@@ -1,0 +1,183 @@
+# dsh-github-trending 插件事项汇总
+
+> 面向仓库读者的自包含摘要。详细设计文档（架构 ADR、插件规格、Go 侧设计）按约定放在 `.dsh/` 下、不入库；本文件可独立阅读。
+>
+> 仓库：`github.com/morehao/dsh-github-trending` ｜ 包名：`@morehao/dsh-github-trending` ｜ 上游产品：`github.com/morehao/trendradar`
+>
+> **实现状态（0.1.0）**：插件侧已落地（核心客户端、设置页、运行页、两个工具、调度、快速填充与回环代理、错误码、locale）。核心的平台包尚未发布，缺失时明确报 `CORE_UNAVAILABLE`。实现层与本文档的偏差集中列在 §14。
+
+## 1. 它是什么
+
+`trendradar` 的 **DSH 入口**。插件本身不生产内容：它收集配置、按时间触发、spawn 本地核心完成一次运行，然后把结果和错误展示出来。
+
+**它不做**：抓取 GitHub Trending、解析 HTML、调用模型生成摘要、渲染内容、执行 git 提交与 PR——这些全部在 `trendradar` 二进制里。
+
+一句话边界：**内容归核心，落库配置与展示归插件。**
+
+## 2. 职责边界
+
+| 能力 | `trendradar`（核心） | 本插件 |
+|---|---|---|
+| 抓取 / 解析 / 归一 / 排序去重 | ✅ 唯一实现 | ❌ |
+| 提示词 / 模型校验 / 摘要缓存 | ✅ | ❌ |
+| Markdown / JSON / 索引渲染 | ✅ | 只做字段映射（可选模板） |
+| git 提交 / 分支 / push / PR / 合并 | ✅ | ❌（只传配置与 token） |
+| 模型 provider 客户端 | ✅ | ❌（回环代理模式除外） |
+| 配置页、调度、状态与历史展示 | ❌ | ✅ |
+| GitHub Device Flow 认证 | ❌ | ✅ + `ctx.credentials` |
+| 运行状态 | 无状态 | ✅ 单一写者 |
+
+## 3. 页面结构
+
+顶层两个 tab：**设置** / **运行**。
+
+| 页面 | 内容 |
+|---|---|
+| 设置 | 内容来源（本地二进制）· 模型 · 归档仓库 · GitHub 认证 · 榜单范围 · 调度；底部一行排障入口（复制脱敏配置 / 查看核心日志） |
+| 运行 · 本次 | 立即运行 / 试跑 / 重置 · 9 步进度 · 最近结果 · 错误卡 · 侧栏卡片预览 |
+| 运行 · 历史 | 最近 30 条记录：日期 / 结果（成功、降级、失败）/ 内容 / 耗时 / commit 与 PR |
+
+侧栏常驻一张摘要卡：状态、下次运行、上次结果、核心版本，外加「立即运行 / 试跑」。
+
+## 4. 两个工具
+
+| 工具 | 参数 | 返回 |
+|---|---|---|
+| `trending_run` | `{ dryRun?: boolean, date?: string }` | 结构化摘要：文件数、commit、PR、用量、错误码 |
+| `trending_history` | — | 上次/下次运行、最近 N 条记录（时间、结果、耗时、commit/PR、错误码）、核心版本、模型、用量、未合并 PR |
+
+工具名是稳定对外接口：**只新增不改名**。
+
+## 5. 配置项
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `model.provider` | `deepseek` | `openai-compatible` / `deepseek` / `anthropic` |
+| `model.baseURL` | 空 | 空则用 provider 默认端点或回环代理地址 |
+| `model.model` | 空 | 必填，不设隐式默认 |
+| `model.apiKeyRef` | `TRENDING_MODEL_KEY` | 指向 `ctx.credentials` 的引用名 |
+| `model.temperature` / `model.maxTokens` | `0.2` / `2048` | 单次调用参数 |
+| `repo.path` | 空 | 本地仓库绝对路径，必填 |
+| `repo.baseBranch` | `main` | PR 目标分支，也是新分支起点 |
+| `repo.remote` | `origin` | |
+| `repo.commitMode` | `branch` | `branch`（分支 + PR）/ `direct` |
+| `pr.enabled` | `true` | `commitMode=direct` 时忽略 |
+| `pr.titleTemplate` | `chore(trending): add {date} digest` | |
+| `pr.autoMerge` | `true` | |
+| `pr.mergeMethod` | `squash` | `squash` / `merge` / `rebase` |
+| `pr.deleteBranchAfterMerge` | `true` | |
+| `github.authMode` | `device` | `device` / `pat` / `gh` |
+| `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名 |
+| `trending.since` | `daily` | `daily` / `weekly` |
+| `trending.languages` | `[all, typescript, python, go, rust]` | 支持范围由核心决定，插件只选择 |
+| `trending.topN` | `25` | 上限；实际条数以核心解析结果为准 |
+| `summary.enabled` | `true` | 关掉则只落原始字段 |
+| `output.dir` | `trending` | 仓库内相对目录 |
+| `output.json` | `true` | 是否同时写 JSON |
+| `layout.mode` | `canonical` | 默认逐字节采用核心产出；`template` 只做字段映射 |
+| `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 复用宿主 `schedule` 服务 |
+
+> 已删除的配置项：`source.type`、`source.instanceUrl`（内容来源只剩本地二进制）、`core.path`（只保留 `TRENDING_DIGEST_CORE` 环境变量作为开发/排障逃逸口）。
+
+## 6. 与核心的交互
+
+- **一次性进程**：`spawn <core> run --json -`，stdin 写一个请求信封，stdout 读一个结果信封，跑完即退。无守护进程、无端口。
+- **握手**：运行前执行 `version --json`，比对 `ipcSchema` / `digestSchema`；不匹配报 `CORE_INCOMPATIBLE`，不做尽力兼容。
+- **定位顺序**：`TRENDING_DIGEST_CORE`（仅开发/排障）→ 平台包 `require.resolve`；都没有报 `CORE_UNAVAILABLE`。
+- **凭据**：模型密钥与 GitHub token 只经 stdin 传入；不落盘、不进 argv、不进日志。
+- **取消**：用户取消或超时 → 终止进程；未收到结果信封视为失败，不提交任何状态。
+- **stdout 纪律**：只允许一个结果信封；核心日志走 stderr。
+- **契约快照**：`contract/` 整体随插件包分发——`schema/` 用于运行时校验，`fixtures/` 用于离线自检；由 `scripts/sync-contract.mjs --ref vX.Y.Z` 从产品仓库同步，`contract/UPSTREAM.json` 记录 ref 与 sha256，CI 用上游同 tag 重算哈希比对。不再单独发布契约 npm 包。
+
+## 7. 错误码映射
+
+| 核心错误码 | 插件展示位置 |
+|---|---|
+| `MODEL_UNAUTHORIZED` / `MODEL_NOT_FOUND` / `MODEL_TIMEOUT` | 设置页「模型」区红字 + 重新选择模型 |
+| `REPO_NOT_GIT` / `REPO_DIRTY` / `GIT_NOT_INSTALLED` | 设置页「归档仓库」区 |
+| `GITHUB_AUTH` | 设置页「GitHub 认证」区 |
+| `PUSH_FAILED` / `PR_FAILED` / `NOT_MERGEABLE` | 运行页错误卡 + 保留本地 commit |
+| `CORE_UNAVAILABLE` / `CORE_INCOMPATIBLE` | 全局提示 + 安装/升级指引 |
+| `FETCH_FAILED` / `PARSE_EMPTY` / `RATE_LIMITED` | 运行页错误卡（可重试） |
+
+## 8. 与本地已装 CLI 共存
+
+用户可能先装了 `trendradar` CLI。插件对此的立场是**只看不用**：
+
+- 插件**永远使用自带的平台包**，不从 PATH 解析核心；PATH 上的 CLI 不参与运行。
+- 运行前探测 PATH 上的 `trendradar` 并读 `version --json`；版本或协议不一致只**提示**，不切换、不阻塞。
+- **不接管**用户已有的 cron / launchd / systemd 任务；只提示「两套定时同时开会重复抓取与重复消耗模型」。
+- **不共享配置与状态**：首次上手可一次性导入 CLI 的非敏感字段（provider / 端点 / 模型 / 仓库 / PR / 版式），**密钥不导入**，导入后两侧独立演进。
+- 产出 frontmatter 与历史记录带 `coreVersion`；跨版本产出时标注差异。
+
+## 9. 首次上手
+
+三步：**选仓库**（不是 git 仓库直接报 `REPO_NOT_GIT`，不替你 init）→ **填模型**（可一键沿用 DSH 已配置的 provider 与凭据；OAuth 类 provider 走回环代理，不需要密钥）→ **试跑一次**（dryRun 只抓取与渲染、不提交）。
+
+## 10. 状态与幂等
+
+- 插件是唯一状态写者：`~/.dsh/...` 下保存 `{ lastRunAt, lastDigest{date,contentHash,coreVersion}, lastResult, pendingPr }` 与最近 30 条记录。
+- 幂等以核心返回的 `contentHash` 为准：同日同内容 → `skipped=true`，零新增 commit、不重复开 PR。
+- 核心自身无状态：上次状态随请求传入，新状态随结果返回。
+
+## 11. 安全与隐私
+
+- 密钥与 token 只存 `ctx.credentials`，运行时解析、经 stdin 传给核心；不写配置文件、不进日志、不进 git diff。
+- 只与三类目标通信：本地核心进程、用户配置的模型端点、`api.github.com`。**不向作者控制的任何服务器发送数据**。
+- 回环代理（OAuth 类 provider）只监听 `127.0.0.1`，随机端口、一次性 token，随运行结束关闭。
+
+## 12. 市场合规
+
+- 发布到公共 npm，`publishConfig.access: public`；`files` 包含 host 入口、客户端 bundle、`cordis.patch.yml`、locales、icon。
+- `engines.dsh` 与 `peerDependencies` 对齐宿主版本区间；`dsh.bundle.patch` 指向 `cordis.patch.yml`。
+- README 必须披露：安装时经 `optionalDependencies` 获取平台二进制；运行时访问用户配置的模型端点与 `api.github.com`；不上传用户仓库信息。
+
+## 13. 验收清单
+
+| 编号 | 验收项 |
+|---|---|
+| AC-P-01 | 干净 profile 一条命令安装并出现设置页 |
+| AC-P-02 | 三步内跑出第一份内容 |
+| AC-P-03 | 快速填充在三种认证形态下各可用一次 |
+| AC-P-04 | 密钥不泄漏（日志、导出、git diff 三处 grep 全空） |
+| AC-P-05 | 同日幂等：第二次运行 0 新增 commit |
+| AC-P-06 | 核心不可用：报 `CORE_UNAVAILABLE`，目标目录无新文件 |
+| AC-P-07 | 版本不匹配：报 `CORE_INCOMPATIBLE` 且不运行 |
+| AC-P-08 | 模型不可用：报 `MODEL_*`，无文件写入 |
+| AC-P-09 | 取消：无半成品、无状态提交、无残留进程 |
+| AC-P-10 | 默认版式下与核心产出逐字节一致 |
+| AC-P-11 | 核心解析顺序：未设环境变量走平台包，设了优先用它 |
+| AC-P-12 | 首次导入：非敏感字段正确落位，密钥未被导入 |
+| AC-P-13 | 共存检测：PATH 有不兼容 CLI 时提示，本次仍用平台包 |
+
+## 14. 未决与后续
+
+| 项 | 状态 |
+|---|---|
+| 回环代理（OAuth 类 provider 复用宿主模型） | 0.1.0 已实现（`127.0.0.1` + 随机端口 + 一次性 token + 运行结束关闭） |
+| `serve` 与 Web 前端（产品侧） | 二期，插件不消费 |
+| 插件 locale 元数据 | 0.1.0 已实现：`locale/zh.json`、`locale/en.json`，`exports`/`files` 含 `./locale/*.json` |
+| `GIT_NOT_INSTALLED` 映射 | 0.1.0 已补进插件错误码表（落点：仓库区） |
+| 包名调整 | 已决定不改：`@morehao/dsh-github-trending` |
+| 契约快照同步脚本 + 哈希校验 | 0.1.0 已实现：`scripts/sync-contract.mjs --ref <sha>` + `npm run check:contract` |
+
+### 实现层偏差（0.1.0，均已写进 README「已知偏差」）
+
+| 偏差 | 原因 | 影响 |
+|---|---|---|
+| 用 `run --config <path> --json`，而非 stdin 信封 | 已提交契约 `ipc.v1.RunRequest` 只有 `configPath`，核心也尚未实现 stdin 分支 | 插件同时兼容两种结果形状；核心补上后插件不改 |
+| 配置经 FIFO 传入（Windows：0600 临时文件） | 核心只接受 `--config <path>`，而配置必须带 `apiKey` | POSIX 上明文不落盘；Windows 有短暂临时文件并立即删除 |
+| GitHub token 走子进程环境变量 | 核心只从 `GITHUB_TOKEN`/`GH_TOKEN` 读 | 不进 argv、不进配置、不进日志 |
+| 调度用插件自有 60 s tick | 宿主 `ctx.schedule`（rc.5）是**会话本地**提醒，需要 sessionId，冷会话不投递 | 无人值守可跑；不依赖会话 |
+| 只支持 canonical 版式 | 核心自己落盘，插件重渲染会破坏「内容唯一实现」 | `template` 留待二期，设置页不暴露假开关 |
+| 平台包未发布 | 核心仓库尚无打包脚本 | 缺包时 `CORE_UNAVAILABLE`，附平台矩阵与修复指引 |
+
+## 15. 相关文档
+
+| 文档 | 位置 | 是否入库 |
+|---|---|---|
+| 架构 ADR（边界、D-01…D-14） | `.dsh/docs/specs/2026-10-30-trendradar-architecture-adr.md` | 否 |
+| 插件入口规格（FR/AC/交互） | `.dsh/docs/specs/2026-10-30-dsh-github-trending-plugin-spec.md` | 否 |
+| Go 侧设计 | 见 `trendradar` 仓库 `.dsh/docs/specs/` | 否 |
+| Go 侧执行计划 | `trendradar` 仓库 `.dsh/docs/plans/` | 否 |
+| 本汇总 | `docs/dsh-plugin-summary.md` | 是 |

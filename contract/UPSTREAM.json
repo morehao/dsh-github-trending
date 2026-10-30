@@ -1,0 +1,37 @@
+{
+  "repo": "https://github.com/morehao/trendradar.git",
+  "ref": "d3bf720",
+  "commit": "d3bf720a869732e7a2ee04fa39d32dd50868fd61",
+  "aggregate": "eb7f1ac9e117a709d15d87de89cf30e309c479e62dfa3d320cb8f154d3f1dc1e",
+  "syncedAt": "2026-10-30T13:20:43.663Z",
+  "files": [
+    {
+      "path": "schema/api.v1.yaml",
+      "sha256": "d52adbbb473d7ee2d856398a5651f96ba2019ee53ba6e14c27ef2d792b5db723"
+    },
+    {
+      "path": "schema/digest.v1.json",
+      "sha256": "ca9b640f374cded12a09ea00f0686eac14eee59eef94c27a61016175bc0d4ebb"
+    },
+    {
+      "path": "schema/ipc.v1.json",
+      "sha256": "16f8f69c8a01da905b2653fb360eea798c1773808737251b54f1f56b134dad22"
+    },
+    {
+      "path": "schema/model.v1.json",
+      "sha256": "2140c9d538bc935c092a83fb6377e3878b2c060992bf458f2437898f4649d41d"
+    },
+    {
+      "path": "fixtures/digest-degraded.json",
+      "sha256": "f34aa3642938bad32df912768d543925f91858da66a8e726e4e4bf88a07d086c"
+    },
+    {
+      "path": "fixtures/digest-empty-lang.json",
+      "sha256": "7bc67dcdc36c7b81df1915c4b50025cef6f0304ef2feb24f393d17771df252c9"
+    },
+    {
+      "path": "fixtures/digest-normal.json",
+      "sha256": "4fe9d91ce3f0ddcc17982e4f0acac950ebc6ec7f63427fe962ea581f3114c0c4"
+    }
+  ]
+}
