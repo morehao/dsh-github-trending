@@ -76,9 +76,10 @@
     "typecheck": "tsc --noEmit",
     "gen:ipc": "node scripts/gen-ipc-types.mjs",
     "check:contract": "node scripts/sync-contract.mjs --check && node scripts/gen-ipc-types.mjs --check",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "pretest": "npm run build",
-    "check": "npm run typecheck && npm run check:contract && npm run build && npm test",
+    "check": "npm run typecheck && npm run check:lockfile && npm run check:contract && npm run build && npm test",
     "prepublishOnly": "npm run check"
   },
   "devDependencies": {
