@@ -22,6 +22,12 @@ on:
   push:
     tags:
       - 'v*'
+  # 手动补发：tag 指向的提交不可改，workflow 本身修好后靠这里重跑同一版本（不新建 tag）。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v0.1.2）'
+        required: true
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -36,6 +42,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # push: 用触发的 tag ref；dispatch: 用输入的 tag（同一个 ref 都能 checkout）
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       # 不设 registry-url：发布凭据一律走 OIDC，registry 由 scripts/ci-publish.sh 显式指定，
@@ -49,6 +57,18 @@ jobs:
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
 
+      # OIDC 自检：只打布尔值，不打印 token。缺 id-token 权限时 npm 会静默跳过 OIDC，
+      # 最终只报一句误导性的 ENEEDAUTH —— 先把「环境到底有没有」变成可读事实。
+      - name: OIDC 环境自检
+        run: |
+          echo "GITHUB_ACTIONS=${GITHUB_ACTIONS:-unset}"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "id-token env: present"
+          else
+            echo "id-token env: MISSING（检查 job 的 permissions.id-token: write 与仓库策略）"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -58,14 +78,16 @@ jobs:
       - name: Publish to npm via OIDC
         run: bash ./scripts/ci-publish.sh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          # verbose 才看得到 oidc 的具体失败原因（npm 对 OIDC 失败一律静默、最后只报 ENEEDAUTH）
+          NPM_CONFIG_LOGLEVEL: verbose
 
       # 只在 npm 发布成功后运行（前面失败即中断）。正文来自注记 tag，已存在即跳过，
       # 因此本步骤可在任意时刻重跑（publish 幂等跳过 + 这里补建缺失的 Release）。
       - name: Create GitHub Release from tag annotation
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release ${TAG} 已存在；跳过（幂等）"
