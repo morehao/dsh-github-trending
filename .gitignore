@@ -2,6 +2,9 @@ node_modules/
 lib/
 dist/
 client.js
+
+# scripts/lib 是源码（不是构建产物），被上面的 lib/ 误伤
+!scripts/lib/
 *.tgz
 *.log
 .DS_Store
