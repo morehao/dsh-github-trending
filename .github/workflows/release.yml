@@ -1,0 +1,84 @@
+# 自动发布（Trusted Publishing / OIDC，tag 触发）：
+#   推送 vX.Y.Z 标签时，从 tag 读版本，经 OIDC 把 @morehao/dsh-github-trending 发布到 npmjs。
+#   认证走 OIDC，**不需要 NPM_TOKEN**（job 提 id-token: write，npm CLI 自动换取短时令牌）。
+#
+#   npm 侧一次性前置（已建包，0.1.0 为手工发布）：
+#     npm trust github @morehao/dsh-github-trending \
+#       --repo morehao/dsh-github-trending --file release.yml --allow-publish
+#     - Workflow 必须等于 release.yml（本文件 name 也必须是 release.yml，OIDC 的 workflow claim
+#       要与 npm 侧精确匹配）；
+#     - Allowed actions 必须允许 `npm publish`（2026-09-03 后新建的默认只允许 stage publish，
+#       会导致 OIDC 直接发布被拒为 permission denied）。
+#
+# 版本约定：发布版本 = 去掉 tag 前缀 v，且必须等于 package.json.version（脚本会校验）。
+# npm 上同版本已存在则跳过（幂等）。
+#
+# GitHub Release：npm 发布**成功后**，用注记 tag 的正文建 Release（正文由
+# scripts/release-notes.mjs 从注记原样投影，不重新生成、不改写；已存在则跳过）。
+# `gh release create` 必须留在这个文件里 —— git-kit 的 /git-release 预检靠 grep
+# .github/workflows 判定 EFFECT_RELEASE=workflow，判定为 workflow 后它只校验、不重复建。
+name: release.yml
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write   # OIDC 可信发布
+      contents: write   # 建 GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 不设 registry-url：发布凭据一律走 OIDC，registry 由 scripts/ci-publish.sh 显式指定，
+      # 免得 .npmrc 里的 NODE_AUTH_TOKEN 占位与 OIDC 抢凭据。
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: 发布前校验（与 PR 门禁同一套）
+        run: npm run check
+
+      - name: Publish to npm via OIDC
+        run: bash ./scripts/ci-publish.sh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+
+      # 只在 npm 发布成功后运行（前面失败即中断）。正文来自注记 tag，已存在即跳过，
+      # 因此本步骤可在任意时刻重跑（publish 幂等跳过 + 这里补建缺失的 Release）。
+      - name: Create GitHub Release from tag annotation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${TAG} 已存在；跳过（幂等）"
+            exit 0
+          fi
+          # checkout 对 tag 事件会把本地 ref 重指成轻量 tag，注记对象随之丢失：显式回拉一次。
+          git fetch --force --no-recurse-submodules origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          notes="$(mktemp)"
+          node scripts/release-notes.mjs "$TAG" > "$notes"
+          args=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file "$notes")
+          if [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,url,body --jq '{tag:.tagName,url:.url,body_len:(.body|length)}'
