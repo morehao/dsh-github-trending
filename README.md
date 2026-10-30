@@ -118,13 +118,15 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（`sync-contract --ref vX.Y.Z` 会同步写入）。
 6. **核心尚未打 tag**：`trendradar` 仓库还没有 Release，因此当前下载会得到「还没有发布」的明确提示；打上 `v0.1.0` 后无需改插件。
 
-## 开发
+## 开发与发版
 
 ```bash
 npm install
 npm run check          # typecheck + 契约校验 + 构建 + 全部测试
 node scripts/ac/run.mjs # AC-P-01…13 的机械部分
 ```
+
+发版走 **tag 触发的 CI**（Trusted Publishing / OIDC，不需要 npm token）：合并 PR → 在 `main` 打注记 tag `vX.Y.Z` → CI 发 npm 并用注记正文建 Release。细节见 [docs/publishing.md](docs/publishing.md)。
 
 - 契约快照：`contract/`（schema + fixtures + `UPSTREAM.json`），由 `node scripts/sync-contract.mjs --ref <sha|vX.Y.Z>` 从核心仓库同步；ref 是 tag 时会同时把版本写进 `package.json` 的 `dsh.core.version`；`npm run check:contract` 校验哈希与生成类型
 - 核心下载与缓存：`src/core/release.ts`（`ensureCore`），缓存位置 `$DSH_HOME/github-trending/core/v<version>/`
