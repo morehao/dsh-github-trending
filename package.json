@@ -1,0 +1,65 @@
+{
+  "name": "@morehao/dsh-github-trending",
+  "version": "0.0.1",
+  "description": "GitHub 趋势日报插件：每日抓取 Trending、生成中文简介与总结，提交到自己仓库并自动合并 PR。",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "icon.svg"
+  ],
+  "icon": "icon.svg",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "github",
+    "trending",
+    "daily-digest",
+    "chinese"
+  ],
+  "engines": {
+    "node": ">=22.20",
+    "dsh": ">=0.2.1-rc.3 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.0"
+  },
+  "license": "MIT",
+  "author": "morehao <morehao@qq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/morehao/dsh-github-trending.git"
+  },
+  "bugs": "https://github.com/morehao/dsh-github-trending/issues",
+  "homepage": "https://github.com/morehao/dsh-github-trending",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
+}

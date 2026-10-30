@@ -1,0 +1,7 @@
+# dsh-github-trending profile bundle patch
+# `name` 是宿主 import() 用的模块标识符，必须与 npm 包名一致。
+# `id` 是 cordis 配置树内的键，与插件导出的插件名保持一致。
+- insert:
+    - id: dsh-github-trending
+      name: '@morehao/dsh-github-trending'
+      config: {}
