@@ -17,6 +17,8 @@ export const PLUGIN_CODES = [
   'CORE_TIMEOUT',
   'CORE_CANCELLED',
   'CORE_CONFIG_CHANNEL_FAILED',
+  'CORE_NOT_DOWNLOADED',
+  'CORE_CHECKSUM_MISMATCH',
   'IPC_INVALID',
   'MODEL_KEY_MISSING',
   'MODEL_NOT_FOUND',
@@ -62,6 +64,8 @@ const RETRIABLE: Record<string, boolean> = {
   CORE_TIMEOUT: true,
   CORE_CANCELLED: false,
   CORE_CONFIG_CHANNEL_FAILED: true,
+  CORE_NOT_DOWNLOADED: false,
+  CORE_CHECKSUM_MISMATCH: true,
   IPC_INVALID: false,
   MODEL_KEY_MISSING: false,
   MODEL_NOT_FOUND: false,
@@ -98,6 +102,10 @@ export function hintOf(code: string): string {
       return '运行已取消：核心已终止，未提交状态，也未留半成品。';
     case 'CORE_CONFIG_CHANNEL_FAILED':
       return '配置通道建立失败（FIFO 不可用）：改用临时文件模式重试，或检查目标文件系统。';
+    case 'CORE_NOT_DOWNLOADED':
+      return '核心还没下载：在设置页点「下载核心」（或用 TRENDING_DIGEST_CORE 指向本地核心）。首次运行需要联网。';
+    case 'CORE_CHECKSUM_MISMATCH':
+      return '核心二进制校验失败且已丢弃：网络代理可能改写了内容，重试一次；仍失败请手动下载后放到缓存目录。';
     case 'IPC_INVALID':
       return '核心输出不是约定的结果信封：升级插件与核心到同一版本。';
     case 'MODEL_KEY_MISSING':

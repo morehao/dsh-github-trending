@@ -185,13 +185,14 @@ function repoFiles(repo) {
   const without = (() => {
     const dir = mkdtempSync(path.join(tmpdir(), 'ac-noenv-'));
     const store = new stateModule.Store({ dir });
-    store.writeSettings({ model: { provider: 'deepseek', model: 'm', apiKeyRef: 'AC_KEY' }, repo: { path: tempRepo() } });
-    return new runnerModule.Runner({ store, get: () => undefined, env: { PATH: process.env.PATH, HOME: process.env.HOME, AC_KEY: 'k' } });
+    // 不联网：禁掉自动下载，验证「无缓存 → 明确报错」这条路径
+    store.writeSettings({ model: { provider: 'deepseek', model: 'm', apiKeyRef: 'AC_KEY' }, repo: { path: tempRepo() }, coreAutoDownload: false });
+    return new runnerModule.Runner({ store, get: () => undefined, env: { PATH: process.env.PATH, HOME: process.env.HOME, AC_KEY: 'k', TRENDING_DIGEST_HOME: dir } });
   })();
   const noEnv = await without.run({ trigger: 'tool' });
-  const ok = withEnv.ok && noEnv.error?.code === 'CORE_UNAVAILABLE' && String(noEnv.error.message).includes('trendradar-core');
-  record('AC-P-11', '核心解析顺序：环境变量优先，未设走平台包', ok,
-    `设 TRENDING_DIGEST_CORE → ok=${withEnv.ok}；未设 → ${noEnv.error?.code}（${noEnv.error?.message?.slice(0, 80)}…）`);
+  const ok = withEnv.ok && noEnv.error?.code === 'CORE_NOT_DOWNLOADED' && String(noEnv.error.message).includes('releases/download');
+  record('AC-P-11', '核心解析顺序：环境变量优先，未设走 Release（缓存/下载）', ok,
+    `设 TRENDING_DIGEST_CORE → ok=${withEnv.ok}；未设且禁用自动下载 → ${noEnv.error?.code}（${noEnv.error?.message?.slice(0, 90)}…）`);
 }
 
 // ---- AC-P-12：首次导入不导密钥 ----

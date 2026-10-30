@@ -13,6 +13,7 @@ import { redact } from '../errors.js';
 import { IpcError } from '../ipc.js';
 import type { Store } from '../state.js';
 import { detectCoexistence, inspectCore } from './core.js';
+import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
 import { importFirstAvailable } from './import-cli.js';
 import { preflightModel } from './preflight.js';
@@ -106,6 +107,13 @@ async function dispatch(
     const core = await inspectCore(settings, { env, fresh: url.searchParams.get('fresh') === '1' });
     const coexistence = await detectCoexistence(core.path, { env });
     return { core, coexistence };
+  }
+
+  if (method === 'POST' && pathname === '/core/download') {
+    // 显式下载（设置页按钮）：强制重下并重新握手。失败把错误码原样回给界面。
+    const core = await locateCore({ settings, env, forceDownload: true });
+    const status = await inspectCore(settings, { env, fresh: true });
+    return { downloaded: true, path: core.path, tag: core.tag ?? null, core: status };
   }
 
   if (method === 'POST' && pathname === '/config') {

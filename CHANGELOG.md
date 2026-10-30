@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.1
+
+分发方式变更：核心二进制不再走 npm 平台分包，改为 **GitHub Release 下载 + sha256 校验 + 本地缓存**（2026-10-30 决策 B）。
+
+### 变更
+
+- **获取核心**：`TRENDING_DIGEST_CORE` / 设置里的 `corePath`（覆盖，仅排障）→ 缓存 `$DSH_HOME/github-trending/core/v<version>/` → 按 `os/arch` 下载 `trendradar_<goos>_<goarch>`，用同目录 `checksums.txt` 校验（流式写入 + 原子 rename + 0755），失败不留半个文件；缓存命中后完全离线。
+- **版本来源**：`package.json` 的 `dsh.core.{repo,version}`；`scripts/sync-contract.mjs --ref vX.Y.Z` 会同步写入，保证「契约来源 tag」与「下载的核心版本」是同一个值。
+- **新增配置**：`coreAutoDownload`（默认 `true`）；关掉后只报 `CORE_NOT_DOWNLOADED`，由设置页显式下载。
+- **设置页**：显示 Release 版本 / 资产名 / 缓存状态 / 下载 URL，并提供「下载核心 / 重新下载」按钮（`POST /core/download`）。
+- **新增错误码**：`CORE_NOT_DOWNLOADED`（未下载，附下载地址）、`CORE_CHECKSUM_MISMATCH`（校验失败且已丢弃）；`CORE_UNAVAILABLE` 现在覆盖 404（版本未发布）、网络失败与平台不在矩阵。
+- **移除**：`optionalDependencies` 里的 6 个 `@morehao/trendradar-core-*`（从未发布，安装时只是 6 次无效探测）。
+
+### 测试
+
+- 新增 `test/release.test.mjs`（命名映射 / 下载校验 / 缓存复用 / 篡改重下 / 校验失败无残留 / 404 提示 / force）与 `test/core-status.test.mjs`（未下载 / 已缓存 / 覆盖路径三种状态）。
+- AC 脚本 AC-P-11 判据改为「环境变量优先 / 未设走 Release」，全套 71 条测试、11 条 AC 机械检查通过。
+
 ## 0.1.0
 
 首个可用版本：插件侧完整落地，内容仍全部由 `trendradar` 核心产出。

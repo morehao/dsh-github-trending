@@ -10,6 +10,7 @@ export * as config from './config.js';
 export * as paths from './paths.js';
 export * as state from './state.js';
 export * as locate from './core/locate.js';
+export * as release from './core/release.js';
 export * as handshake from './core/handshake.js';
 export * as channel from './core/channel.js';
 export * as exec from './core/exec.js';

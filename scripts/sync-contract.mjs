@@ -131,6 +131,25 @@ function sync({ ref, src }) {
     writeFileSync(path.join(contractDir, file.path), file.buffer);
   }
   writeFileSync(path.join(contractDir, 'CONTRACT.sha256'), manifestText);
+  // ref 是 tag（vX.Y.Z）时，同时把「要下载的核心版本」写进 package.json 的 dsh.core：
+  // 契约来源与二进制版本必须是同一个值，否则插件会下载另一个版本的核心。
+  const tagMatch = /^v?(\d+\.\d+\.\d+(?:-[\w.]+)?)$/.exec(ref.trim());
+  if (tagMatch !== null) {
+    const pkgPath = path.join(root, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    const slug = /^https?:\/\/github\.com\/([^/]+\/[^/.]+)(?:\.git)?$/.exec(remote.replace(/\.git$/, ''));
+    const dsh = pkg.dsh ?? {};
+    dsh.core = {
+      repo: slug === null ? (dsh.core?.repo ?? '') : slug[1],
+      version: tagMatch[1],
+    };
+    pkg.dsh = dsh;
+    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+    console.log(`package.json dsh.core → ${dsh.core.repo}@${dsh.core.version}`);
+  } else {
+    console.log(`ref 不是 tag（${ref}），未更新 dsh.core.version`);
+  }
+
   writeFileSync(
     upstreamPath,
     `${JSON.stringify(
