@@ -57,3 +57,34 @@ test('direct 提交模式不会写 PR 开关', () => {
   const settings = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x', commitMode: 'direct' } });
   assert.equal(config.toCoreConfig(settings, 'k').pr.enabled, false);
 });
+
+test('代理模式允许空 baseURL，direct 仍需显式端点', () => {
+  const providers = ['deepseek', 'openai-compatible'];
+  const proxy = config.normalizeSettings({ model: { provider: 'openai-compatible', mode: 'proxy', model: 'm' }, repo: { path: '/tmp/x' } });
+  assert.equal(config.effectiveBaseURL(proxy.model), '');
+  assert.equal(config.validateSettings(proxy, providers).some((problem) => problem.field === 'model.baseURL'), false);
+
+  const direct = config.normalizeSettings({ model: { provider: 'openai-compatible', mode: 'direct', model: 'm' }, repo: { path: '/tmp/x' } });
+  assert.ok(config.validateSettings(direct, providers).some((problem) => problem.field === 'model.baseURL'));
+});
+
+test('分段合并只覆盖目标分区，字段归位正确', () => {
+  const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'deepseek-chat' }, repo: { path: '/tmp/a' }, trending: { topN: 10 } });
+  const incoming = config.normalizeSettings({ model: { provider: 'openai-compatible', mode: 'proxy', model: '' }, repo: { path: '/tmp/b' }, trending: { topN: 30 } });
+
+  const repoMerged = config.mergeSettingsSection(stored, incoming, 'repo');
+  assert.equal(repoMerged.repo.path, '/tmp/b');
+  assert.equal(repoMerged.model.provider, 'deepseek'); // 其它分区保持已保存值
+  assert.equal(repoMerged.trending.topN, 10);
+
+  const modelMerged = config.mergeSettingsSection(stored, incoming, 'model');
+  assert.equal(modelMerged.model.provider, 'openai-compatible');
+  assert.equal(modelMerged.repo.path, '/tmp/a');
+  assert.equal(modelMerged.trending.topN, 10);
+
+  assert.equal(config.sectionOfField('model.baseURL'), 'model');
+  assert.equal(config.sectionOfField('output.dir'), 'repo');
+  assert.equal(config.sectionOfField('github.tokenRef'), 'auth');
+  assert.equal(config.sectionOfField('trending.topN'), 'scope');
+  assert.equal(config.sectionOfField('schedule.timezone'), 'schedule');
+});

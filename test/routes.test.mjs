@@ -25,6 +25,7 @@ const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CO
 store.writeSettings({
   model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' },
   repo: { path: repo },
+  github: { authMode: 'pat', tokenRef: 'GITHUB_TOKEN' },
 });
 
 const runner = new runnerModule.Runner({ store, get: () => undefined, env });
@@ -97,8 +98,69 @@ test('GET /log 拒绝非法 id（避免路径穿越）', async () => {
   assert.equal(payload.code, 'CONFIG_INVALID');
 });
 
+test('GET /repo/branch 读取默认分支（读不到时安全返回 none）', async () => {
+  const response = await fetch(`${base}/repo/branch?path=${encodeURIComponent(repo)}`, { headers: HEADER });
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.repo.source, 'none');
+  assert.equal(typeof payload.repo.message, 'string');
+});
+
+test('POST /github/test 没配 token 时返回可操作的失败，不抛错', async () => {
+  const response = await fetch(`${base}/github/test`, {
+    method: 'POST',
+    headers: HEADER,
+    body: JSON.stringify({ settings: { github: { authMode: 'pat', tokenRef: 'GITHUB_TOKEN' } } }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.github.ok, false);
+  assert.equal(payload.github.code, 'GITHUB_AUTH');
+});
+
 test('/quickfill 在没有 llm 服务时返回空列表而不是报错', async () => {
   const response = await fetch(`${base}/quickfill`, { headers: HEADER });
   const payload = await response.json();
   assert.deepEqual(payload.providers, []);
+});
+
+test('/config 分段保存：代理模式空 baseURL 的模型分区可保存', async () => {
+  const response = await fetch(`${base}/config`, {
+    method: 'POST',
+    headers: HEADER,
+    body: JSON.stringify({
+      section: 'model',
+      settings: {
+        model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'some-oauth', baseURL: '', model: 'gpt-x', apiKeyRef: 'DSHGT_ROUTES_KEY' },
+        repo: { path: repo },
+      },
+    }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.saved, true);
+  assert.equal(store.readSettings().model.mode, 'proxy');
+  assert.equal(store.readSettings().model.baseURL, '');
+});
+
+test('/config 分段保存只校验并写入当前分区（不被其它分区阻塞）', async () => {
+  const before = store.readSettings();
+  const response = await fetch(`${base}/config`, {
+    method: 'POST',
+    headers: HEADER,
+    body: JSON.stringify({
+      section: 'repo',
+      settings: {
+        // 同时带一个非法的 model（model.model 为空）；仓库分区保存不应被它阻塞。
+        model: { provider: 'openai-compatible', mode: 'proxy', model: '', baseURL: '' },
+        repo: { path: repo },
+        trending: { topN: 7 },
+      },
+    }),
+  });
+  const payload = await response.json();
+  assert.equal(payload.saved, true);
+  const after = store.readSettings();
+  assert.equal(after.repo.path, repo);
+  assert.equal(after.model.model, before.model.model); // 非目标分区不被覆盖
+  assert.equal(after.trending.topN, before.trending.topN);
 });

@@ -90,7 +90,11 @@ export function areaOf(code: string): ErrorArea {
 }
 
 /** 每种码一句「下一步怎么做」，避免界面只给码不给路。 */
-export function hintOf(code: string): string {
+export function hintOf(code: string, message?: string): string {
+  // GIT_OPERATION_FAILED 覆盖很多 git 子命令失败；带 non-fast-forward 时给最可执行的建议。
+  if (code === 'GIT_OPERATION_FAILED' && typeof message === 'string' && /non-fast-forward|\[rejected\]|failed to push|fetch first/i.test(message)) {
+    return '推送被拒（non-fast-forward）：远端已有同名分支且历史分叉。先合并/关闭并删除该远端分支，或让核心以 --force-with-lease 推送后重试。';
+  }
   switch (code) {
     case 'CORE_UNAVAILABLE':
       return '核心二进制没找到：确认插件安装完整（含平台包），或用 TRENDING_DIGEST_CORE 指向一个可执行的 trendradar。';
@@ -178,7 +182,9 @@ const TEXT_RULES: Array<{ pattern: RegExp; code: AnyCode }> = [
  * 从核心的 stderr 里解出一个结构化错误。
  *
  * 优先级：`error: <CODE>: ...` 的显式码 > 文本归类 > INTERNAL。
- * message 只取最后一条非空行（核心把根因打在最外层，前面的行多是上下文）。
+ * 显式码命中的那一行往往只是首行（如 `error: GIT_OPERATION_FAILED: To github.com:...`），
+ * 真正的根因在其后的多行里（`! [rejected] ... (non-fast-forward)`、`hint: ...`），
+ * 因此把这些诊断行一并保留进 message，避免界面只看到半句。
  */
 export function classifyStderr(stderr: string): ClassifiedError {
   const text = stderr.trim();
@@ -190,7 +196,11 @@ export function classifyStderr(stderr: string): ClassifiedError {
     const match = explicit.exec(line);
     if (match !== null && CORE_CODES.has(match[1] ?? '')) {
       const code = match[1] as AnyCode;
-      return { code, message: (match[2] ?? '').trim() || line, retriable: isRetriable(code), inferred: false };
+      const detail = [(match[2] ?? '').trim(), ...lines.slice(index + 1)]
+        .filter((part) => part !== '')
+        .join('\n')
+        .slice(0, 2000);
+      return { code, message: detail || line, retriable: isRetriable(code), inferred: false };
     }
   }
   const message = lines[lines.length - 1] ?? '核心未输出错误信息';

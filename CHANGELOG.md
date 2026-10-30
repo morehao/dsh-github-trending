@@ -1,5 +1,23 @@
 # Changelog
 
+## 未发布
+
+### 变更
+
+- **设置页只出现在左侧菜单栏**：不再同时注册 `settings.section`，改为左侧栏一个入口、内含「设置 / 运行」两个 tab，避免同一插件在左侧栏与设置里各出现一份。
+- **跟随宿主明暗主题**：样式表从宿主并不存在的 `--dsh-fg / --dsh-bg / ...` 换成设计系统 token `--dsw-alias-*`，暗色桌面端不再强行渲染亮色。
+- **设置页改为左侧纵向 tab + 右侧滚动**：六个分区（内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度）纵向排列，右栏独立滚动；面板根补上 `height/overflow`，修复宿主 `main` 面板裁掉内容且不出纵向滚动条的问题（运行页同样受益）。
+- **沿用 DSH 配置更省心**：改为读取宿主 `ctx.agentDefaultModel.currentSelection()` 的当前默认模型一键带入（默认置顶），并只列**实际生效路由**（`listProviders`）及其模型目录（`listModels`）供按需展开选择；不再把 `listConfigurableProviders` 的能力目录当成「已配置」，也不会再把「支持 OAuth」误判为可用。`凭据引用` 默认隐藏、随选择自动带入。
+- **首屏只留普通用户字段**：`TRENDING_DIGEST_CORE` 与手动 `凭据引用` 收进「高级设置」；仓库路径改为目录选择；目标分支只读展示仓库默认分支（`git symbolic-ref` 读 `origin/HEAD`，只读不写仓库）；`远端`、`PR 标题模板` 不再露出，用默认规则。
+- **GitHub 认证收敛**：只保留真正可用的「本机 gh」与「PAT」两种，各自给出可操作步骤，并新增「测试认证」按钮（`POST /github/test` 调 `api.github.com/user` 验证并回显账号）。删除从未实现的 Device Flow（旧配置里的 `device` 自动迁移为 `gh`）。
+- **侧栏入口不再是一整张卡片**：`sidebar.panellist` 只渲染 16–18px 图标（`SidebarPanelIcon`），状态摘要与「立即运行 / 试跑」留在面板页。
+- **设置按 tab 分段保存**：每个 tab 独立提交与校验（`POST /config` 新增 `section`），保存某个分区不会顺带提交或覆盖其它 tab 里尚未保存的改动；左栏 tab 用黄点标记未保存改动。
+
+### 修复
+
+- **运行日志写到真实 `~/.dsh`**：`Store.logsPath` 之前忽略 `dir` 选项，测试/自定义数据目录也会把 `runs/*.log` 写进默认数据目录；改为跟随 `this.dir`。
+- **代理模式下保存被 baseURL 校验误拦**：`mode=proxy` 的端点由运行时回环代理注入、quickfill 也会清空 `baseURL`，但 `/config` 仍强制其非空，导致「模型预检通过、保存却报 `model.baseURL：该 provider 需要显式 baseURL`」。现在代理模式豁免该必填校验（仍校验非空时的 http(s) 格式）。
+
 ## 0.1.4 - 2026-10-30
 
 > 0.1.3 从未发布到 npm（tag 推上去后 `release.yml` 在「发布前校验」失败）。0.1.4 是这批改动的第一次真实发布，内容 = 0.1.3 小节 + 本节的修复。

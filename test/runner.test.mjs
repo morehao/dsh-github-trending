@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runner as runnerModule, state as stateModule } from '../lib/internal.js';
+import { runner as runnerModule, state as stateModule, schedule as scheduleModule } from '../lib/internal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE_CORE = path.join(here, 'fixtures', 'fake-core.mjs');
@@ -153,3 +153,45 @@ test('握手途中取消 → CORE_CANCELLED（而不是 CORE_INCOMPATIBLE）', a
   assert.equal(summary.ok, false);
   assert.equal(summary.error.code, 'CORE_CANCELLED');
 });
+
+test('代理模式：把代理一次性 token 作为 apiKey 传给核心（否则核心静默降级为英文）', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-proxy-'));
+  const store = new stateModule.Store({ dir });
+  const repo = makeRepo();
+  store.writeSettings({
+    model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'magpie', model: 'm', baseURL: '', apiKeyRef: 'UNUSED' },
+    repo: { path: repo },
+  });
+  // 宿主 llm 服务：代理开启需要它，但假核心不会真的发请求。
+  const llm = { stream: async function* () {} };
+  const env = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    TRENDING_DIGEST_CORE: fakeCore({}),
+  };
+  const runner = new runnerModule.Runner({ store, get: (name) => (name === 'llm' ? llm : undefined), env });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.proxy, true);
+  // 假核心只有在配置里读到非空 apiKey 时才返回 hash-with-key；
+  // 代理模式下这个 apiKey 必须是一次的代理 token，而不是空串。
+  assert.equal(summary.contentHash, 'hash-with-key');
+});
+
+test('默认按调度时区计算运行日期，并写进摘要与 lastDigest', async () => {
+  const { runner, store } = makeRunner();
+  const summary = await runner.run({ trigger: 'tool' });
+  const expected = scheduleModule.zonedDateString(new Date(), 'Asia/Shanghai');
+  assert.equal(summary.date, expected);
+  assert.equal(store.readState().lastDigest.date, expected);
+});
+
+test('存在未合并 pendingPr 时也照常运行（核心 v0.2.0 用 force-with-lease 更新 PR，插件不再拦截）', async () => {
+  const { runner, store } = makeRunner();
+  const today = scheduleModule.zonedDateString(new Date(), 'Asia/Shanghai');
+  store.writeState({ pendingPr: { url: 'https://github.com/o/r/pull/9', createdAt: new Date().toISOString(), date: today } });
+  const summary = await runner.run({ trigger: 'manual' });
+  assert.equal(summary.ok, true);
+  assert.equal(store.readHistory().length, 1);
+});
+

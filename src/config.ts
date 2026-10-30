@@ -10,7 +10,8 @@ import path from 'node:path';
 
 export type Provider = string;
 export type CommitMode = 'branch' | 'direct';
-export type AuthMode = 'device' | 'pat' | 'gh';
+/** 只保留两种真正可用的方式：本机 `gh` 登录态、手动 PAT。历史的 `device` 在归一化时迁移为 `gh`。 */
+export type AuthMode = 'pat' | 'gh';
 export type Since = 'daily' | 'weekly';
 
 export interface ModelSettings {
@@ -106,7 +107,7 @@ export const DEFAULT_SETTINGS: Settings = {
     autoMerge: true,
     labels: [],
   },
-  github: { authMode: 'device', tokenRef: 'GITHUB_TOKEN' },
+  github: { authMode: 'gh', tokenRef: 'GITHUB_TOKEN' },
   trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
   output: { dir: 'trending' },
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai' },
@@ -122,6 +123,53 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 };
 
 export const CORE_PROVIDERS = ['deepseek', 'openai-compatible'] as const;
+
+/** 设置页分区；分段保存时只提交并校验对应分区，互不牵连。 */
+export const SETTINGS_SECTIONS = ['source', 'model', 'repo', 'auth', 'scope', 'schedule'] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+/** 校验问题字段 → 所属分区（用于分段保存时只把本分区的问题回给界面）。 */
+export function sectionOfField(field: string): SettingsSection | undefined {
+  if (field.startsWith('model.')) return 'model';
+  if (field.startsWith('repo.') || field.startsWith('output.') || field.startsWith('pr.')) return 'repo';
+  if (field.startsWith('github.')) return 'auth';
+  if (field.startsWith('trending.')) return 'scope';
+  if (field.startsWith('schedule.')) return 'schedule';
+  if (field === 'corePath' || field === 'coreAutoDownload') return 'source';
+  return undefined;
+}
+
+/**
+ * 分段保存：只把 `incoming` 里 `section` 的字段合并进 `stored`，其余分区保持已保存值。
+ * 这样一个 tab 的保存不会顺带提交或覆盖其它 tab 里尚未保存的改动。
+ */
+export function mergeSettingsSection(stored: Settings, incoming: Settings, section: SettingsSection): Settings {
+  const next = JSON.parse(JSON.stringify(stored)) as Settings;
+  switch (section) {
+    case 'source':
+      next.corePath = incoming.corePath;
+      next.coreAutoDownload = incoming.coreAutoDownload;
+      break;
+    case 'model':
+      next.model = incoming.model;
+      break;
+    case 'repo':
+      next.repo = incoming.repo;
+      next.pr = incoming.pr;
+      next.output = incoming.output;
+      break;
+    case 'auth':
+      next.github = incoming.github;
+      break;
+    case 'scope':
+      next.trending = incoming.trending;
+      break;
+    case 'schedule':
+      next.schedule = incoming.schedule;
+      break;
+  }
+  return next;
+}
 
 function str(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
@@ -184,7 +232,8 @@ export function normalizeSettings(input: unknown): Settings {
       labels: strArray(pr.labels, DEFAULT_SETTINGS.pr.labels),
     },
     github: {
-      authMode: authMode === 'pat' || authMode === 'gh' ? authMode : 'device',
+      // 旧版本可能存 'device'：它没有对应实现，统一迁移到真正可用的「本机 gh」。
+      authMode: authMode === 'pat' ? 'pat' : 'gh',
       tokenRef: str(github.tokenRef, DEFAULT_SETTINGS.github.tokenRef).trim() || DEFAULT_SETTINGS.github.tokenRef,
     },
     trending: {
@@ -244,11 +293,20 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (model.model.trim() === '') {
     problems.push({ field: 'model.model', code: 'CONFIG_INVALID', message: '必须填模型 ID（插件不设隐式默认模型）' });
   }
-  const baseURL = model.baseURL || PROVIDER_BASE_URLS[model.provider] || '';
-  if (baseURL === '') {
-    problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: '该 provider 需要显式 baseURL' });
-  } else if (!/^https?:\/\//.test(baseURL)) {
-    problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+  // 代理模式（mode=proxy）下端点由插件运行时注入回环代理地址（runner 的 baseURLOverride），
+  // baseURL 允许留空——与 quickfill 在 proxy 时清空 baseURL 的做法一致。若不豁免，
+  // 就会出现「模型预检通过、保存却被拒」的自相矛盾。
+  if (model.mode === 'proxy') {
+    if (model.baseURL !== '' && !/^https?:\/\//.test(model.baseURL)) {
+      problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+    }
+  } else {
+    const baseURL = model.baseURL || PROVIDER_BASE_URLS[model.provider] || '';
+    if (baseURL === '') {
+      problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: '该 provider 需要显式 baseURL' });
+    } else if (!/^https?:\/\//.test(baseURL)) {
+      problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+    }
   }
   if (model.temperature < 0 || model.temperature > 2) {
     problems.push({ field: 'model.temperature', code: 'CONFIG_INVALID', message: 'temperature 必须在 0–2 之间' });

@@ -8,16 +8,27 @@
  */
 import type http from 'node:http';
 
-import { normalizeSettings, validateSettings, type Settings } from '../config.js';
+import {
+  normalizeSettings,
+  validateSettings,
+  mergeSettingsSection,
+  sectionOfField,
+  SETTINGS_SECTIONS,
+  type Settings,
+  type SettingsSection,
+} from '../config.js';
 import { redact } from '../errors.js';
 import { IpcError } from '../ipc.js';
 import type { Store } from '../state.js';
 import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
+import { probeGithubAuth } from './github.js';
 import { importFirstAvailable } from './import-cli.js';
+import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
-import { applyCandidate, listProviderCandidates, llmServices } from './quickfill.js';
+import { applyCandidate, applyDefaultSelection, listProviderCandidates, llmServices, readDefaultSelection } from './quickfill.js';
+import { readDefaultBranch } from './repo.js';
 import type { Runner } from './runner.js';
 import type { Scheduler } from './schedule.js';
 
@@ -31,6 +42,8 @@ export interface RouteDeps {
   scheduler: Scheduler;
   get: (name: string) => unknown;
   env?: NodeJS.ProcessEnv;
+  /** 注入用：pendingPr 对账的 fetch 实现（测试不联网）。 */
+  fetchImpl?: typeof fetch;
   version: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
@@ -86,7 +99,8 @@ export function createRoutes(deps: RouteDeps) {
       const code = error instanceof IpcError ? error.code : 'INTERNAL';
       const message = redact(error instanceof Error ? error.message : String(error));
       deps.logger?.('route.error', { pathname, method, code, message });
-      sendJson(response, code === 'CONFIG_INVALID' ? 400 : 500, { ok: false, code, message });
+      const status = code === 'CONFIG_INVALID' ? 400 : 500;
+      sendJson(response, status, { ok: false, code, message });
     }
   };
 }
@@ -118,10 +132,23 @@ async function dispatch(
 
   if (method === 'POST' && pathname === '/config') {
     const body = await readBody(request);
-    const next = normalizeSettings(body.settings ?? body);
+    const incoming = normalizeSettings(body.settings ?? body);
+    const section =
+      typeof body.section === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(body.section)
+        ? (body.section as SettingsSection)
+        : undefined;
+    // 分段保存：只把本分区字段合并进已保存设置，其它分区保持原值（不静默提交别处草稿）。
+    let next = section === undefined ? incoming : mergeSettingsSection(settings, incoming, section);
+    // 目标分支以仓库默认分支为准，忽略客户端传值（设置页只读展示，不允许手改）。
+    if (next.repo.path.trim() !== '' && (section === undefined || section === 'repo')) {
+      const branch = await readDefaultBranch(next.repo.path, { env });
+      if (branch.branch !== undefined) next.repo.baseBranch = branch.branch;
+    }
     const core = await inspectCore({ ...next, corePath: settings.corePath }, { env });
     const providers = core.supportedProviders.length > 0 ? core.supportedProviders : undefined;
-    const problems = validateSettings(next, providers);
+    const allProblems = validateSettings(next, providers);
+    // 分段保存只回本分区的问题：其它分区沿用已保存值，不该阻塞这次保存。
+    const problems = section === undefined ? allProblems : allProblems.filter((problem) => sectionOfField(problem.field) === section);
     if (problems.length > 0) {
       return { saved: false, problems, settings: next };
     }
@@ -155,26 +182,55 @@ async function dispatch(
     return { cancelled: deps.runner.cancel() };
   }
 
+  if (method === 'GET' && pathname === '/repo/branch') {
+    const repoPath = url.searchParams.get('path') ?? settings.repo.path;
+    return { repo: await readDefaultBranch(repoPath, { env }) };
+  }
+
+  if (method === 'POST' && pathname === '/github/test') {
+    const body = await readBody(request);
+    const candidate = body.settings === undefined ? settings : normalizeSettings(body.settings);
+    const probe = await probeGithubAuth({
+      credentials: credentialServices(deps.get),
+      authMode: candidate.github.authMode,
+      tokenRef: candidate.github.tokenRef,
+      env,
+    });
+    return { github: probe };
+  }
+
   if (method === 'GET' && pathname === '/quickfill') {
     const candidates = await listProviderCandidates({
       llm: llmServices(deps.get),
       credentials: credentialServices(deps.get),
       env,
     });
-    return { providers: candidates };
+    return { providers: candidates, defaultSelection: readDefaultSelection(deps.get) ?? null };
   }
 
   if (method === 'POST' && pathname === '/quickfill') {
     const body = await readBody(request);
-    const providerId = typeof body.providerId === 'string' ? body.providerId : '';
-    const modelId = typeof body.modelId === 'string' ? body.modelId : '';
     const candidates = await listProviderCandidates({
       llm: llmServices(deps.get),
       credentials: credentialServices(deps.get),
       env,
     });
+    if (body.useDefault === true) {
+      const selection = readDefaultSelection(deps.get);
+      if (selection === undefined) throw new IpcError('CONFIG_INVALID', '宿主没有可沿用的默认模型');
+      const candidate = candidates.find((item) => item.id === selection.provider);
+      const next = applyDefaultSelection(settings, selection, candidate);
+      deps.store.writeSettings(next);
+      return {
+        saved: true,
+        settings: next,
+        applied: { provider: selection.provider, model: selection.model, mode: next.model.mode },
+      };
+    }
+    const providerId = typeof body.providerId === 'string' ? body.providerId : '';
+    const modelId = typeof body.modelId === 'string' ? body.modelId : '';
     const candidate = candidates.find((item) => item.id === providerId);
-    if (candidate === undefined) throw new IpcError('CONFIG_INVALID', `宿主没有这个 provider：${providerId}`);
+    if (candidate === undefined) throw new IpcError('CONFIG_INVALID', `宿主没有这个已配置的 provider：${providerId}`);
     if (modelId === '') throw new IpcError('CONFIG_INVALID', '必须选择一个模型');
     const next = applyCandidate(settings, candidate, modelId);
     deps.store.writeSettings(next);
@@ -207,6 +263,25 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
   const coexistence = await detectCoexistence(core.path, { env });
   const modelCredential = await describeRef(credentials, settings.model.apiKeyRef, env);
   const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
+
+  // 对账 pendingPr：外部已合并/关闭的 PR 不该继续以「未合并」示人；清掉陈旧记录。
+  let pendingPr = state.pendingPr ?? null;
+  let pendingPrState: string | undefined;
+  if (pendingPr !== null) {
+    const status = await checkPendingPr({
+      url: pendingPr.url,
+      token: github.token,
+      ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
+    });
+    pendingPrState = status.state;
+    if (status.state === 'merged' || status.state === 'closed') {
+      const next = { ...state };
+      delete next.pendingPr;
+      deps.store.writeState(next);
+      pendingPr = null;
+    }
+  }
+
   return {
     plugin: { name: '@morehao/dsh-github-trending', version: deps.version },
     settings,
@@ -218,7 +293,8 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       lastRunAt: state.lastRunAt ?? null,
       lastDigest: state.lastDigest ?? null,
       lastResult: state.lastResult ?? null,
-      pendingPr: state.pendingPr ?? null,
+      pendingPr,
+      ...(pendingPrState === undefined ? {} : { pendingPrState }),
       history,
     },
     model: {

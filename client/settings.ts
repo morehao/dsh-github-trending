@@ -1,23 +1,75 @@
 /**
  * 设置页：内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度。
  *
+ * 版式是「左侧纵向 tab + 右侧可滚动分区」，避免整页一长条、宿主裁掉且不出滚动条。
  * 编辑在本地 `draft` 里进行，只有点「保存设置」才 POST /config —— 与规格
- * 「禁止静默复制」「保存前预检」一致；快速填充也要用户再点一次「使用这个模型」。
+ * 「禁止静默复制」「保存前预检」一致；快速填充也要用户再点一次确认。
+ *
+ * 默认只暴露普通用户需要的字段；`TRENDING_DIGEST_CORE`（核心路径）与手动
+ * `凭据引用` 收进「高级设置」，避免把开发/排障概念摊在首屏。
  */
 import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, duration, h, localTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
-import { apiCall, type PreflightResult, type ProviderCandidate, type SettingsShape } from './api.js';
+import {
+  apiCall,
+  type DefaultSelection,
+  type GithubProbeResult,
+  type PreflightResult,
+  type QuickfillResponse,
+  type RepoBranchResult,
+  type SettingsShape,
+} from './api.js';
 import type { StoreValue } from './store.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
+
+type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'schedule';
+
+/** 分区顺序，与左侧 tab 一致；用于「是否还有未保存改动」的判定。 */
+const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'schedule'];
+
+const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, schedule: false };
+
+function cloneSettings(settings: SettingsShape): SettingsShape {
+  return JSON.parse(JSON.stringify(settings)) as SettingsShape;
+}
+
+/** 一个分区实际包含的设置字段（repo 分区同时承载输出目录与 PR 自动合并开关）。 */
+function sectionSlice(settings: SettingsShape, section: SectionId): Record<string, unknown> {
+  switch (section) {
+    case 'source':
+      return { corePath: settings.corePath };
+    case 'model':
+      return { model: settings.model };
+    case 'repo':
+      return { repo: settings.repo, pr: settings.pr, output: settings.output };
+    case 'auth':
+      return { github: settings.github };
+    case 'scope':
+      return { trending: settings.trending };
+    case 'schedule':
+      return { schedule: settings.schedule };
+  }
+}
+
+function sectionEquals(a: SettingsShape, b: SettingsShape, section: SectionId): boolean {
+  return JSON.stringify(sectionSlice(a, section)) === JSON.stringify(sectionSlice(b, section));
+}
+
+/** 只把 `section` 的字段从 `source` 覆盖到 `target`，保留其它分区里尚未保存的编辑。 */
+function applySection(target: SettingsShape, source: SettingsShape, section: SectionId): SettingsShape {
+  const next = cloneSettings(target);
+  Object.assign(next, sectionSlice(source, section));
+  return next;
+}
 
 export function SettingsView(props: { t: Translate; store: StoreValue; onClose?: () => void; pickDirectory?: () => Promise<string | undefined> }): any {
   const { t, store } = props;
   const state = store.state;
   const [draft, setDraft] = React.useState<SettingsShape | null>(null);
-  const [dirty, setDirty] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
-  const [saved, setSaved] = React.useState(false);
+  const [dirtySections, setDirtySections] = React.useState<Record<SectionId, boolean>>({ ...EMPTY_DIRTY });
+  const [savingSection, setSavingSection] = React.useState<SectionId | null>(null);
+  const [savedSection, setSavedSection] = React.useState<SectionId | null>(null);
   const [problems, setProblems] = React.useState<Array<{ field: string; message: string }>>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [preflight, setPreflight] = React.useState<PreflightResult | null>(null);
@@ -25,34 +77,82 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [rechecking, setRechecking] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [quickOpen, setQuickOpen] = React.useState(false);
+  const [advanced, setAdvanced] = React.useState(false);
+  const [section, setSection] = React.useState<SectionId>('source');
+  const [branchInfo, setBranchInfo] = React.useState<RepoBranchResult | null>(null);
+  const [branchLoading, setBranchLoading] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [githubTest, setGithubTest] = React.useState<GithubProbeResult | null>(null);
+
+  const anyDirty = SECTIONS.some((id) => dirtySections[id]);
 
   React.useEffect(() => {
-    if (state !== null && !dirty) setDraft(state.settings);
-  }, [state, dirty]);
+    if (state !== null && !anyDirty) setDraft(state.settings);
+  }, [state, anyDirty]);
+
+  // 切到别的分区时清掉上一分区残留的校验错误。
+  React.useEffect(() => {
+    setProblems([]);
+  }, [section]);
+
+  const repoPath = draft === null ? '' : draft.repo.path;
+
+  // 读仓库默认分支（只读展示）：路径变化时重新读取，不写任何状态。
+  React.useEffect(() => {
+    if (repoPath.trim() === '') {
+      setBranchInfo(null);
+      return () => undefined;
+    }
+    let cancelled = false;
+    setBranchLoading(true);
+    apiCall<{ repo: RepoBranchResult }>('GET', `/repo/branch?path=${encodeURIComponent(repoPath)}`)
+      .then((result) => {
+        if (!cancelled) setBranchInfo(result.repo);
+      })
+      .catch((error) => {
+        if (!cancelled) setBranchInfo({ source: 'none', message: error instanceof Error ? error.message : String(error) });
+      })
+      .finally(() => {
+        if (!cancelled) setBranchLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoPath]);
 
   const update = (mutate: (next: SettingsShape) => void): void => {
     if (draft === null) return;
-    const next = JSON.parse(JSON.stringify(draft)) as SettingsShape;
+    const prev = draft;
+    const next = cloneSettings(draft);
     mutate(next);
     setDraft(next);
-    setDirty(true);
-    setSaved(false);
+    const changed = SECTIONS.filter((id) => !sectionEquals(prev, next, id));
+    if (changed.length > 0) {
+      setDirtySections((current) => {
+        const merged = { ...current };
+        for (const id of changed) merged[id] = true;
+        return merged;
+      });
+      setSavedSection((current) => (current !== null && changed.includes(current) ? null : current));
+      setProblems([]);
+    }
   };
 
-  const save = async (): Promise<void> => {
+  const save = async (section: SectionId): Promise<void> => {
     if (draft === null) return;
-    setSaving(true);
+    setSavingSection(section);
     setProblems([]);
     try {
       const result = await apiCall<{ saved: boolean; settings: SettingsShape; problems: Array<{ field: string; message: string }> }>(
         'POST',
         '/config',
-        { settings: draft },
+        { settings: draft, section },
       );
       if (result.saved) {
-        setDraft(result.settings);
-        setDirty(false);
-        setSaved(true);
+        // 只回填本分区的规范化结果，保留其它分区里尚未保存的编辑。
+        setDraft((current) => (current === null ? current : applySection(current, result.settings, section)));
+        setDirtySections((current) => ({ ...current, [section]: false }));
+        setSavedSection(section);
         setMessage(null);
         await store.refresh({ quiet: true });
       } else {
@@ -61,7 +161,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      setSaving(false);
+      setSavingSection(null);
     }
   };
 
@@ -106,6 +206,20 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
+  const testGithub = async (): Promise<void> => {
+    if (draft === null) return;
+    setTesting(true);
+    setGithubTest(null);
+    try {
+      const result = await apiCall<{ github: GithubProbeResult }>('POST', '/github/test', { settings: draft });
+      setGithubTest(result.github);
+    } catch (error) {
+      setGithubTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const importCli = async (): Promise<void> => {
     try {
       const result = await apiCall<{ import: { ok: boolean; imported: string[]; skippedSecrets: string[]; problems: string[]; settings?: SettingsShape } }>(
@@ -116,8 +230,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       const payload = result.import;
       if (payload.ok && payload.settings !== undefined) {
         setDraft(payload.settings);
-        setDirty(false);
-        setSaved(true);
+        setDirtySections({ ...EMPTY_DIRTY });
+        setSavedSection(null);
         setMessage(t('settings.import.done', { fields: payload.imported.join('、') }));
         await store.refresh({ quiet: true });
       } else {
@@ -145,290 +259,366 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const providers = state.core.supportedProviders.length > 0 ? state.core.supportedProviders : ['deepseek', 'openai-compatible'];
   const coreKind = state.core.state === 'ready' ? 'ok' : state.core.state === 'incompatible' ? 'warn' : 'err';
 
-  return h(
-    'div',
-    { className: 'dshgt-root' },
-    h(
-      'div',
-      { className: 'dshgt-head' },
-      h('span', { className: 'dshgt-title' }, t('section.title')),
-      h('span', { className: 'dshgt-sub' }, t('section.subtitle')),
-      h('span', { className: 'dshgt-hint', style: { marginLeft: 'auto' } }, `v${state.plugin.version}`),
-    ),
+  const branchText = branchLoading
+    ? t('branch.loading')
+    : branchInfo?.branch !== undefined
+      ? branchInfo.branch
+      : draft.repo.baseBranch !== ''
+        ? draft.repo.baseBranch
+        : '—';
+  const branchHint =
+    branchInfo?.source === 'origin-head'
+      ? t('branch.fromOrigin')
+      : branchInfo?.source === 'head'
+        ? t('branch.fromHead')
+        : branchInfo?.message !== undefined
+          ? branchInfo.message
+          : t('branch.readonlyHint');
 
-    // ---- 来源与核心 ----
+  const isGh = draft.github.authMode === 'gh';
+
+  const sections: Array<{ id: SectionId; label: string }> = [
+    { id: 'source', label: t('st.source') },
+    { id: 'model', label: t('st.model') },
+    { id: 'repo', label: t('st.repo') },
+    { id: 'auth', label: t('st.auth') },
+    { id: 'scope', label: t('st.scope') },
+    { id: 'schedule', label: t('st.schedule') },
+  ];
+
+  const sourceCard = h(
+    Card,
+    {
+      title: t('card.source.title'),
+      hint: t('card.source.hint'),
+      extra: h(Btn, { small: true, onClick: () => void recheck(), disabled: rechecking }, rechecking ? t('core.checking') : t('core.recheck')),
+    },
+    h('p', { className: 'dshgt-desc' }, t('card.source.desc')),
     h(
-      Card,
-      {
-        title: t('card.source.title'),
-        hint: t('card.source.hint'),
-        extra: h(Btn, { small: true, onClick: () => void recheck(), disabled: rechecking }, rechecking ? t('core.checking') : t('core.recheck')),
-      },
-      h('p', { className: 'dshgt-desc' }, t('card.source.desc')),
-      h(
-        Row,
-        { label: t('card.source.title') },
-        h('span', { className: 'dshgt-pill' }, h('span', { className: 'dshgt-dot ok' }), t('source.local')),
-        h('span', { className: 'dshgt-hint' }, t('source.local.hint')),
-      ),
-      h(
-        Row,
-        { label: t('core.label') },
-        h('span', { className: 'dshgt-pill' }, h('span', { className: `dshgt-dot ${coreKind}` }), state.core.version ?? t(`core.${state.core.state}`)),
-        state.core.ipcSchema === undefined
-          ? null
-          : h('span', { className: 'dshgt-hint dshgt-mono' }, `ipc ${state.core.ipcSchema} · digest ${state.core.digestSchema ?? '?'}`),
-        state.core.release === undefined
-          ? null
-          : h('span', { className: 'dshgt-hint dshgt-mono' }, `${state.core.release.tag} · ${state.core.release.asset}`),
-        h(
-          'span',
-          { className: 'dshgt-hint' },
-          state.core.download.state === 'override'
-            ? `覆盖路径：${state.core.override?.path ?? ''}`
-            : state.core.release?.cached === true
-              ? t('core.cached')
-              : t('core.notDownloaded'),
-        ),
-        state.core.download.state === 'override'
-          ? null
-          : h(Btn, { small: true, onClick: () => void downloadCore(), disabled: downloading },
-              downloading ? t('core.downloading') : state.core.release?.cached === true ? t('core.redownload') : t('core.download')),
-      ),
+      Row,
+      { label: t('card.source.title') },
+      h('span', { className: 'dshgt-pill' }, h('span', { className: 'dshgt-dot ok' }), t('source.local')),
+      h('span', { className: 'dshgt-hint' }, t('source.local.hint')),
+    ),
+    h(
+      Row,
+      { label: t('core.label') },
+      h('span', { className: 'dshgt-pill' }, h('span', { className: `dshgt-dot ${coreKind}` }), state.core.version ?? t(`core.${state.core.state}`)),
+      state.core.ipcSchema === undefined
+        ? null
+        : h('span', { className: 'dshgt-hint dshgt-mono' }, `ipc ${state.core.ipcSchema} · digest ${state.core.digestSchema ?? '?'}`),
       state.core.release === undefined
         ? null
-        : h('p', { className: 'dshgt-hint dshgt-mono', style: { fontSize: 11 } }, `${state.core.release.url}  →  ${state.core.release.binaryPath}`),
-      state.core.state === 'ready'
+        : h('span', { className: 'dshgt-hint dshgt-mono' }, `${state.core.release.tag} · ${state.core.release.asset}`),
+      h(
+        'span',
+        { className: 'dshgt-hint' },
+        state.core.download.state === 'override'
+          ? t('core.override', { path: state.core.override?.path ?? '' })
+          : state.core.release?.cached === true
+            ? t('core.cached')
+            : t('core.notDownloaded'),
+      ),
+      state.core.download.state === 'override'
         ? null
-        : h(Alert, { kind: 'err', title: t('core.label') }, h('div', null, state.core.message ?? ''), h('div', { className: 'dshgt-hint' }, t('core.order'))),
-      h('p', { className: 'dshgt-hint' }, t('core.order')),
-      state.coexistence.found
-        ? h(Alert, { kind: 'warn', title: t('coexist.title') }, h('div', { className: 'dshgt-mono', style: { fontSize: 12 } }, `${state.coexistence.path ?? ''} ${state.coexistence.version ?? ''}`), h('div', null, state.coexistence.message ?? ''), h('div', { className: 'dshgt-hint' }, t('coexist.hint')))
-        : null,
-      h(Row, { label: 'TRENDING_DIGEST_CORE' }, h(Input, { mono: true, width: 420, value: draft.corePath, placeholder: '/path/to/trendradar', onInput: (value: string) => update((next) => { next.corePath = value; }) })),
+        : h(Btn, { small: true, onClick: () => void downloadCore(), disabled: downloading },
+            downloading ? t('core.downloading') : state.core.release?.cached === true ? t('core.redownload') : t('core.download')),
     ),
+    state.core.release === undefined
+      ? null
+      : h('p', { className: 'dshgt-hint dshgt-mono', style: { fontSize: 11 } }, `${state.core.release.url}  →  ${state.core.release.binaryPath}`),
+    state.core.state === 'ready'
+      ? null
+      : h(Alert, { kind: 'err', title: t('core.label') }, h('div', null, state.core.message ?? ''), h('div', { className: 'dshgt-hint' }, t('core.order'))),
+    h('p', { className: 'dshgt-hint' }, t('core.order')),
+    state.coexistence.found
+      ? h(Alert, { kind: 'warn', title: t('coexist.title') }, h('div', { className: 'dshgt-mono', style: { fontSize: 12 } }, `${state.coexistence.path ?? ''} ${state.coexistence.version ?? ''}`), h('div', null, state.coexistence.message ?? ''), h('div', { className: 'dshgt-hint' }, t('coexist.hint')))
+      : null,
+    advanced
+      ? h(Row, { label: 'TRENDING_DIGEST_CORE' }, h(Input, { mono: true, width: 420, value: draft.corePath, placeholder: '/path/to/trendradar', onInput: (value: string) => update((next) => { next.corePath = value; }) }), h('span', { className: 'dshgt-hint' }, t('core.path.advancedHint')))
+      : null,
+  );
 
-    // ---- 模型 ----
+  const modelCard = h(
+    Card,
+    {
+      title: t('card.model.title'),
+      hint: t('card.model.hint'),
+      extra: h(Btn, { small: true, variant: 'primary', onClick: () => setQuickOpen(true) }, t('model.quickfill')),
+    },
+    h('p', { className: 'dshgt-desc' }, t('model.quickfill.desc')),
     h(
-      Card,
-      {
-        title: t('card.model.title'),
-        hint: t('card.model.hint'),
-        extra: h(Btn, { small: true, variant: 'primary', onClick: () => setQuickOpen(true) }, t('model.quickfill')),
-      },
-      h('p', { className: 'dshgt-desc' }, t('model.quickfill.desc')),
-      h(
-        Row,
-        { label: t('model.provider') },
-        h(Select, {
-          value: draft.model.provider,
-          options: providers.map((provider) => ({ value: provider, label: provider })),
-          onChange: (value: string) => update((next) => { next.model.provider = value; }),
-        }),
-        h('span', { className: 'dshgt-hint' }, state.model.mode === 'proxy' ? t('model.mode.proxy') : t('model.mode.direct')),
-      ),
-      h(Row, { label: t('model.baseURL') }, h(Input, {
+      Row,
+      { label: t('model.provider') },
+      h(Select, {
+        value: draft.model.provider,
+        options: providers.map((provider) => ({ value: provider, label: provider })),
+        onChange: (value: string) => update((next) => { next.model.provider = value; }),
+      }),
+      h('span', { className: 'dshgt-hint' }, state.model.mode === 'proxy' ? t('model.mode.proxy') : t('model.mode.direct')),
+    ),
+    h(Row, { label: t('model.baseURL') }, h(Input, {
+      mono: true,
+      width: 420,
+      value: draft.model.baseURL,
+      placeholder: t('model.baseURL.placeholder'),
+      onInput: (value: string) => update((next) => { next.model.baseURL = value; }),
+    })),
+    h(
+      Row,
+      { label: t('model.model') },
+      h(Input, {
         mono: true,
-        width: 420,
-        value: draft.model.baseURL,
-        placeholder: t('model.baseURL.placeholder'),
-        onInput: (value: string) => update((next) => { next.model.baseURL = value; }),
-      })),
-      h(
-        Row,
-        { label: t('model.model') },
-        h(Input, {
-          mono: true,
-          width: 260,
-          value: draft.model.model,
-          placeholder: t('model.model.placeholder'),
-          onInput: (value: string) => update((next) => { next.model.model = value; }),
-        }),
-        h(Btn, { small: true, onClick: () => void runPreflight(), disabled: preflighting }, preflighting ? t('model.preflighting') : t('model.preflight')),
-      ),
-      h(
-        Row,
-        { label: t('model.keyRef') },
-        h(Input, { mono: true, width: 220, value: draft.model.apiKeyRef, onInput: (value: string) => update((next) => { next.model.apiKeyRef = value; }) }),
-        h(Pill, { kind: state.model.credential.configured ? 'ok' : 'err' },
-          state.model.credential.configured ? `${t('auth.configured')}${state.model.credential.source === null ? '' : ` · ${state.model.credential.source}`}` : t('auth.missing'),
+        width: 260,
+        value: draft.model.model,
+        placeholder: t('model.model.placeholder'),
+        onInput: (value: string) => update((next) => { next.model.model = value; }),
+      }),
+      h(Btn, { small: true, onClick: () => void runPreflight(), disabled: preflighting }, preflighting ? t('model.preflighting') : t('model.preflight')),
+    ),
+    advanced
+      ? h(
+          Row,
+          { label: t('model.keyRef') },
+          h(Input, { mono: true, width: 220, value: draft.model.apiKeyRef, onInput: (value: string) => update((next) => { next.model.apiKeyRef = value; }) }),
+          h('span', { className: 'dshgt-hint' }, t('model.keyRef.advancedHint')),
+        )
+      : h(
+          Row,
+          { label: t('model.credential') },
+          h(Pill, { kind: state.model.credential.configured ? 'ok' : 'err' },
+            state.model.credential.configured ? `${t('auth.configured')}${state.model.credential.source === null ? '' : ` · ${state.model.credential.source}`}` : t('auth.missing'),
+          ),
+          h('span', { className: 'dshgt-hint' }, t('model.credential.hint')),
         ),
-      ),
-      h(
-        Row,
-        { label: t('model.params') },
-        h(Input, { mono: true, width: 70, value: String(draft.model.temperature), onInput: (value: string) => update((next) => { next.model.temperature = Number(value) || 0; }) }),
-        h(Input, { mono: true, width: 90, value: String(draft.model.maxTokens), onInput: (value: string) => update((next) => { next.model.maxTokens = Math.round(Number(value) || 0); }) }),
-        h(Toggle, { checked: draft.model.allowDegraded, label: t('model.allowDegraded'), onChange: (value: boolean) => update((next) => { next.model.allowDegraded = value; }) }),
-      ),
-      preflight === null
+    h(
+      Row,
+      { label: t('model.params') },
+      h(Input, { mono: true, width: 70, value: String(draft.model.temperature), onInput: (value: string) => update((next) => { next.model.temperature = Number(value) || 0; }) }),
+      h(Input, { mono: true, width: 90, value: String(draft.model.maxTokens), onInput: (value: string) => update((next) => { next.model.maxTokens = Math.round(Number(value) || 0); }) }),
+      h(Toggle, { checked: draft.model.allowDegraded, label: t('model.allowDegraded'), onChange: (value: boolean) => update((next) => { next.model.allowDegraded = value; }) }),
+    ),
+    preflight === null
+      ? null
+      : h(
+          Alert,
+          { kind: preflight.ok ? 'ok' : 'err', title: preflight.ok ? t('state.ok') : t('error.prefix') },
+          h('div', null, `${preflight.mode} · ${duration(preflight.durationMs)}${preflight.endpoint === undefined ? '' : ` · ${preflight.endpoint}`}`),
+          preflight.message === undefined ? null : h('div', null, preflight.message),
+          preflight.hint === undefined ? null : h('div', { className: 'dshgt-hint' }, preflight.hint),
+        ),
+  );
+
+  const repoCard = h(
+    Card,
+    { title: t('card.repo.title'), hint: t('card.repo.hint') },
+    h(
+      Row,
+      { label: t('repo.path') },
+      h('span', { className: 'dshgt-mono', style: { wordBreak: 'break-all' } }, draft.repo.path === '' ? t('repo.path.empty') : draft.repo.path),
+      props.pickDirectory === undefined
         ? null
-        : h(
-            Alert,
-            { kind: preflight.ok ? 'ok' : 'err', title: preflight.ok ? t('state.ok') : t('error.prefix') },
-            h('div', null, `${preflight.mode} · ${duration(preflight.durationMs)}${preflight.endpoint === undefined ? '' : ` · ${preflight.endpoint}`}`),
-            preflight.message === undefined ? null : h('div', null, preflight.message),
-            preflight.hint === undefined ? null : h('div', { className: 'dshgt-hint' }, preflight.hint),
+        : h(Btn, {
+            small: true,
+            onClick: () => {
+              void props.pickDirectory?.().then((picked) => {
+                if (typeof picked === 'string' && picked !== '') update((next) => { next.repo.path = picked; });
+              });
+            },
+          }, t('repo.pick')),
+    ),
+    h(
+      Row,
+      { label: t('repo.baseBranch') },
+      h('span', { className: 'dshgt-mono' }, branchText),
+      h('span', { className: 'dshgt-hint' }, branchHint),
+    ),
+    h(
+      Row,
+      { label: t('repo.outputDir') },
+      h(Input, { mono: true, width: 200, value: draft.output.dir, onInput: (value: string) => update((next) => { next.output.dir = value; }) }),
+      h('span', { className: 'dshgt-hint' }, t('repo.outputDir.hint')),
+    ),
+    h(
+      Row,
+      { label: t('repo.commitMode') },
+      h(Select, {
+        value: draft.repo.commitMode,
+        options: [
+          { value: 'branch', label: t('repo.commitMode.branch') },
+          { value: 'direct', label: t('repo.commitMode.direct') },
+        ],
+        onChange: (value: string) => update((next) => { next.repo.commitMode = value === 'direct' ? 'direct' : 'branch'; }),
+      }),
+      h(Toggle, { checked: draft.pr.autoMerge, label: t('repo.autoMerge'), onChange: (value: boolean) => update((next) => { next.pr.autoMerge = value; }) }),
+    ),
+  );
+
+  const authCard = h(
+    Card,
+    { title: t('card.auth.title'), hint: t('card.auth.hint') },
+    h(
+      Row,
+      { label: t('auth.mode') },
+      h(Select, {
+        value: draft.github.authMode,
+        options: [
+          { value: 'gh', label: t('auth.gh') },
+          { value: 'pat', label: t('auth.pat') },
+        ],
+        onChange: (value: string) => update((next) => { next.github.authMode = value === 'pat' ? 'pat' : 'gh'; }),
+      }),
+      h(Pill, { kind: state.github.configured ? 'ok' : 'warn' }, state.github.configured ? `${t('auth.configured')} · ${state.github.source}` : t('auth.missing')),
+    ),
+    h('p', { className: 'dshgt-hint' }, isGh ? t('auth.gh.hint') : t('auth.pat.hint')),
+    isGh
+      ? null
+      : h(
+          Row,
+          { label: t('auth.tokenRef') },
+          h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
+          h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
+        ),
+    h(
+      Row,
+      { label: t('auth.test') },
+      h(Btn, { small: true, onClick: () => void testGithub(), disabled: testing }, testing ? t('auth.testing') : t('auth.test')),
+      githubTest === null
+        ? null
+        : h(Pill, { kind: githubTest.ok ? 'ok' : 'err' },
+            githubTest.ok
+              ? `${t('auth.test.ok')}${githubTest.login === undefined ? '' : ` · @${githubTest.login}`}`
+              : githubTest.message ?? t('auth.test.fail'),
           ),
     ),
+  );
 
-    // ---- 仓库 ----
+  const scopeCard = h(
+    Card,
+    { title: t('card.scope.title') },
     h(
-      Card,
-      { title: t('card.repo.title'), hint: t('card.repo.hint') },
-      h(
-        Row,
-        { label: t('repo.path') },
-        h(Input, {
-          mono: true,
-          width: 380,
-          value: draft.repo.path,
-          placeholder: t('repo.path.placeholder'),
-          onInput: (value: string) => update((next) => { next.repo.path = value; }),
-        }),
-        props.pickDirectory === undefined
-          ? null
-          : h(Btn, {
-              small: true,
-              onClick: () => {
-                void props.pickDirectory?.().then((picked) => {
-                  if (typeof picked === 'string' && picked !== '') update((next) => { next.repo.path = picked; });
-                });
-              },
-            }, t('repo.pick')),
-      ),
-      h(
-        Row,
-        { label: t('repo.baseBranch') },
-        h(Input, { mono: true, width: 120, value: draft.repo.baseBranch, onInput: (value: string) => update((next) => { next.repo.baseBranch = value; }) }),
-        h('span', { className: 'dshgt-hint' }, t('repo.remote')),
-        h(Input, { mono: true, width: 100, value: draft.repo.remote, onInput: (value: string) => update((next) => { next.repo.remote = value; }) }),
-        h('span', { className: 'dshgt-hint' }, t('repo.outputDir')),
-        h(Input, { mono: true, width: 140, value: draft.output.dir, onInput: (value: string) => update((next) => { next.output.dir = value; }) }),
-      ),
-      h(
-        Row,
-        { label: t('repo.commitMode') },
-        h(Select, {
-          value: draft.repo.commitMode,
-          options: [
-            { value: 'branch', label: t('repo.commitMode.branch') },
-            { value: 'direct', label: t('repo.commitMode.direct') },
-          ],
-          onChange: (value: string) => update((next) => { next.repo.commitMode = value === 'direct' ? 'direct' : 'branch'; }),
-        }),
-        h(Toggle, { checked: draft.pr.autoMerge, label: t('repo.autoMerge'), onChange: (value: boolean) => update((next) => { next.pr.autoMerge = value; }) }),
-      ),
-      h(Row, { label: t('repo.titleTemplate') }, h(Input, {
-        mono: true,
-        width: 360,
-        value: draft.pr.titleTemplate,
-        onInput: (value: string) => update((next) => { next.pr.titleTemplate = value; }),
-      })),
+      Row,
+      { label: t('scope.period') },
+      h(Select, {
+        value: draft.trending.since,
+        options: [
+          { value: 'daily', label: t('scope.daily') },
+          { value: 'weekly', label: t('scope.weekly') },
+        ],
+        onChange: (value: string) => update((next) => { next.trending.since = value === 'weekly' ? 'weekly' : 'daily'; }),
+      }),
+      h('span', { className: 'dshgt-hint' }, t('scope.topN')),
+      h(Input, { mono: true, width: 70, value: String(draft.trending.topN), onInput: (value: string) => update((next) => { next.trending.topN = Math.round(Number(value) || 0); }) }),
     ),
-
-    // ---- 认证 ----
     h(
-      Card,
-      { title: t('card.auth.title'), hint: t('card.auth.hint') },
-      h(
-        Row,
-        { label: t('auth.mode') },
-        h(Select, {
-          value: draft.github.authMode,
-          options: [
-            { value: 'device', label: t('auth.device') },
-            { value: 'pat', label: t('auth.pat') },
-            { value: 'gh', label: t('auth.gh') },
-          ],
-          onChange: (value: string) => update((next) => { next.github.authMode = value === 'pat' ? 'pat' : value === 'gh' ? 'gh' : 'device'; }),
-        }),
-        h('span', { className: 'dshgt-hint' }, t('auth.tokenRef')),
-        h(Input, { mono: true, width: 180, value: draft.github.tokenRef, onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
-        h(Pill, { kind: state.github.configured ? 'ok' : 'warn' }, state.github.configured ? `${t('auth.configured')} · ${state.github.source}` : t('auth.missing')),
-      ),
-      state.github.configured
-        ? null
-        : h('p', { className: 'dshgt-hint' }, '未配置 token 时 push / 开 PR 会以 GITHUB_AUTH 失败；试跑（dryRun）不受影响。'),
+      Row,
+      { label: t('scope.languages') },
+      h(Chips, {
+        values: LANGUAGES,
+        selected: draft.trending.languages,
+        onChange: (next: string[]) => update((draftNext) => { draftNext.trending.languages = next; }),
+      }),
     ),
+  );
 
-    // ---- 榜单 ----
+  const scheduleCard = h(
+    Card,
+    { title: t('card.schedule.title'), hint: state.schedule.nextRunAt === undefined ? undefined : `${t('schedule.next')} ${localTime(state.schedule.nextRunAt)}` },
     h(
-      Card,
-      { title: t('card.scope.title') },
-      h(
-        Row,
-        { label: t('scope.period') },
-        h(Select, {
-          value: draft.trending.since,
-          options: [
-            { value: 'daily', label: t('scope.daily') },
-            { value: 'weekly', label: t('scope.weekly') },
-          ],
-          onChange: (value: string) => update((next) => { next.trending.since = value === 'weekly' ? 'weekly' : 'daily'; }),
-        }),
-        h('span', { className: 'dshgt-hint' }, t('scope.topN')),
-        h(Input, { mono: true, width: 70, value: String(draft.trending.topN), onInput: (value: string) => update((next) => { next.trending.topN = Math.round(Number(value) || 0); }) }),
-      ),
-      h(
-        Row,
-        { label: t('scope.languages') },
-        h(Chips, {
-          values: LANGUAGES,
-          selected: draft.trending.languages,
-          onChange: (next: string[]) => update((draftNext) => { draftNext.trending.languages = next; }),
-        }),
+      Row,
+      { label: t('schedule.enabled') },
+      h(Toggle, { checked: draft.schedule.enabled, onChange: (value: boolean) => update((next) => { next.schedule.enabled = value; }) }),
+      h('span', { className: 'dshgt-hint' }, t('schedule.time')),
+      h(Input, { mono: true, width: 110, value: draft.schedule.time, onInput: (value: string) => update((next) => { next.schedule.time = value; }) }),
+      h('span', { className: 'dshgt-hint' }, t('schedule.timezone')),
+      h(Input, { mono: true, width: 170, value: draft.schedule.timezone, onInput: (value: string) => update((next) => { next.schedule.timezone = value; }) }),
+    ),
+    h('p', { className: 'dshgt-hint' }, t('schedule.source')),
+  );
+
+  const currentCard =
+    section === 'source' ? sourceCard
+      : section === 'model' ? modelCard
+        : section === 'repo' ? repoCard
+          : section === 'auth' ? authCard
+            : section === 'scope' ? scopeCard
+              : scheduleCard;
+
+  return h(
+    'div',
+    { className: 'dshgt-settings' },
+    h(
+      'nav',
+      { className: 'dshgt-vtabs', role: 'tablist', 'aria-orientation': 'vertical' },
+      sections.map((item) =>
+        h(
+          'button',
+          {
+            key: item.id,
+            type: 'button',
+            className: 'dshgt-vtab',
+            role: 'tab',
+            'aria-selected': section === item.id ? 'true' : 'false',
+            onClick: () => setSection(item.id),
+          },
+          item.label,
+          dirtySections[item.id] ? h('span', { className: 'dshgt-vtab-dirty', title: t('settings.dirty') }) : null,
+        ),
       ),
     ),
-
-    // ---- 调度 ----
-    h(
-      Card,
-      { title: t('card.schedule.title'), hint: state.schedule.nextRunAt === undefined ? undefined : `${t('schedule.next')} ${localTime(state.schedule.nextRunAt)}` },
-      h(
-        Row,
-        { label: t('schedule.enabled') },
-        h(Toggle, { checked: draft.schedule.enabled, onChange: (value: boolean) => update((next) => { next.schedule.enabled = value; }) }),
-        h('span', { className: 'dshgt-hint' }, t('schedule.time')),
-        h(Input, { mono: true, width: 110, value: draft.schedule.time, onInput: (value: string) => update((next) => { next.schedule.time = value; }) }),
-        h('span', { className: 'dshgt-hint' }, t('schedule.timezone')),
-        h(Input, { mono: true, width: 170, value: draft.schedule.timezone, onInput: (value: string) => update((next) => { next.schedule.timezone = value; }) }),
-      ),
-      h('p', { className: 'dshgt-hint' }, t('schedule.source')),
-    ),
-
-    // ---- 保存 / 排障 ----
-    problems.length > 0
-      ? h(Alert, { kind: 'err', title: t('error.prefix') }, h('ul', { style: { margin: 0, paddingLeft: 16 } }, problems.map((problem, index) => h('li', { key: index }, `${problem.field}：${problem.message}`))))
-      : null,
-    message === null ? null : h(Alert, { kind: 'ok' }, message),
     h(
       'div',
-      { className: 'dshgt-footer' },
-      h(Btn, { variant: 'primary', onClick: () => void save(), disabled: saving || !dirty }, saving ? t('settings.saving') : dirty ? t('settings.save') : saved ? t('settings.saved') : t('settings.save')),
-      h(Btn, { onClick: () => void importCli() }, t('settings.import')),
-      h(Btn, { onClick: copyConfig }, t('settings.copyConfig')),
-      state.status.lastRunAt === null ? null : h('span', { className: 'dshgt-hint' }, `上次运行 ${localTime(state.status.lastRunAt)}`),
+      { className: 'dshgt-vpanel' },
+      currentCard,
+      problems.length > 0
+        ? h(Alert, { kind: 'err', title: t('error.prefix') }, h('ul', { style: { margin: 0, paddingLeft: 16 } }, problems.map((problem, index) => h('li', { key: index }, `${problem.field}：${problem.message}`))))
+        : null,
+      message === null ? null : h(Alert, { kind: 'ok' }, message),
+      h(
+        'div',
+        { className: 'dshgt-footer' },
+        h(
+          Btn,
+          {
+            variant: 'primary',
+            onClick: () => void save(section),
+            disabled: savingSection !== null || !dirtySections[section],
+            title: t('settings.saveSection.hint'),
+          },
+          savingSection === section
+            ? t('settings.saving')
+            : dirtySections[section]
+              ? t('settings.saveSection')
+              : savedSection === section
+                ? t('settings.saved')
+                : t('settings.saveSection'),
+        ),
+        h('span', { className: 'dshgt-hint' }, t('settings.saveSection.hint')),
+        h(Btn, { onClick: () => void importCli() }, t('settings.import')),
+        h(Btn, { onClick: copyConfig }, t('settings.copyConfig')),
+        h(Btn, { onClick: () => setAdvanced(!advanced) }, advanced ? t('settings.advanced.hide') : t('settings.advanced')),
+      ),
     ),
     quickOpen
-      ? h(QuickFillModal, { t, onClose: () => setQuickOpen(false), onApplied: (settings: SettingsShape) => { setDraft(settings); setDirty(false); setSaved(true); void store.refresh({ quiet: true }); } })
+      ? h(QuickFillModal, { t, onClose: () => setQuickOpen(false), onApplied: (settings: SettingsShape) => { setDraft(settings); setDirtySections({ ...EMPTY_DIRTY }); setSavedSection(null); void store.refresh({ quiet: true }); } })
       : null,
   );
 }
 
 function QuickFillModal(props: { t: Translate; onClose: () => void; onApplied: (settings: SettingsShape) => void }): any {
   const { t } = props;
-  const [providers, setProviders] = React.useState<ProviderCandidate[] | null>(null);
+  const [data, setData] = React.useState<QuickfillResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = React.useState('');
   const [selectedModel, setSelectedModel] = React.useState('');
-  const [applying, setApplying] = React.useState(false);
+  const [applying, setApplying] = React.useState<string | null>(null);
+  const [showOthers, setShowOthers] = React.useState(false);
 
   React.useEffect(() => {
     void (async () => {
       try {
-        const result = await apiCall<{ providers: ProviderCandidate[] }>('GET', '/quickfill');
-        setProviders(result.providers);
+        const result = await apiCall<QuickfillResponse>('GET', '/quickfill');
+        setData(result);
         const first = result.providers[0];
         if (first !== undefined) {
           setSelectedProvider(first.id);
@@ -436,23 +626,44 @@ function QuickFillModal(props: { t: Translate; onClose: () => void; onApplied: (
         }
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : String(failure));
-        setProviders([]);
+        setData({ providers: [], defaultSelection: null });
       }
     })();
   }, []);
 
-  const current = providers?.find((provider) => provider.id === selectedProvider);
-  const apply = async (): Promise<void> => {
-    if (current === undefined) return;
-    setApplying(true);
+  const providers = data?.providers ?? [];
+  const defaultSelection: DefaultSelection | null = data?.defaultSelection ?? null;
+  const current = providers.find((provider) => provider.id === selectedProvider);
+
+  const finish = (settings: SettingsShape): void => {
+    props.onApplied(settings);
+    props.onClose();
+  };
+
+  const applyDefault = async (): Promise<void> => {
+    setApplying('default');
+    setError(null);
     try {
-      const result = await apiCall<{ settings: SettingsShape }>('POST', '/quickfill', { providerId: current.id, modelId: selectedModel });
-      props.onApplied(result.settings);
-      props.onClose();
+      const result = await apiCall<{ settings: SettingsShape }>('POST', '/quickfill', { useDefault: true });
+      finish(result.settings);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
-      setApplying(false);
+      setApplying(null);
+    }
+  };
+
+  const applySelected = async (): Promise<void> => {
+    if (current === undefined) return;
+    setApplying('selected');
+    setError(null);
+    try {
+      const result = await apiCall<{ settings: SettingsShape }>('POST', '/quickfill', { providerId: current.id, modelId: selectedModel });
+      finish(result.settings);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setApplying(null);
     }
   };
 
@@ -465,45 +676,69 @@ function QuickFillModal(props: { t: Translate; onClose: () => void; onApplied: (
       h('h3', { style: { margin: 0, fontSize: 14 } }, t('quickfill.title')),
       h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('quickfill.hint')),
       error === null ? null : h(Alert, { kind: 'err' }, error),
-      providers === null
+      data === null
         ? h('p', { className: 'dshgt-hint' }, t('quickfill.loading'))
-        : providers.length === 0
-          ? h('p', { className: 'dshgt-hint' }, t('quickfill.empty'))
-          : h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-              h(Select, {
-                value: selectedProvider,
-                options: providers.map((provider) => ({ value: provider.id, label: `${provider.name} (${provider.id})` })),
-                onChange: (value: string) => {
-                  setSelectedProvider(value);
-                  const provider = providers.find((item) => item.id === value);
-                  setSelectedModel(provider?.models[0]?.id ?? '');
-                },
-              }),
-              current === undefined
-                ? null
-                : h(Select, {
-                    value: selectedModel,
-                    options: current.models.map((model) => ({ value: model.id, label: model.name })),
-                    onChange: setSelectedModel,
-                  }),
-              current === undefined
-                ? null
-                : h(KV, {
-                    items: [
-                      ['provider', current.coreProvider],
-                      ['baseURL', current.baseURL === '' ? t('label.optional') : current.baseURL],
-                      ['credential', current.credential.ref ?? '—'],
-                      ['mode', t(`quickfill.mode.${current.credential.mode}`)],
-                    ],
-                  }),
-            ),
+        : h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+            defaultSelection === null
+              ? null
+              : h(
+                  'div',
+                  { className: 'dshgt-default' },
+                  h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                    h('span', { className: 'dshgt-hint' }, t('quickfill.default')),
+                    h('span', { className: 'dshgt-mono' }, `${defaultSelection.provider} / ${defaultSelection.model}`),
+                  ),
+                  h(Btn, { variant: 'primary', small: true, onClick: () => void applyDefault(), disabled: applying !== null }, applying === 'default' ? t('quickfill.applying') : t('quickfill.useDefault')),
+                ),
+            providers.length === 0
+              ? defaultSelection === null
+                ? h('p', { className: 'dshgt-hint' }, t('quickfill.empty'))
+                : null
+              : h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                  h(Btn, { small: true, onClick: () => setShowOthers(!showOthers) }, showOthers ? t('quickfill.others.hide') : t('quickfill.others')),
+                  showOthers
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                        h(Select, {
+                          value: selectedProvider,
+                          options: providers.map((provider) => ({ value: provider.id, label: `${provider.name} (${provider.id})` })),
+                          onChange: (value: string) => {
+                            setSelectedProvider(value);
+                            const provider = providers.find((item) => item.id === value);
+                            setSelectedModel(provider?.models[0]?.id ?? '');
+                          },
+                        }),
+                        current === undefined
+                          ? null
+                          : h(Select, {
+                              value: selectedModel,
+                              options: current.models.map((model) => ({ value: model.id, label: model.name })),
+                              onChange: setSelectedModel,
+                            }),
+                        current === undefined
+                          ? null
+                          : h(KV, {
+                              items: [
+                                ['provider', current.coreProvider],
+                                ['baseURL', current.baseURL === '' ? t('label.optional') : current.baseURL],
+                                ['credential', current.credential.ref ?? '—'],
+                                ['mode', t(`quickfill.mode.${current.credential.mode}`)],
+                              ],
+                            }),
+                        h(Btn, { variant: 'primary', small: true, disabled: applying !== null || selectedModel === '', onClick: () => void applySelected() }, applying === 'selected' ? t('quickfill.applying') : t('quickfill.apply')),
+                      )
+                    : null,
+                ),
+          ),
       h(
         'div',
         { className: 'dshgt-footer', style: { justifyContent: 'flex-end' } },
         h(Btn, { onClick: props.onClose }, t('quickfill.close')),
-        h(Btn, { variant: 'primary', disabled: applying || current === undefined || selectedModel === '', onClick: () => void apply() }, t('quickfill.apply')),
       ),
     ),
   );

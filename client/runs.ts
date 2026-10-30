@@ -49,6 +49,7 @@ export function RunsView(props: { t: Translate; store: StoreValue; page?: boolea
   }
 
   const running = state.status.running !== null;
+  const pendingPr = state.status.pendingPr;
   const shown = summary;
   const lastRecord = state.status.history[0] === undefined ? null : state.status.history[0];
   // 摘要（刚跑完）与历史记录字段不同：摘要没有 at，用当前时间兜底展示
@@ -85,6 +86,14 @@ export function RunsView(props: { t: Translate; store: StoreValue; page?: boolea
               h(Toggle, { checked: dryRun, label: t('run.dryRun'), onChange: setDryRun }),
               running || busy ? h(Btn, { variant: 'danger', onClick: () => void cancel() }, t('run.cancel')) : null,
             ),
+            pendingPr === null
+              ? null
+              : h(
+                  Alert,
+                  { kind: 'warn', title: t('run.pendingPr') },
+                  h('div', null, h('a', { href: pendingPr.url, target: '_blank', rel: 'noreferrer' }, pendingPr.url)),
+                  h('div', { className: 'dshgt-hint' }, t('run.pendingPr.hint')),
+                ),
             error === null ? null : h(Alert, { kind: 'err' }, error),
             h(
               'ul',

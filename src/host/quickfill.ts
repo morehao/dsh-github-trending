@@ -97,14 +97,15 @@ export async function listProviderCandidates(options: CandidateOptions): Promise
   const { llm, credentials } = options;
   const env = options.env ?? process.env;
   if (llm === undefined) return [];
+  // 只列「当前实际注册/生效」的路由：pi-ai 只把 profile 里声明的 provider 注册成路由，
+  // 其余只是能力目录（`listConfigurableProviders`，含所有可接入但没配置的供应商）。
+  // 用能力目录当「已配置」会列出一堆没登录、也没模型的路由，正是之前的错误。
   const live = llm.listProviders?.() ?? [];
   const configurable = llm.listConfigurableProviders?.() ?? [];
   const declared = new Map(configurable.map((entry) => [entry.provider, entry]));
 
-  // 只列「活着或可配置」的并集，按 listProviders 的顺序优先。
   const ids: string[] = [];
   for (const provider of live) if (!ids.includes(provider.id)) ids.push(provider.id);
-  for (const entry of configurable) if (!ids.includes(entry.provider)) ids.push(entry.provider);
 
   const candidates: LlmProviderCandidate[] = [];
   for (const id of ids) {
@@ -124,7 +125,8 @@ export async function listProviderCandidates(options: CandidateOptions): Promise
         break;
       }
     }
-    if (mode !== 'direct' && oauth) mode = 'proxy';
+    // 已经是「生效路由」的供应商一定能被宿主转发，没有可导出密钥时走回环代理。
+    if (mode !== 'direct') mode = 'proxy';
     const models = await listModelsWithTimeout(llm, id);
     candidates.push({
       id,
@@ -142,7 +144,64 @@ export async function listProviderCandidates(options: CandidateOptions): Promise
       coreProvider: coreProviderFor(id),
     });
   }
-  return candidates;
+  // 没有模型目录的路由无法在「选择其他模型」里选，直接隐藏；默认模型走单独的一键入口。
+  return candidates.filter((candidate) => candidate.models.length > 0);
+}
+
+/** 宿主当前的默认模型选择（`ctx.agentDefaultModel`）；没有该服务或读取失败时返回 undefined。 */
+export interface DefaultSelection {
+  provider: string;
+  model: string;
+  reasoningEffort?: string;
+}
+
+export function readDefaultSelection(get: (name: string) => unknown): DefaultSelection | undefined {
+  try {
+    const service = get('agentDefaultModel') as { currentSelection?: () => unknown } | undefined;
+    const selection = service?.currentSelection?.() as
+      | { provider?: unknown; model?: unknown; reasoningEffort?: unknown }
+      | undefined;
+    if (
+      selection !== undefined &&
+      typeof selection.provider === 'string' &&
+      selection.provider !== '' &&
+      typeof selection.model === 'string' &&
+      selection.model !== ''
+    ) {
+      return {
+        provider: selection.provider,
+        model: selection.model,
+        ...(typeof selection.reasoningEffort === 'string' ? { reasoningEffort: selection.reasoningEffort } : {}),
+      };
+    }
+  } catch {
+    // 服务异常按「没有默认值」处理，界面走手动选择。
+  }
+  return undefined;
+}
+
+/**
+ * 把「DSH 默认模型」落成模型设置：能匹配到已生效路由就复用其认证形态，
+ * 否则按代理模式（hostProvider = 该路由 id）交给宿主转发。
+ */
+export function applyDefaultSelection(
+  settings: Settings,
+  selection: DefaultSelection,
+  candidate?: LlmProviderCandidate,
+): Settings {
+  if (candidate !== undefined) return applyCandidate(settings, candidate, selection.model);
+  const coreProvider = coreProviderFor(selection.provider);
+  return {
+    ...settings,
+    model: {
+      ...settings.model,
+      provider: coreProvider,
+      mode: 'proxy',
+      hostProvider: selection.provider,
+      baseURL: '',
+      model: selection.model,
+    },
+  };
 }
 
 /**

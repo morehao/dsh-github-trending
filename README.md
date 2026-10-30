@@ -9,7 +9,7 @@
 
 ## 它做什么
 
-- 按你设定的时间（IANA 时区）每天跑一次；也可以在设置页或侧栏卡片点「立即运行」
+- 按你设定的时间（IANA 时区）每天跑一次；从侧栏入口或「设置 → GitHub 趋势」进入运行页，点「立即运行」
 - 一次运行 = **spawn 一次本地核心**：抓取 → 模型总结 → 渲染 → commit → push → PR → 合并，全部由核心完成
 - 插件只负责：收集配置、调度、传配置与密钥、展示结果与错误、记录最近 30 次运行
 - 内容按核心产出的成品**原样**落地（canonical），插件不改写、不重排、不二次调用模型
@@ -30,6 +30,8 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 2. **填模型**：点「沿用 DSH 配置」从宿主 provider 目录里挑 provider 与模型；可导出密钥的直接传给核心，OAuth 类凭据走本机回环代理。
 3. **试跑一次**：「试跑（不提交）」只抓取与渲染，不写文件、不提交。
 
+> 设置页分「内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度」六个 tab，**每个 tab 独立保存与校验**；某个 tab 有未保存改动时，左侧对应 tab 会显示黄点。
+
 ## 它需要什么 / 它访问哪里 / 它不上传什么
 
 **需要什么**
@@ -37,7 +39,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - DSH `0.2.1-rc.3` 以上（`engines.dsh`），Node.js `^22.20.0 || >=24.0.0`（`.nvmrc` 钉 22 线；CI 与发布跑 22）
 - 一个本地 **git 仓库**（提交目标）与可写的远端
 - 模型：provider + 模型 ID + 密钥（或用宿主已配置的 provider；OAuth 类凭据不需要密钥）
-- Git 与 GitHub 凭据（PAT / Device Flow / 本机 `gh`），仅 push 与开 PR 需要
+- Git 与 GitHub 凭据（本机 `gh` 登录态 / PAT），仅 push 与开 PR 需要
 - 核心二进制：首次运行从 `github.com/morehao/trendradar/releases` 下载（按 `os/arch`，sha256 校验后缓存）；之后离线复用。开发/排障时可用 `TRENDING_DIGEST_CORE`（或设置里的「核心路径」）指向一个可执行的 `trendradar`，此时完全不下载
 
 **访问哪里**
@@ -68,15 +70,17 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `model.temperature` / `maxTokens` | `0.2` / `2048` | 单次调用参数 |
 | `model.allowDegraded` | `true` | 模型失败时核心是否退回原文（会标记 degraded） |
 | `repo.path` | 空 | 本地仓库绝对路径，必填 |
-| `repo.baseBranch` / `remote` | `main` / `origin` | |
+| `repo.baseBranch` | 读取仓库默认分支 | 只读展示，不允许手改（以 `origin/HEAD` 为准） |
+| `repo.remote` | `origin` | 固定 `origin`，界面不展示 |
 | `repo.commitMode` | `branch` | `branch`（分支 + PR）/ `direct` |
-| `pr.enabled` / `autoMerge` / `titleTemplate` | `true` / `true` / `chore(trending): add {date} digest` | |
-| `github.authMode` | `device` | `device` / `pat` / `gh` |
-| `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名 |
+| `pr.enabled` / `autoMerge` | `true` / `true` | |
+| `pr.titleTemplate` | `chore(trending): add {date} digest` | 默认规则，界面不展示 |
+| `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
+| `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名（`pat` 用） |
 | `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | 实际支持范围由核心决定 |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
-| `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障；设了就完全不下载） |
+| `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障，收在「高级设置」；设了就完全不下载） |
 | `coreAutoDownload` | `true` | 缓存缺失时是否自动下载核心；关掉后只报 `CORE_NOT_DOWNLOADED`，由你在设置页点「下载核心」 |
 
 ## 两个工具
@@ -100,6 +104,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `IPC_INVALID` | 核心 stdout 不是约定的结果信封 | 升级插件与核心 |
 | `MODEL_KEY_MISSING` / `MODEL_UNAUTHORIZED` / `MODEL_NOT_FOUND` / `MODEL_RATE_LIMITED` | 模型侧 | 设置页「模型」区红字 + 重新选择 |
 | `GIT_NOT_INSTALLED` / `REPO_NOT_GIT` / `REPO_DIRTY` | 本机 git / 仓库状态 | 装 git ≥ 2.30、换仓库、先提交改动 |
+| `GIT_OPERATION_FAILED` | 核心执行 git 失败（含 push 被拒） | 核心对 `trending/` 自有分支用 `--force-with-lease`；若仍报 `non-fast-forward`，多半是他人抢先推送，先 fetch/rebase 或合并该分支再重试 |
 | `GITHUB_AUTH` / `PUSH_FAILED` / `PR_FAILED` / `NOT_MERGEABLE` | 推送与 PR | 本地 commit 已保留，修好后重试即可复用 |
 | `FETCH_FAILED` / `FETCH_RATE_LIMITED` | 抓取 | 检查网络/代理或稍后重试 |
 

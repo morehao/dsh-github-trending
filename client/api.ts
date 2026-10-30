@@ -128,7 +128,7 @@ export interface SettingsShape {
   };
   repo: { path: string; baseBranch: string; remote: string; commitMode: 'branch' | 'direct'; authorName: string; authorEmail: string };
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };
-  github: { authMode: 'device' | 'pat' | 'gh'; tokenRef: string };
+  github: { authMode: 'pat' | 'gh'; tokenRef: string };
   trending: { since: 'daily' | 'weekly'; languages: string[]; topN: number };
   output: { dir: string };
   schedule: { enabled: boolean; time: string; timezone: string };
@@ -146,7 +146,8 @@ export interface StatePayload {
     lastRunAt: string | null;
     lastDigest: { date: string; contentHash: string; coreVersion: string } | null;
     lastResult: RunRecord | null;
-    pendingPr: { url: string; createdAt: string } | null;
+    pendingPr: { url: string; createdAt: string; date?: string } | null;
+    pendingPrState?: 'open' | 'closed' | 'merged' | 'unknown';
     history: RunRecord[];
   };
   model: {
@@ -166,6 +167,18 @@ export interface ProviderCandidate {
   coreProvider: string;
 }
 
+/** 宿主默认模型（`ctx.agentDefaultModel.currentSelection()`）。 */
+export interface DefaultSelection {
+  provider: string;
+  model: string;
+  reasoningEffort?: string;
+}
+
+export interface QuickfillResponse {
+  providers: ProviderCandidate[];
+  defaultSelection: DefaultSelection | null;
+}
+
 export interface PreflightResult {
   ok: boolean;
   code?: string;
@@ -180,4 +193,18 @@ export interface Problem {
   field: string;
   code: string;
   message: string;
+}
+
+export interface RepoBranchResult {
+  branch?: string;
+  source: 'origin-head' | 'head' | 'none';
+  message?: string;
+}
+
+export interface GithubProbeResult {
+  ok: boolean;
+  login?: string;
+  source?: string;
+  code?: string;
+  message?: string;
 }

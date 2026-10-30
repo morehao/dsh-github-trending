@@ -85,7 +85,7 @@ export function createTrendingRunTool(runner: Runner) {
       'dryRun=true 只抓取与渲染、不写文件也不提交。同日同内容重跑会返回 skipped=true（零新增 commit）。',
     parameters: {
       dryRun: { type: 'boolean', description: '只试跑：不写文件、不提交、不开 PR' },
-      date: { type: 'string', description: '指定日期（YYYY-MM-DD）；省略则用今天' },
+      date: { type: 'string', description: '指定日期（YYYY-MM-DD）；省略则用调度时区的今天' },
     },
     output: {
       schema: RUN_OUTPUT_SCHEMA,
