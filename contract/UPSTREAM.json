@@ -1,9 +1,9 @@
 {
   "repo": "https://github.com/morehao/trendradar.git",
-  "ref": "d3bf720",
+  "ref": "v0.1.0",
   "commit": "d3bf720a869732e7a2ee04fa39d32dd50868fd61",
   "aggregate": "eb7f1ac9e117a709d15d87de89cf30e309c479e62dfa3d320cb8f154d3f1dc1e",
-  "syncedAt": "2026-10-30T13:20:43.663Z",
+  "syncedAt": "2026-10-30T14:06:16.766Z",
   "files": [
     {
       "path": "schema/api.v1.yaml",
