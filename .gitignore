@@ -1,6 +1,11 @@
 node_modules/
 lib/
 dist/
+client.js
+*.tgz
 *.log
 .DS_Store
 .env
+
+# agent 过程文档（不入库）
+.dsh/

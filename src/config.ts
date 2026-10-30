@@ -1,0 +1,375 @@
+/**
+ * 插件设置（`settings.json`）⇄ 核心配置（YAML）之间的唯一映射。
+ *
+ * 原则：**不翻译语义**。插件里的 `model.*` 与核心 `config.ModelConfig` 一一对应；
+ * 核心没有的字段（mergeMethod / deleteBranchAfterMerge / output.json / summary.enabled）
+ * 在插件里也不存在——宁可少一个开关，也不造一个「点了没反应」的配置。
+ * 版式只支持 canonical（核心自己落盘），template 映射留待二期，见执行计划 §7。
+ */
+import path from 'node:path';
+
+export type Provider = string;
+export type CommitMode = 'branch' | 'direct';
+export type AuthMode = 'device' | 'pat' | 'gh';
+export type Since = 'daily' | 'weekly';
+
+export interface ModelSettings {
+  provider: Provider;
+  /** `direct` = 密钥经配置通道直传核心；`proxy` = 宿主 provider 无可导出密钥，走回环代理。 */
+  mode: 'direct' | 'proxy';
+  /** `mode=proxy` 时转发给哪个宿主 provider 路由（核心不认这个值）。 */
+  hostProvider: string;
+  baseURL: string;
+  model: string;
+  /** `ctx.credentials` 的引用名；密钥本身不写进 settings.json。 */
+  apiKeyRef: string;
+  temperature: number;
+  maxTokens: number;
+  allowDegraded: boolean;
+}
+
+export interface RepoSettings {
+  path: string;
+  baseBranch: string;
+  remote: string;
+  commitMode: CommitMode;
+  authorName: string;
+  authorEmail: string;
+}
+
+export interface PRSettings {
+  enabled: boolean;
+  titleTemplate: string;
+  autoMerge: boolean;
+  labels: string[];
+}
+
+export interface GithubSettings {
+  authMode: AuthMode;
+  tokenRef: string;
+}
+
+export interface TrendingSettings {
+  since: Since;
+  languages: string[];
+  topN: number;
+}
+
+export interface OutputSettings {
+  dir: string;
+}
+
+export interface ScheduleSettings {
+  enabled: boolean;
+  /** `HH:MM:SS`（本地墙钟，按 timezone 解释）。 */
+  time: string;
+  timezone: string;
+}
+
+export interface Settings {
+  model: ModelSettings;
+  repo: RepoSettings;
+  pr: PRSettings;
+  github: GithubSettings;
+  trending: TrendingSettings;
+  output: OutputSettings;
+  schedule: ScheduleSettings;
+  /** 核心二进制覆盖；只在开发/排障时用，对应 TRENDING_DIGEST_CORE。 */
+  corePath: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  model: {
+    provider: 'deepseek',
+    mode: 'direct',
+    hostProvider: '',
+    baseURL: '',
+    model: '',
+    apiKeyRef: 'TRENDING_MODEL_KEY',
+    temperature: 0.2,
+    maxTokens: 2048,
+    allowDegraded: true,
+  },
+  repo: {
+    path: '',
+    baseBranch: 'main',
+    remote: 'origin',
+    commitMode: 'branch',
+    authorName: '',
+    authorEmail: '',
+  },
+  pr: {
+    enabled: true,
+    titleTemplate: 'chore(trending): add {date} digest',
+    autoMerge: true,
+    labels: [],
+  },
+  github: { authMode: 'device', tokenRef: 'GITHUB_TOKEN' },
+  trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
+  output: { dir: 'trending' },
+  schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai' },
+  corePath: '',
+};
+
+/** 核心支持的 provider 默认端点（空字符串 = 必须由用户填）。 */
+export const PROVIDER_BASE_URLS: Record<string, string> = {
+  deepseek: 'https://api.deepseek.com/v1',
+  'openai-compatible': '',
+  anthropic: '',
+};
+
+export const CORE_PROVIDERS = ['deepseek', 'openai-compatible'] as const;
+
+function str(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function num(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function strArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const items = value.filter((item): item is string => typeof item === 'string' && item.trim() !== '');
+  return items.length > 0 ? items.map((item) => item.trim()) : fallback;
+}
+
+/**
+ * 把任意来源的对象（磁盘上的旧版本、HTTP 请求体、CLI 导入）收敛成完整设置。
+ * 未知字段一律丢弃：settings.json 只有以下形状，避免旧版本字段悄悄生效。
+ */
+export function normalizeSettings(input: unknown): Settings {
+  const raw = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  const model = (raw.model ?? {}) as Record<string, unknown>;
+  const repo = (raw.repo ?? {}) as Record<string, unknown>;
+  const pr = (raw.pr ?? {}) as Record<string, unknown>;
+  const github = (raw.github ?? {}) as Record<string, unknown>;
+  const trending = (raw.trending ?? {}) as Record<string, unknown>;
+  const output = (raw.output ?? {}) as Record<string, unknown>;
+  const schedule = (raw.schedule ?? {}) as Record<string, unknown>;
+  const commitMode = str(repo.commitMode, DEFAULT_SETTINGS.repo.commitMode);
+  const authMode = str(github.authMode, DEFAULT_SETTINGS.github.authMode);
+  const since = str(trending.since, DEFAULT_SETTINGS.trending.since);
+  return {
+    model: {
+      provider: str(model.provider, DEFAULT_SETTINGS.model.provider),
+      mode: str(model.mode, DEFAULT_SETTINGS.model.mode) === 'proxy' ? 'proxy' : 'direct',
+      hostProvider: str(model.hostProvider, DEFAULT_SETTINGS.model.hostProvider).trim(),
+      baseURL: str(model.baseURL, DEFAULT_SETTINGS.model.baseURL).trim(),
+      model: str(model.model, DEFAULT_SETTINGS.model.model).trim(),
+      apiKeyRef: str(model.apiKeyRef, DEFAULT_SETTINGS.model.apiKeyRef).trim() || DEFAULT_SETTINGS.model.apiKeyRef,
+      temperature: num(model.temperature, DEFAULT_SETTINGS.model.temperature),
+      maxTokens: num(model.maxTokens, DEFAULT_SETTINGS.model.maxTokens),
+      allowDegraded: bool(model.allowDegraded, DEFAULT_SETTINGS.model.allowDegraded),
+    },
+    repo: {
+      path: str(repo.path, DEFAULT_SETTINGS.repo.path).trim(),
+      baseBranch: str(repo.baseBranch, DEFAULT_SETTINGS.repo.baseBranch).trim() || 'main',
+      remote: str(repo.remote, DEFAULT_SETTINGS.repo.remote).trim() || 'origin',
+      commitMode: commitMode === 'direct' ? 'direct' : 'branch',
+      authorName: str(repo.authorName, DEFAULT_SETTINGS.repo.authorName).trim(),
+      authorEmail: str(repo.authorEmail, DEFAULT_SETTINGS.repo.authorEmail).trim(),
+    },
+    pr: {
+      enabled: bool(pr.enabled, DEFAULT_SETTINGS.pr.enabled),
+      titleTemplate: str(pr.titleTemplate, DEFAULT_SETTINGS.pr.titleTemplate),
+      autoMerge: bool(pr.autoMerge, DEFAULT_SETTINGS.pr.autoMerge),
+      labels: strArray(pr.labels, DEFAULT_SETTINGS.pr.labels),
+    },
+    github: {
+      authMode: authMode === 'pat' || authMode === 'gh' ? authMode : 'device',
+      tokenRef: str(github.tokenRef, DEFAULT_SETTINGS.github.tokenRef).trim() || DEFAULT_SETTINGS.github.tokenRef,
+    },
+    trending: {
+      since: since === 'weekly' ? 'weekly' : 'daily',
+      languages: strArray(trending.languages, DEFAULT_SETTINGS.trending.languages),
+      topN: Math.round(num(trending.topN, DEFAULT_SETTINGS.trending.topN)),
+    },
+    output: {
+      dir: str(output.dir, DEFAULT_SETTINGS.output.dir).trim() || DEFAULT_SETTINGS.output.dir,
+    },
+    schedule: {
+      enabled: bool(schedule.enabled, DEFAULT_SETTINGS.schedule.enabled),
+      time: str(schedule.time, DEFAULT_SETTINGS.schedule.time),
+      timezone: str(schedule.timezone, DEFAULT_SETTINGS.schedule.timezone),
+    },
+    corePath: str(raw.corePath, DEFAULT_SETTINGS.corePath).trim(),
+  };
+}
+
+export interface Problem {
+  field: string;
+  code: string;
+  message: string;
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+
+export function isValidTimezone(timezone: string): boolean {
+  if (timezone.trim() === '') return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 设置校验。`providers` 来自核心 `version --json` 的 `supportedProviders`
+ * （拿不到时按 CORE_PROVIDERS 兜底）——provider 不在核心能力里必须当场拦下，
+ * 否则会变成运行时一个莫名其妙的模型错误。
+ */
+export function validateSettings(settings: Settings, providers: readonly string[] = CORE_PROVIDERS): Problem[] {
+  const problems: Problem[] = [];
+  const { model, repo, trending, output, schedule } = settings;
+
+  if (model.provider.trim() === '') {
+    problems.push({ field: 'model.provider', code: 'CONFIG_INVALID', message: '缺少 provider' });
+  } else if (!providers.includes(model.provider)) {
+    problems.push({
+      field: 'model.provider',
+      code: 'MODEL_PROVIDER_UNSUPPORTED',
+      message: `核心不支持 provider「${model.provider}」；可用：${providers.join(' / ')}`,
+    });
+  }
+  if (model.model.trim() === '') {
+    problems.push({ field: 'model.model', code: 'CONFIG_INVALID', message: '必须填模型 ID（插件不设隐式默认模型）' });
+  }
+  const baseURL = model.baseURL || PROVIDER_BASE_URLS[model.provider] || '';
+  if (baseURL === '') {
+    problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: '该 provider 需要显式 baseURL' });
+  } else if (!/^https?:\/\//.test(baseURL)) {
+    problems.push({ field: 'model.baseURL', code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+  }
+  if (model.temperature < 0 || model.temperature > 2) {
+    problems.push({ field: 'model.temperature', code: 'CONFIG_INVALID', message: 'temperature 必须在 0–2 之间' });
+  }
+  if (!Number.isInteger(model.maxTokens) || model.maxTokens <= 0) {
+    problems.push({ field: 'model.maxTokens', code: 'CONFIG_INVALID', message: 'maxTokens 必须是正整数' });
+  }
+
+  if (repo.path.trim() === '') {
+    problems.push({ field: 'repo.path', code: 'CONFIG_INVALID', message: '必须选择归档仓库目录' });
+  } else if (!path.isAbsolute(repo.path)) {
+    problems.push({ field: 'repo.path', code: 'CONFIG_INVALID', message: '仓库路径必须是绝对路径' });
+  }
+  if (!Number.isInteger(trending.topN) || trending.topN <= 0) {
+    problems.push({ field: 'trending.topN', code: 'CONFIG_INVALID', message: '每语言条数必须是正整数' });
+  }
+  if (output.dir.trim() === '' || path.isAbsolute(output.dir) || output.dir.split(/[\\/]/).includes('..')) {
+    problems.push({ field: 'output.dir', code: 'CONFIG_INVALID', message: '输出目录必须是仓库内的相对路径，且不含 ..' });
+  }
+  if (!TIME_RE.test(schedule.time)) {
+    problems.push({ field: 'schedule.time', code: 'CONFIG_INVALID', message: '时间格式必须是 HH:MM 或 HH:MM:SS' });
+  }
+  if (!isValidTimezone(schedule.timezone)) {
+    problems.push({ field: 'schedule.timezone', code: 'CONFIG_INVALID', message: '时区必须是 IANA 名称（如 Asia/Shanghai）' });
+  }
+  return problems;
+}
+
+export function effectiveBaseURL(model: ModelSettings): string {
+  return model.baseURL !== '' ? model.baseURL : PROVIDER_BASE_URLS[model.provider] ?? '';
+}
+
+/** 核心 `config.Config` 的对象形状（随后序列化成 YAML）。 */
+export interface CoreConfig {
+  model: {
+    provider: string;
+    name: string;
+    baseURL: string;
+    apiKey: string;
+    temperature: number;
+    maxTokens: number;
+    allowDegraded: boolean;
+  };
+  repo: {
+    path: string;
+    remote: string;
+    baseBranch: string;
+    authorName?: string;
+    authorEmail?: string;
+  };
+  pr: { enabled: boolean; titleTemplate: string; labels: string[]; autoMerge: boolean };
+  trending: { languages: string[]; since: string; perLanguage: number };
+  output: { dir: string; branchPrefix: string; retentionDays: number };
+}
+
+/**
+ * 生成核心配置。`apiKey` 单独传入：它只能来自宿主凭据或用户当次输入，
+ * 绝不来自 settings.json。
+ */
+export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride?: string): CoreConfig {
+  const config: CoreConfig = {
+    model: {
+      provider: settings.model.provider,
+      name: settings.model.model,
+      baseURL: baseURLOverride ?? effectiveBaseURL(settings.model),
+      apiKey,
+      temperature: settings.model.temperature,
+      maxTokens: settings.model.maxTokens,
+      allowDegraded: settings.model.allowDegraded,
+    },
+    repo: {
+      path: settings.repo.path,
+      remote: settings.repo.remote,
+      baseBranch: settings.repo.baseBranch,
+      ...(settings.repo.authorName !== '' ? { authorName: settings.repo.authorName } : {}),
+      ...(settings.repo.authorEmail !== '' ? { authorEmail: settings.repo.authorEmail } : {}),
+    },
+    pr: {
+      enabled: settings.repo.commitMode === 'branch' && settings.pr.enabled,
+      titleTemplate: settings.pr.titleTemplate,
+      labels: settings.pr.labels,
+      autoMerge: settings.pr.autoMerge,
+    },
+    trending: {
+      languages: settings.trending.languages,
+      since: settings.trending.since,
+      perLanguage: settings.trending.topN,
+    },
+    output: {
+      dir: settings.output.dir,
+      branchPrefix: 'trending/',
+      retentionDays: 90,
+    },
+  };
+  return config;
+}
+
+/**
+ * 极简 YAML 序列化：只覆盖「对象/数组/字符串/数字/布尔」。
+ * 字符串一律用 JSON 双引号形式——JSON 字符串是合法 YAML 标量，且能避免
+ * `: `、`#`、`- ` 之类的歧义；密钥因此不需要额外转义规则。
+ */
+export function toYaml(value: unknown, depth = 0): string {
+  const pad = '  '.repeat(depth);
+  if (Array.isArray(value)) return toYamlScalar(value);
+  if (typeof value === 'object' && value !== null) {
+    const lines: string[] = [];
+    for (const [key, item] of Object.entries(value)) {
+      if (item === undefined) continue;
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        lines.push(`${pad}${key}:\n${toYaml(item, depth + 1)}`);
+      } else {
+        lines.push(`${pad}${key}: ${toYamlScalar(item)}`);
+      }
+    }
+    return lines.join('\n');
+  }
+  return `${pad}${toYamlScalar(value)}`;
+}
+
+function toYamlScalar(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => toYamlScalar(item)).join(', ')}]`;
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '0';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return 'null';
+}

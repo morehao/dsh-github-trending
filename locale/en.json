@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub Trending Digest",
+    "description": "Fetch GitHub Trending on a daily schedule, summarize it in Chinese, commit into your own repo and auto-merge the PR. All content is produced by the local trendradar core."
+  }
+}

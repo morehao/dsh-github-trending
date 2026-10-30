@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub 趋势日报",
+    "description": "每天定时把 GitHub Trending 抓取、生成中文简介与总结，提交到你自己的仓库并自动合并 PR；内容全部由本地 trendradar 核心产出。"
+  }
+}
