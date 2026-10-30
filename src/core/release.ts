@@ -75,7 +75,9 @@ export function goTarget(
 
 export function assetName(platform: NodeJS.Platform = process.platform, arch: string = process.arch): string {
   const { goos, goarch } = goTarget(platform, arch);
-  return `trendradar_${goos}_${goarch}`;
+  // goreleaser 的 `formats: [binary]` 在 Windows 上保留 `.exe`（实测 v0.1.0 资产名）。
+  const suffix = platform === 'win32' ? '.exe' : '';
+  return `trendradar_${goos}_${goarch}${suffix}`;
 }
 
 function binaryName(platform: NodeJS.Platform = process.platform): string {

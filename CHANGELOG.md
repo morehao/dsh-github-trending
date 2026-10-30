@@ -13,6 +13,10 @@
 - **新增错误码**：`CORE_NOT_DOWNLOADED`（未下载，附下载地址）、`CORE_CHECKSUM_MISMATCH`（校验失败且已丢弃）；`CORE_UNAVAILABLE` 现在覆盖 404（版本未发布）、网络失败与平台不在矩阵。
 - **移除**：`optionalDependencies` 里的 6 个 `@morehao/trendradar-core-*`（从未发布，安装时只是 6 次无效探测）。
 
+### 修复（实测 v0.1.0 Release 后发现）
+
+- Windows 资产名带 `.exe`（goreleaser `formats: [binary]` 保留后缀）：`assetName()` 按平台补后缀，避免 Windows 上下载 404。
+
 ### 测试
 
 - 新增 `test/release.test.mjs`（命名映射 / 下载校验 / 缓存复用 / 篡改重下 / 校验失败无残留 / 404 提示 / force）与 `test/core-status.test.mjs`（未下载 / 已缓存 / 覆盖路径三种状态）。
