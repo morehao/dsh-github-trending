@@ -74,16 +74,16 @@ export async function resolveRef(
   return envValue === undefined ? {} : { value: envValue, source: 'env' };
 }
 
-/** GitHub token：按 authMode 取，`gh` 模式读本机 gh 的登录态。 */
+/** GitHub token：按 authMode 取，`gh` 模式读本机 gh 的登录态，`pat` 读凭据/环境变量。 */
 export async function resolveGithubToken(
   services: CredentialServices | undefined,
-  authMode: 'device' | 'pat' | 'gh',
+  authMode: 'pat' | 'gh',
   tokenRef: string,
-  deps: { env?: NodeJS.ProcessEnv; execGh?: () => Promise<string | undefined> } = {},
+  deps: { env?: NodeJS.ProcessEnv; execGh?: () => Promise<string | undefined>; freshGh?: boolean } = {},
 ): Promise<{ token?: string; source: string }> {
   const env = deps.env ?? process.env;
   if (authMode === 'gh') {
-    const execGh = deps.execGh ?? defaultGhToken;
+    const execGh = deps.execGh ?? (() => defaultGhToken(deps.freshGh === true));
     try {
       const token = await execGh();
       if (token !== undefined && token !== '') return { token, source: 'gh' };
@@ -96,10 +96,18 @@ export async function resolveGithubToken(
   return { source: 'none' };
 }
 
-async function defaultGhToken(): Promise<string | undefined> {
+/** 本机 gh token 短缓存：`/state` 每 5 s 轮询、每次运行都会解析，不能每次都 spawn 一次 gh。 */
+let ghTokenCache: { value: string | undefined; at: number } | undefined;
+const GH_TOKEN_TTL_MS = 30_000;
+
+async function defaultGhToken(fresh = false): Promise<string | undefined> {
+  if (!fresh && ghTokenCache !== undefined && Date.now() - ghTokenCache.at < GH_TOKEN_TTL_MS) {
+    return ghTokenCache.value;
+  }
   const { execCapture } = await import('../core/exec.js');
-  const result = await execCapture('gh', ['auth', 'token'], { timeoutMs: 5000 });
-  if (result.code !== 0) return undefined;
-  const token = result.stdout.trim();
-  return token === '' ? undefined : token;
+  const result = await execCapture('gh', ['auth', 'token'], { timeoutMs: 2000 });
+  const token = result.code === 0 ? result.stdout.trim() : '';
+  const value = token === '' ? undefined : token;
+  ghTokenCache = { value, at: Date.now() };
+  return value;
 }

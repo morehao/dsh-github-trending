@@ -1,7 +1,7 @@
 /**
  * 由 scripts/gen-ipc-types.mjs 从 contract/schema/ipc.v1.json 生成，**不要手改**。
- * 上游：https://github.com/morehao/trendradar.git@d3bf720a869732e7a2ee04fa39d32dd50868fd61
- * aggregate：eb7f1ac9e117a709d15d87de89cf30e309c479e62dfa3d320cb8f154d3f1dc1e
+ * 上游：https://github.com/morehao/trendradar.git@5cf0ad26c5748cf2bc9a1cc4ce66a09411d590f7
+ * aggregate：4717074d26d1a6d85c1885bd052d411f81c20b39467cb81c398f565bbe34dcde
  * 重新生成：npm run gen:ipc
  */
 export type ErrorCode = "INTERNAL" | "CONFIG_INVALID" | "PAYLOAD_TOO_LARGE" | "FETCH_FAILED" | "FETCH_RATE_LIMITED" | "PARSE_FAILED" | "MODEL_UNAUTHORIZED" | "MODEL_RATE_LIMITED" | "MODEL_TIMEOUT" | "MODEL_FAILED" | "MODEL_BAD_OUTPUT" | "GIT_NOT_INSTALLED" | "REPO_NOT_GIT" | "REPO_DIRTY" | "GIT_OPERATION_FAILED" | "PR_FAILED" | "NOT_MERGEABLE";
@@ -46,6 +46,7 @@ export interface RunResult {
 export interface StateRun {
   date: string
   contentHash: string
+  outputDir?: string
   runAt: string
   [key: string]: unknown
 }

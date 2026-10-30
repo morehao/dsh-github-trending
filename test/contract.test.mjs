@@ -23,8 +23,8 @@ test('contract 快照与 UPSTREAM.json 一致', () => {
 
 test('聚合哈希与上游 CONTRACT.sha256 声明一致', () => {
   const upstream = JSON.parse(readFileSync(path.join(root, 'contract/UPSTREAM.json'), 'utf8'));
-  assert.equal(upstream.aggregate, 'eb7f1ac9e117a709d15d87de89cf30e309c479e62dfa3d320cb8f154d3f1dc1e');
-  assert.equal(upstream.commit, 'd3bf720a869732e7a2ee04fa39d32dd50868fd61');
+  assert.equal(upstream.aggregate, '4717074d26d1a6d85c1885bd052d411f81c20b39467cb81c398f565bbe34dcde');
+  assert.equal(upstream.commit, '5cf0ad26c5748cf2bc9a1cc4ce66a09411d590f7');
   const manifest = readFileSync(path.join(root, 'contract/CONTRACT.sha256'), 'utf8');
   assert.match(manifest, new RegExp(`aggregate: ${upstream.aggregate}`));
 });

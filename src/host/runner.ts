@@ -19,6 +19,7 @@ import { inspectCore, type CoreStatus } from './core.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
 import { startProxy, type ProxyHandle } from './proxy.js';
+import { zonedDateString } from './schedule.js';
 
 export interface RunSummary {
   id: string;
@@ -70,6 +71,19 @@ function repoProblem(repoPath: string): { code: string; message: string } | unde
   return undefined;
 }
 
+/**
+ * 运行用哪一天：默认按调度时区算「今天」，而不是宿主机本地日期。
+ * 核心 `run` 的 `--date` 默认取机器本地日期；宿主机时区与调度时区不一致时
+ * 会生成错误日期/分支名，所以这里显式算好再透传。
+ */
+function runDate(settings: Settings, now: Date = new Date()): string {
+  try {
+    return zonedDateString(now, settings.schedule.timezone);
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}
+
 export class Runner {
   private active: { id: string; controller: AbortController; startedAt: string } | undefined;
   private readonly deps: RunnerDeps;
@@ -106,12 +120,14 @@ export class Runner {
     const repoIssue = repoProblem(settings.repo.path);
     if (repoIssue !== undefined) throw new IpcError(repoIssue.code, repoIssue.message);
 
+    const dryRun = options.dryRun === true;
+    const date = options.date !== undefined && options.date !== '' ? options.date : runDate(settings);
+
     const id = newRunId();
     const controller = new AbortController();
     const startedAt = new Date().toISOString();
     this.active = { id, controller, startedAt };
     const logFile = store.newLogPath(id);
-    const dryRun = options.dryRun === true;
     const startedMs = Date.now();
     let proxy: ProxyHandle | undefined;
 
@@ -132,6 +148,10 @@ export class Runner {
       if (modelKey.mode === 'direct' && (modelKey.apiKey === undefined || modelKey.apiKey === '')) {
         throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
       }
+      // The key actually handed to the core. In proxy mode this is replaced by
+      // the loopback proxy's one-time token (see below) so the core makes a real
+      // request instead of silently degrading to its offline fallback model.
+      let apiKey = modelKey.apiKey ?? '';
 
       let baseURLOverride: string | undefined;
       if (modelKey.mode === 'proxy') {
@@ -148,6 +168,12 @@ export class Runner {
           timeoutMs: 120_000,
         });
         baseURLOverride = proxy.url;
+        // A non-empty key is REQUIRED: the core (gllm) treats an empty key as
+        // "no credentials" and falls back to a fake model when allowDegraded is
+        // on, never hitting the proxy. Use the proxy token — the proxy accepts
+        // `Authorization: Bearer <token>` and forwards with the host's real
+        // credentials. Without this, summaries silently degrade to English.
+        apiKey = proxy.token;
         store.appendLog(
           logFile,
           `[proxy] 回环代理已启动：127.0.0.1:${proxy.port}（一次性 token，运行结束即关闭）`,
@@ -163,13 +189,13 @@ export class Runner {
         core,
         version: handshakeResult.version,
         settings,
-        apiKey: modelKey.apiKey ?? '',
+        apiKey,
         ...(github.token === undefined ? {} : { token: github.token }),
-        ...(options.date === undefined ? {} : { date: options.date }),
+        date,
         dryRun,
         ...(baseURLOverride === undefined ? {} : { baseURLOverride }),
         signal: controller.signal,
-        secrets: [modelKey.apiKey, github.token],
+        secrets: [apiKey, github.token],
         onStderr: (line) => store.appendLog(logFile, line),
       });
       const outcome: RunOutcome = result.outcome;
@@ -177,7 +203,7 @@ export class Runner {
         id,
         outcome,
         dryRun,
-        ...(options.date === undefined ? {} : { date: options.date }),
+        date,
         logFile,
         channel: result.channelKind,
         proxy: proxy !== undefined,
@@ -194,7 +220,7 @@ export class Runner {
           ? new IpcError('CORE_CANCELLED', '运行已取消：核心进程已终止，未提交任何状态')
           : error,
         dryRun,
-        ...(options.date === undefined ? {} : { date: options.date }),
+        date,
         logFile,
         durationMs: Date.now() - startedMs,
       });
@@ -225,14 +251,17 @@ export class Runner {
     const error =
       outcome.error === undefined
         ? undefined
-        : {
-            code: outcome.error.code,
-            message: redact(outcome.error.message),
-            hint: hintOf(outcome.error.code),
-            area: areaOf(outcome.error.code),
-            retriable: outcome.error.retriable,
-            inferred: outcome.error.details?.inferred === true,
-          };
+        : (() => {
+            const message = redact(outcome.error.message);
+            return {
+              code: outcome.error.code,
+              message,
+              hint: hintOf(outcome.error.code, message),
+              area: areaOf(outcome.error.code),
+              retriable: outcome.error.retriable,
+              inferred: outcome.error.details?.inferred === true,
+            };
+          })();
     return {
       id: input.id,
       ok: outcome.ok,
@@ -267,7 +296,7 @@ export class Runner {
       durationMs: input.durationMs ?? 0,
       coreVersion: '',
       files: 0,
-      error: { code, message, hint: hintOf(code), area: areaOf(code), retriable: false },
+      error: { code, message, hint: hintOf(code, message), area: areaOf(code), retriable: false },
       warnings: [],
       logFile: input.logFile,
     };
@@ -297,7 +326,9 @@ export class Runner {
     const state = store.readState();
     const next: Parameters<Store['recordRun']>[1] = {
       lastRunAt: record.at,
-      ...(summary.ok && summary.prUrl !== undefined ? { pendingPr: { url: summary.prUrl, createdAt: record.at } } : {}),
+      ...(summary.ok && summary.prUrl !== undefined
+        ? { pendingPr: { url: summary.prUrl, createdAt: record.at, ...(summary.date === undefined ? {} : { date: summary.date }) } }
+        : {}),
       ...(summary.ok && !summary.skipped && summary.contentHash !== undefined
         ? {
             lastDigest: {

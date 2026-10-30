@@ -34,10 +34,12 @@
 | 页面 | 内容 |
 |---|---|
 | 设置 | 内容来源（本地二进制）· 模型 · 归档仓库 · GitHub 认证 · 榜单范围 · 调度；底部一行排障入口（复制脱敏配置 / 查看核心日志） |
-| 运行 · 本次 | 立即运行 / 试跑 / 重置 · 9 步进度 · 最近结果 · 错误卡 · 侧栏卡片预览 |
+| 运行 · 本次 | 立即运行 / 试跑 / 重置 · 9 步进度 · 最近结果 · 错误卡 |
 | 运行 · 历史 | 最近 30 条记录：日期 / 结果（成功、降级、失败）/ 内容 / 耗时 / commit 与 PR |
 
-侧栏常驻一张摘要卡：状态、下次运行、上次结果、核心版本，外加「立即运行 / 试跑」。
+侧栏入口是导航行里的一个小图标 + 「GitHub 趋势」标签（与「插件」「自动化任务」同级），点它切到运行页；状态摘要与「立即运行 / 试跑」都在运行页里。不要把卡片塞进导航行（v0.1.4 曾因此占满侧栏）。
+
+图标是一枚趋势折线，**侧栏入口与设置对话框左栏的「GitHub 趋势」共用同一枚**：宿主的设置导航按 section id 从闭名单选 glyph，第三方分区一律回退成齿轮，而 `settings.section` 只投影 id / order / label、没法传 icon，所以客户端在对话框挂载后认领自己那一行（可见文本等于本分区 label）并换成同一枚折线（见 `client/panel-icon.ts` 的 `installSettingsNavIcon`）。`settings.section` 以后支持 icon 字段时删掉这段即可。
 
 ## 4. 两个工具
 
@@ -58,15 +60,15 @@
 | `model.apiKeyRef` | `TRENDING_MODEL_KEY` | 指向 `ctx.credentials` 的引用名 |
 | `model.temperature` / `model.maxTokens` | `0.2` / `2048` | 单次调用参数 |
 | `repo.path` | 空 | 本地仓库绝对路径，必填 |
-| `repo.baseBranch` | `main` | PR 目标分支，也是新分支起点 |
-| `repo.remote` | `origin` | |
+| `repo.baseBranch` | 读取仓库默认分支 | 只读展示，`origin/HEAD` 为准 |
+| `repo.remote` | `origin` | 固定 origin，界面不展示 |
 | `repo.commitMode` | `branch` | `branch`（分支 + PR）/ `direct` |
 | `pr.enabled` | `true` | `commitMode=direct` 时忽略 |
-| `pr.titleTemplate` | `chore(trending): add {date} digest` | |
+| `pr.titleTemplate` | `chore(trending): add {date} digest` | 默认规则，界面不展示 |
 | `pr.autoMerge` | `true` | |
 | `pr.mergeMethod` | `squash` | `squash` / `merge` / `rebase` |
 | `pr.deleteBranchAfterMerge` | `true` | |
-| `github.authMode` | `device` | `device` / `pat` / `gh` |
+| `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
 | `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名 |
 | `trending.since` | `daily` | `daily` / `weekly` |
 | `trending.languages` | `[all, typescript, python, go, rust]` | 支持范围由核心决定，插件只选择 |
@@ -117,7 +119,11 @@
 ## 10. 状态与幂等
 
 - 插件是唯一状态写者：`~/.dsh/...` 下保存 `{ lastRunAt, lastDigest{date,contentHash,coreVersion}, lastResult, pendingPr }` 与最近 30 条记录。
-- 幂等以核心返回的 `contentHash` 为准：同日同内容 → `skipped=true`，零新增 commit、不重复开 PR。
+- 幂等以核心返回的 `contentHash` 为准：同日同内容 → `skipped=true`，零新增 commit、不重复开 PR。核心 `v0.2.0` 起幂等键还包含 `output.dir`（只改目录会重渲染，而不是被误判为“同内容”）。
+- **运行日期按 `schedule.timezone` 计算**并显式以 `--date` 传给核心，避免宿主机时区与调度时区不一致时跑错日期/分支。
+- **同日重跑由核心处理**：`trending/` 自有分支用 `--force-with-lease` 推送，open PR 会被更新、closed PR 会重建分支并新开 PR、merged 直接 skip。插件不再拦截同日重跑。
+- **pendingPr 对账**：`/state` 只读核对 `pendingPr`（`open/merged/closed`），已合并/已关闭的陈旧记录自动清理，避免界面/工具长期显示已关闭的 PR。
+- **推送失败信息保真**：核心多行 stderr（含 `! [rejected] ... (non-fast-forward)`）会完整带回，不再只截首行；对应错误码给可执行提示（如被他人抢先推送时先 fetch/rebase）。
 - 核心自身无状态：上次状态随请求传入，新状态随结果返回。
 
 ## 11. 安全与隐私

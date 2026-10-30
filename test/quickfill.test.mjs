@@ -72,3 +72,41 @@ test('直接模式解析密钥：先凭据服务，再环境变量，都没有�
   const proxied = config.normalizeSettings({ model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'corp-sso', model: 'm' }, repo: { path: '/tmp/x' } });
   assert.equal((await quickfill.resolveModelKey(proxied, credentials, {})).mode, 'proxy');
 });
+
+test('只列生效路由，不列能力目录里未配置的供应商', async () => {
+  const llm = {
+    // 只有 magpie 是 profile 里声明、真正注册的路由
+    listProviders: () => [{ id: 'magpie', name: 'Magpie' }],
+    listConfigurableProviders: () => [
+      { provider: 'magpie', displayName: 'Magpie', defaultBaseURL: 'http://127.0.0.1:3425/v1', nativeAuth: { env: ['MAGPIE_GATEWAY_KEY'], oauth: false } },
+      { provider: 'openai', displayName: 'OpenAI', defaultBaseURL: 'https://api.openai.com/v1', nativeAuth: { env: ['OPENAI_API_KEY'], oauth: true } },
+      { provider: 'anthropic', displayName: 'Anthropic', defaultBaseURL: 'https://api.anthropic.com', nativeAuth: { env: [], oauth: true } },
+    ],
+    listModels: async (provider) =>
+      provider === 'magpie' ? [{ id: 'yygu/deepseek-flash', name: 'DeepSeek Flash' }, { id: 'workbuddy/deepseek-v4.1-flash' }] : [],
+  };
+  const credentials = { describe: async () => ({ configured: false, writable: true }) };
+  const candidates = await quickfill.listProviderCandidates({ llm, credentials, env: { MAGPIE_GATEWAY_KEY: 'mg' } });
+  assert.deepEqual(candidates.map((candidate) => candidate.id), ['magpie']);
+  assert.equal(candidates[0].credential.mode, 'direct');
+  assert.equal(candidates[0].credential.ref, 'MAGPIE_GATEWAY_KEY');
+  assert.deepEqual(candidates[0].models.map((model) => model.id), ['yygu/deepseek-flash', 'workbuddy/deepseek-v4.1-flash']);
+});
+
+test('readDefaultSelection 读取宿主默认；applyDefaultSelection 无候选时退回代理', () => {
+  const get = (name) =>
+    name === 'agentDefaultModel'
+      ? { currentSelection: () => ({ provider: 'magpie', model: 'yygu/deepseek-flash' }) }
+      : undefined;
+  const selection = quickfill.readDefaultSelection(get);
+  assert.deepEqual(selection, { provider: 'magpie', model: 'yygu/deepseek-flash' });
+  assert.equal(quickfill.readDefaultSelection(() => undefined), undefined);
+
+  const base = config.normalizeSettings({ model: { provider: 'deepseek', model: 'old' }, repo: { path: '/tmp/x' } });
+  const next = quickfill.applyDefaultSelection(base, selection);
+  assert.equal(next.model.provider, 'openai-compatible');
+  assert.equal(next.model.mode, 'proxy');
+  assert.equal(next.model.hostProvider, 'magpie');
+  assert.equal(next.model.model, 'yygu/deepseek-flash');
+  assert.equal(next.model.baseURL, '');
+});

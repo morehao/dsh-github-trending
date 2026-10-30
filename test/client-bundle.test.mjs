@@ -44,7 +44,7 @@ test('client bundle 可加载，id 与包名一致', () => {
   assert.match(source, /window\.__ModuleLoader__\.load/);
 });
 
-test('apply 注册设置分区、主面板、侧栏入口与清理 effect', () => {
+test('apply 只注册主面板与侧栏入口（不再进设置分区）与清理 effect', () => {
   const mod = loadBundle();
   const registered = [];
   const injected = [];
@@ -56,16 +56,16 @@ test('apply 注册设置分区、主面板、侧栏入口与清理 effect', () =
   mod.apply(ctx);
   assert.deepEqual(mod.inject, ['slots', 'locale']);
   const names = registered.map((entry) => entry.options.name);
-  assert.ok(names.includes('settings.section'));
   assert.ok(names.includes('main'));
   assert.ok(names.includes('sidebar.panellist'));
-  const section = registered.find((entry) => entry.options.name === 'settings.section');
-  assert.equal(section.options.id, 'dsh-github-trending');
-  assert.equal(section.options.label(), 'GitHub 趋势');
+  assert.equal(names.includes('settings.section'), false);
   const main = registered.find((entry) => entry.options.name === 'main');
   assert.equal(main.options.key, 'dsh-github-trending');
-  assert.ok(injected.includes('settings.section'));
+  const sidebar = registered.find((entry) => entry.options.name === 'sidebar.panellist');
+  assert.equal(sidebar.options.id, 'dsh-github-trending');
+  assert.equal(sidebar.options.label(), 'GitHub 趋势');
   assert.ok(injected.includes('main'));
   assert.ok(injected.includes('sidebar.panellist'));
+  assert.equal(injected.includes('settings.section'), false);
   assert.equal(effects[0].label, 'dsh-github-trending:client');
 });

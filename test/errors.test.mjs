@@ -31,6 +31,27 @@ test('redact 抹掉已知密钥与常见形态', () => {
   assert.equal(out.includes('sk-zzzzzzzzzzzz'), false);
 });
 
+test('显式错误码保留后续诊断行（non-fast-forward 不再被截断）', () => {
+  const stderr = [
+    'error: GIT_OPERATION_FAILED: To github.com:owner/repo.git',
+    ' ! [rejected]        trending/2026-10-31 -> trending/2026-10-31 (non-fast-forward)',
+    "error: failed to push some refs to 'github.com:owner/repo.git'",
+    'hint: Updates were rejected because the tip of your current branch is behind',
+  ].join('\n');
+  const classified = errors.classifyStderr(stderr);
+  assert.equal(classified.code, 'GIT_OPERATION_FAILED');
+  assert.equal(classified.inferred, false);
+  assert.match(classified.message, /non-fast-forward/);
+  assert.match(classified.message, /failed to push some refs/);
+});
+
+test('hintOf 针对 non-fast-forward 给出可执行建议', () => {
+  const hint = errors.hintOf('GIT_OPERATION_FAILED', ' ! [rejected] ... (non-fast-forward)');
+  assert.match(hint, /force-with-lease|删除该远端分支/);
+  // 非 non-fast-forward 的 git 失败仍走默认提示
+  assert.doesNotMatch(errors.hintOf('GIT_OPERATION_FAILED', 'some other git failure'), /force-with-lease/);
+});
+
 test('错误码到界面落点的映射稳定', () => {
   assert.equal(errors.areaOf('MODEL_UNAUTHORIZED'), 'model');
   assert.equal(errors.areaOf('CORE_UNAVAILABLE'), 'core');

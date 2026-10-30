@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config, core, release } from '../lib/internal.js';
 
-const RELEASE = { repo: 'morehao/trendradar', version: '0.1.0' };
+// 从 package.json 读取当前核心版本，避免每次升核心都要手改测试常量。
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const CORE_VERSION = pkg.dsh.core.version;
+const RELEASE = { repo: pkg.dsh.core.repo, version: CORE_VERSION };
 
 function env() {
   return { TRENDING_DIGEST_HOME: mkdtempSync(path.join(tmpdir(), 'dshgt-status-')), HOME: process.env.HOME, PATH: process.env.PATH };
@@ -20,8 +23,8 @@ test('未下载：state=unavailable、download=missing、release 指向确切资
   assert.equal(status.code, 'CORE_NOT_DOWNLOADED');
   assert.equal(status.download.state, 'missing');
   assert.equal(status.release.asset, release.assetName());
-  assert.equal(status.release.tag, 'v0.1.0');
-  assert.match(status.release.url, /releases\/download\/v0\.1\.0\//);
+  assert.equal(status.release.tag, `v${CORE_VERSION}`);
+  assert.match(status.release.url, new RegExp(`releases/download/v${CORE_VERSION.replace(/\./g, '\\.')}/`));
   assert.equal(status.override, undefined);
 });
 

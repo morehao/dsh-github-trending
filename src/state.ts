@@ -11,7 +11,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync, exi
 import path from 'node:path';
 
 import { normalizeSettings, type Settings } from './config.js';
-import { HISTORY_FILE, SETTINGS_FILE, STATE_FILE, dataDir, runsDir } from './paths.js';
+import { HISTORY_FILE, SETTINGS_FILE, STATE_FILE, dataDir } from './paths.js';
 
 export const HISTORY_LIMIT = 30;
 
@@ -46,6 +46,8 @@ export interface RunRecord {
 export interface PendingPr {
   url: string;
   createdAt: string;
+  /** 该 PR 对应的 digest 日期（YYYY-MM-DD）；用于判断「同日重跑」是否真的会撞分支。 */
+  date?: string;
 }
 
 export interface PluginState {
@@ -110,7 +112,8 @@ export class Store {
   }
 
   get logsPath(): string {
-    return runsDir(this.env);
+    // 必须跟随 `dir`：测试与自定义数据目录都只应写在自己的目录下，绝不回落到真实 ~/.dsh。
+    return path.join(this.dir, 'runs');
   }
 
   readSettings(): Settings {
