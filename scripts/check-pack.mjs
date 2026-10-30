@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { parsePackOutput } from './lib/pack-json.mjs';
+
 const run = promisify(execFile);
 
 const ALLOWED_EXACT = new Set([
@@ -43,25 +45,16 @@ const REQUIRED = [
 ];
 
 const cacheDir = await mkdtemp(join(tmpdir(), 'dsh-trending-pack-'));
-// 某些 npm 版本（如 npm 10）在 `npm pack` 时仍会执行 prepack，构建日志混进 stdout，
-// 直接 JSON.parse 会报 "Unexpected token"。只截取第一段 `[` 到最后一段 `]`，兼容 npm 10/11/12；
-// 本机（npm 11）与 CI（Node 22 自带 npm 10）都会走到这段兼容逻辑。
-function parsePackJson(stdout) {
-  const start = stdout.indexOf('[');
-  const end = stdout.lastIndexOf(']');
-  if (start === -1 || end < start) {
-    throw new Error(`npm pack 未输出 JSON 清单：\n${stdout}`);
-  }
-  return JSON.parse(stdout.slice(start, end + 1));
-}
-
+// 输出解析放在 scripts/lib/pack-json.mjs：输出形状随 npm 版本变（npm 10 是数组，
+// npm 12 是按包名索引的对象；release run 41083620340 实测），直接 JSON.parse 会炸。
 let files;
 try {
-  const { stdout } = await run('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-    cwd: new URL('..', import.meta.url),
-    env: { ...process.env, npm_config_cache: cacheDir },
-  });
-  files = parsePackJson(stdout)[0].files.map((f) => f.path);
+  const { stdout } = await run(
+    'npm',
+    ['pack', '--dry-run', '--json', '--ignore-scripts', '--loglevel=silent'],
+    { cwd: new URL('..', import.meta.url), env: { ...process.env, npm_config_cache: cacheDir } },
+  );
+  files = parsePackOutput(stdout);
 } finally {
   await rm(cacheDir, { recursive: true, force: true });
 }
