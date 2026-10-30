@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 - 2026-10-30
+
+> 0.1.3 从未发布到 npm（tag 推上去后 `release.yml` 在「发布前校验」失败）。0.1.4 是这批改动的第一次真实发布，内容 = 0.1.3 小节 + 本节的修复。
+
+### 修复
+
+- `check-pack` 不再假设 `npm pack --dry-run --json` 是单段干净 JSON：改为扫描顶层平衡 JSON 值、取第一个含 `files` 的数组，兼容 CI 上「两段 JSON 以逗号相连」的输出形态（release run 41083620340 实测）；新增 `test/pack-json.test.mjs` 6 条回归。
+
 ## 0.1.3 - 2026-10-30
 
 ### 工程（CI / 工具链）
