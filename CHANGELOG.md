@@ -1,5 +1,14 @@
 # Changelog
 
+## 未发布
+
+### 工程（CI / 工具链）
+
+- **门禁补齐为单一入口**：`npm run check` 现在串起语法 → host/client 类型 → lockfile → 契约 → 构建 → 命名/接线 → 打包白名单 → Release 正文冒烟 → 单测 → AC-P；`check.yml` 只调用它，本地与 CI 跑同一串脚本。
+- 新增四道检查：`check-syntax.mjs`（`scripts/`、`test/` 语法 + `locale/`、`contract/` JSON 可解析）、`check-naming.mjs`（包名 / patch `name` / `export const name` 三处一致，`dsh.core` 与 `UPSTREAM.json` 同源，`exports`/`files` 接线）、`check-pack.mjs`（tarball 白名单 + 必备文件）、`smoke-release-notes.mjs`（投影与 git-kit 读回管道逐字一致）。
+- release 链路不再重复校验：`prepublishOnly: npm run check` 改为 `prepack: npm run build`，发布时只构建、不再跑第二遍测试。
+- **actions 升 v7**：此前的两条 CI warning（`Node.js 20 is deprecated`、`package-manager-cache` 非法输入——v4 不认识该输入，等于「关依赖缓存」一直空转）来自 actions v4，升 v7 后消失；Node 保持 22（CI 与发布），`engines` 为 `^22.20.0 || >=24.0.0`，新增 `.nvmrc`，构建依赖精确锁版本。
+
 ## 0.1.2
 
 > 0.1.1 从未发布到 npm（tag 推上去后 CI 在 `npm ci` 就失败），0.1.2 是它的第一次真实发布。

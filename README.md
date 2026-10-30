@@ -1,8 +1,11 @@
 # dsh-github-trending
 
+[![check](https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml/badge.svg)](https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml)
+[![npm version](https://img.shields.io/npm/v/@morehao/dsh-github-trending.svg)](https://www.npmjs.com/package/@morehao/dsh-github-trending)
+
 > GitHub 趋势日报的 **DSH 入口**：每天定时 spawn 本地 [`trendradar`](https://github.com/morehao/trendradar) 核心，抓取 Trending、生成中文简介与当日总结，提交到你自己的仓库并自动合并 PR。
 
-**状态：0.1.1。** 插件侧（配置、调度、核心调用、状态与界面、两个工具）已完成。核心二进制走 **GitHub Release**：首次运行按 `os/arch` 下载、用 `checksums.txt` 校验 sha256、缓存到插件数据目录，之后离线复用。核心仓库打 tag 出资产之前，运行会明确报 `CORE_NOT_DOWNLOADED` / `CORE_UNAVAILABLE` 并给出下载地址——不会写空文件，也不会退回旧内容。
+**状态：0.1.2。** 插件侧（配置、调度、核心调用、状态与界面、两个工具）已完成。核心二进制走 **GitHub Release**：首次运行按 `os/arch` 下载、用 `checksums.txt` 校验 sha256、缓存到插件数据目录，之后离线复用。核心仓库打 tag 出资产之前，运行会明确报 `CORE_NOT_DOWNLOADED` / `CORE_UNAVAILABLE` 并给出下载地址——不会写空文件，也不会退回旧内容。
 
 ## 它做什么
 
@@ -31,7 +34,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 **需要什么**
 
-- DSH `0.2.1-rc.3` 以上（`engines.dsh`），Node.js ≥ 22.20
+- DSH `0.2.1-rc.3` 以上（`engines.dsh`），Node.js `^22.20.0 || >=24.0.0`（`.nvmrc` 钉 22 线；CI 与发布跑 22）
 - 一个本地 **git 仓库**（提交目标）与可写的远端
 - 模型：provider + 模型 ID + 密钥（或用宿主已配置的 provider；OAuth 类凭据不需要密钥）
 - Git 与 GitHub 凭据（PAT / Device Flow / 本机 `gh`），仅 push 与开 PR 需要

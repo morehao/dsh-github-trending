@@ -2,6 +2,7 @@ name: check
 
 # PR / main 上的机械校验：与发版链路同一套命令，把「只有发版才暴露」的错误前移。
 # 产物（lib/、client.js）不入库，由 `npm run check` 现场构建。
+# 门禁全部收敛在 `npm run check` 里（含 AC-P），YAML 只调用它——本地与 CI 跑的是同一串脚本。
 on:
   pull_request:
   push:
@@ -18,11 +19,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
+          # CI 主支持线（engines 另放行 >=24，但不在 CI 覆盖）；v7 下 22 的日志是干净的。
           node-version: '22'
           # 产物统一由 `npm run check` 构建一次，不走 setup-node 的依赖缓存。
           package-manager-cache: false
@@ -33,8 +35,7 @@ jobs:
       - name: 发布脚本语法
         run: bash -n scripts/ci-publish.sh
 
-      - name: 机械校验（typecheck + 契约 + 构建 + 测试）
+      # 语法 → 类型（src + client）→ lockfile 注册表 → 契约快照 → 构建
+      # → 命名/接线 → 打包白名单 → Release 正文投影冒烟 → 单测 → AC-P 机械检查。
+      - name: 机械校验（npm run check）
         run: npm run check
-
-      - name: AC-P 机械检查
-        run: node scripts/ac/run.mjs

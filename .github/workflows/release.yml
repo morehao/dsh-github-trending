@@ -40,7 +40,7 @@ jobs:
       contents: write   # 建 GitHub Release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # push: 用触发的 tag ref；dispatch: 用输入的 tag（同一个 ref 都能 checkout）
           ref: ${{ inputs.tag || github.ref }}
@@ -48,8 +48,9 @@ jobs:
 
       # 不设 registry-url：发布凭据一律走 OIDC，registry 由 scripts/ci-publish.sh 显式指定，
       # 免得 .npmrc 里的 NODE_AUTH_TOKEN 占位与 OIDC 抢凭据。
+      # setup-node v7 起不再注入 dummy NODE_AUTH_TOKEN，与 OIDC 更契合；v5 起跑在 node24 上。
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           package-manager-cache: false
@@ -75,6 +76,8 @@ jobs:
       - name: 发布前校验（与 PR 门禁同一套）
         run: npm run check
 
+      # 构建不再挂在 prepublishOnly 上（那样 `npm run check` 会连同测试跑第二遍）：
+      # 产物由 `prepack` 在 publish 时构建一次，校验只在这里跑一次。
       - name: Publish to npm via OIDC
         run: bash ./scripts/ci-publish.sh
         env:
