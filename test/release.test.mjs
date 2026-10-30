@@ -48,7 +48,8 @@ test('命名映射：Node platform/arch → Release 资产名与缓存路径', (
   assert.ok(mac.binaryPath.endsWith(path.join('core', 'v0.1.0', 'trendradar')));
 
   const win = release.describeRelease(RELEASE, { env, platform: 'win32', arch: 'x64' });
-  assert.equal(win.asset, 'trendradar_windows_amd64');
+  // goreleaser 在 Windows 上保留 .exe：资产名与缓存文件名都要带后缀
+  assert.equal(win.asset, 'trendradar_windows_amd64.exe');
   assert.ok(win.binaryPath.endsWith('trendradar.exe'));
 
   const linux = release.describeRelease(RELEASE, { env, platform: 'linux', arch: 'x64' });
