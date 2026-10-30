@@ -2,11 +2,13 @@
 /**
  * 测试用的假核心：只实现插件依赖的两个命令面。
  *
- *   version --json   → {version, commit, ipcSchema, digestSchema, supportedProviders}
- *   run --config X   → 读一遍配置（验证 FIFO/临时文件通道可用），再输出 runOutput
+ *   version --json   → {version, commit, ipcSchema, digestSchema, contractVersion, supportedProviders}
+ *   run --config X   → 读一遍配置（验证 FIFO/临时文件通道可用），再输出契约 v2 RunResult
  *
  * 行为全部由环境变量控制，测试里按用例设置：
  *   FAKE_IPC_SCHEMA      覆盖 ipcSchema（AC-P-07）
+ *   FAKE_DIGEST_SCHEMA   覆盖 digestSchema
+ *   FAKE_CONTRACT_VERSION 覆盖 contractVersion
  *   FAKE_EXIT            非 0 时以该码退出并在 stderr 打一条错误（AC-P-08）
  *   FAKE_STDERR          非 0 退出时打印的 stderr 文本
  *   FAKE_SLEEP           运行前睡多少毫秒（用于取消测试）
@@ -18,13 +20,19 @@ import { readFileSync } from 'node:fs';
 const argv = process.argv.slice(2);
 const command = argv[0];
 
+// 契约 RunResult 的 contentHash 必须匹配 ^sha256:[0-9a-f]{64}$；用两串固定值区分
+// 「配置里带密钥」与「不带密钥」两种路径。
+const HASH_WITH_KEY = `sha256:${'a'.repeat(64)}`;
+const HASH_NO_KEY = `sha256:${'b'.repeat(64)}`;
+
 if (command === 'version') {
   process.stdout.write(
     JSON.stringify({
-      version: '0.1.0-fake',
+      version: '0.3.0-fake',
       commit: 'test',
-      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '1'),
-      digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '1'),
+      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '2'),
+      digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '2'),
+      contractVersion: process.env.FAKE_CONTRACT_VERSION ?? '0.2.0',
       supportedProviders: ['openai-compatible', 'deepseek'],
     }) + '\n',
   );
@@ -56,13 +64,25 @@ if (command === 'run') {
   }
   const skipped = process.env.FAKE_SKIPPED === '1';
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
+  const now = new Date().toISOString();
   process.stdout.write(
     JSON.stringify({
-      files: skipped ? [] : [{ path: 'trending/2026-10-30/all.md', bytes: 12, sha256: 'sha256:abc' }],
+      ipcSchema: 2,
+      ok: true,
+      command: 'run',
+      startedAt: now,
+      finishedAt: now,
       skipped,
-      branch: skipped ? undefined : 'trending/2026-10-30',
-      prUrl: skipped ? undefined : 'https://example.invalid/pr/1',
-      digest: { contentHash: hasKey ? 'hash-with-key' : 'hash-no-key' },
+      files: skipped ? [] : [{ path: 'trending/2026-10-30/all.md', bytes: 12, sha256: `sha256:${'c'.repeat(64)}` }],
+      ...(skipped
+        ? {}
+        : {
+            branch: 'trending/2026-10-30',
+            commit: 'deadbeef',
+            prUrl: 'https://example.invalid/pr/1',
+            contentHash: hasKey ? HASH_WITH_KEY : HASH_NO_KEY,
+          }),
+      warnings: [],
     }) + '\n',
   );
   process.exit(0);

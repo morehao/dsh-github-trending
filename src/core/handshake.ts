@@ -5,7 +5,14 @@
  * 是静默的产出差异，比一次明确的失败昂贵得多。
  */
 import { execCapture } from './exec.js';
-import { IpcError, IPC_SCHEMA_VERSION, SUPPORTED_DIGEST_SCHEMA, parseVersionInfo, type VersionInfo } from '../ipc.js';
+import {
+  IpcError,
+  IPC_SCHEMA_VERSION,
+  SUPPORTED_CONTRACT_MAJOR,
+  SUPPORTED_DIGEST_SCHEMA,
+  parseVersionInfo,
+  type VersionInfo,
+} from '../ipc.js';
 import type { CoreLocation } from './locate.js';
 
 export interface HandshakeResult {
@@ -50,11 +57,17 @@ export async function handshake(
     const detail = error instanceof Error ? error.message : String(error);
     throw new IpcError('CORE_INCOMPATIBLE', `核心 version --json 输出无法识别：${detail}`);
   }
-  if (version.ipcSchema !== IPC_SCHEMA_VERSION || version.digestSchema !== SUPPORTED_DIGEST_SCHEMA) {
+  const contractMajor =
+    typeof version.contractVersion === 'string' ? Number(version.contractVersion.split('.')[0]) : undefined;
+  if (
+    version.ipcSchema !== IPC_SCHEMA_VERSION ||
+    version.digestSchema !== SUPPORTED_DIGEST_SCHEMA ||
+    contractMajor !== SUPPORTED_CONTRACT_MAJOR
+  ) {
     throw new IpcError(
       'CORE_INCOMPATIBLE',
-      `核心协议不匹配：核心 ipcSchema=${version.ipcSchema} digestSchema=${version.digestSchema}，` +
-        `插件支持 ipcSchema=${IPC_SCHEMA_VERSION} digestSchema=${SUPPORTED_DIGEST_SCHEMA}。` +
+      `核心协议不匹配：核心 ipcSchema=${version.ipcSchema} digestSchema=${version.digestSchema} contractVersion=${version.contractVersion ?? '(缺失)'}，` +
+        `插件支持 ipcSchema=${IPC_SCHEMA_VERSION} digestSchema=${SUPPORTED_DIGEST_SCHEMA} contractVersion 主版本=${SUPPORTED_CONTRACT_MAJOR}。` +
         '请把插件与核心升级到同一版本（插件带平台包，升级插件即可）。',
     );
   }

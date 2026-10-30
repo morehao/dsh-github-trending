@@ -59,6 +59,18 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
   };
 
   const store = new Store({ env, ...(config.stateDir === undefined ? {} : { dir: config.stateDir }) });
+  try {
+    const migration = store.migrateLegacyState();
+    if (migration.stateChanged || migration.historyMarked > 0) {
+      log('state.migrated', {
+        clearedDigest: migration.clearedDigest,
+        clearedPendingPr: migration.clearedPendingPr,
+        historyMarked: migration.historyMarked,
+      });
+    }
+  } catch (error) {
+    ctx.logger?.warn?.(`[dsh-github-trending] 旧状态迁移失败：${error instanceof Error ? error.message : String(error)}`);
+  }
   if (config.corePath !== undefined && config.corePath !== '') {
     const settings = store.readSettings();
     if (settings.corePath === '') store.writeSettings({ ...settings, corePath: config.corePath });

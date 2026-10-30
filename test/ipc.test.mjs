@@ -12,33 +12,41 @@ const expectCode = (fn, code) => {
   assert.fail(`expected ${code}`);
 };
 
-const timing = { coreVersion: '0.1.0', startedAt: '2026-10-30T00:00:00.000Z', finishedAt: '2026-10-30T00:00:05.000Z', durationMs: 5000, dryRun: false };
+const timing = { coreVersion: '0.3.0', startedAt: '2026-10-30T00:00:00.000Z', finishedAt: '2026-10-30T00:00:05.000Z', durationMs: 5000, dryRun: false };
+const HASH = `sha256:${'a'.repeat(64)}`;
 
-test('parseRunResult 接受核心 run --json 形状', () => {
-  const outcome = ipc.parseRunResult(
-    JSON.stringify({ files: [{ path: 'a.md', bytes: 3, sha256: 'sha256:x' }], skipped: false, branch: 'trending/2026-10-30', prUrl: 'https://example.invalid/1', digest: { contentHash: 'h1' } }),
-    timing,
-  );
+function runResult(patch = {}) {
+  return {
+    ipcSchema: 2,
+    ok: true,
+    command: 'run',
+    startedAt: '2026-10-30T00:00:00Z',
+    finishedAt: '2026-10-30T00:00:01Z',
+    skipped: false,
+    files: [{ path: 'a.md', bytes: 3, sha256: `sha256:${'c'.repeat(64)}` }],
+    branch: 'trending/2026-10-30',
+    commit: 'deadbeef',
+    prUrl: 'https://example.invalid/1',
+    contentHash: HASH,
+    warnings: [],
+    ...patch,
+  };
+}
+
+test('parseRunResult 接受契约 RunResult v2 并映射可选字段', () => {
+  const outcome = ipc.parseRunResult(JSON.stringify(runResult()), timing);
   assert.equal(outcome.ok, true);
   assert.equal(outcome.skipped, false);
-  assert.equal(outcome.contentHash, 'h1');
+  assert.equal(outcome.contentHash, HASH);
   assert.equal(outcome.branch, 'trending/2026-10-30');
+  assert.equal(outcome.commit, 'deadbeef');
+  assert.equal(outcome.prUrl, 'https://example.invalid/1');
   assert.equal(outcome.files.length, 1);
 });
 
-test('parseRunResult 接受契约 RunResult 形状', () => {
+test('parseRunResult 映射失败结果与 warnings', () => {
   const outcome = ipc.parseRunResult(
-    JSON.stringify({
-      ipcSchema: 1,
-      ok: false,
-      command: 'run',
-      startedAt: '2026-10-30T00:00:00Z',
-      finishedAt: '2026-10-30T00:00:01Z',
-      skipped: false,
-      files: [],
-      error: { code: 'REPO_DIRTY', message: 'dirty', retriable: false },
-      warnings: ['w'],
-    }),
+    JSON.stringify(runResult({ ok: false, error: { code: 'REPO_DIRTY', message: 'dirty', retriable: false }, warnings: ['w'] })),
     timing,
   );
   assert.equal(outcome.ok, false);
@@ -46,7 +54,16 @@ test('parseRunResult 接受契约 RunResult 形状', () => {
   assert.deepEqual(outcome.warnings, ['w']);
 });
 
-test('两种形状都不像时抛 IPC_INVALID，不猜字段', () => {
+test('非契约形状一律 IPC_INVALID：不猜字段、不接受旧 runOutput / 旧 ipcSchema', () => {
+  // 旧核心的 runOutput（只有 files/digest）
+  expectCode(
+    () => ipc.parseRunResult(JSON.stringify({ files: [{ path: 'a.md', bytes: 3, sha256: 'x' }], digest: { contentHash: 'h1' } }), timing),
+    'IPC_INVALID',
+  );
+  // ipcSchema=1 的旧信封
+  expectCode(() => ipc.parseRunResult(JSON.stringify(runResult({ ipcSchema: 1 })), timing), 'IPC_INVALID');
+  // contentHash 不符合 ^sha256:[0-9a-f]{64}$
+  expectCode(() => ipc.parseRunResult(JSON.stringify(runResult({ contentHash: 'hash-with-key' })), timing), 'IPC_INVALID');
   expectCode(() => ipc.parseRunResult(JSON.stringify({ hello: 1 }), timing), 'IPC_INVALID');
   expectCode(() => ipc.parseRunResult('', timing), 'IPC_INVALID');
   expectCode(() => ipc.parseRunResult('{"files":[]}\n{"files":[]}', timing), 'IPC_INVALID');
@@ -54,6 +71,7 @@ test('两种形状都不像时抛 IPC_INVALID，不猜字段', () => {
 
 test('parseVersionInfo 拒绝缺字段的输出', () => {
   expectCode(() => ipc.parseVersionInfo('{"version":"1"}'), 'IPC_INVALID');
-  const info = ipc.parseVersionInfo(JSON.stringify({ version: '0.1.0', ipcSchema: 1, digestSchema: 1 }));
-  assert.equal(info.version, '0.1.0');
+  const info = ipc.parseVersionInfo(JSON.stringify({ version: '0.3.0', ipcSchema: 2, digestSchema: 2, contractVersion: '0.2.0' }));
+  assert.equal(info.version, '0.3.0');
+  assert.equal(info.contractVersion, '0.2.0');
 });

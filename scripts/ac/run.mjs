@@ -84,7 +84,7 @@ function repoFiles(repo) {
 // ---- AC-P-01：包内容齐全（真实 profile 安装见人工步骤） ----
 {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
-  const required = ['lib/index.js', 'lib/index.d.ts', 'client.js', 'cordis.patch.yml', 'contract/schema/ipc.v1.json', 'contract/UPSTREAM.json', 'locale/zh.json', 'locale/en.json', 'icon.svg'];
+  const required = ['lib/index.js', 'lib/index.d.ts', 'client.js', 'cordis.patch.yml', 'locale/zh.json', 'locale/en.json', 'icon.svg'];
   const missing = required.filter((file) => !existsSync(path.join(root, file)));
   const exportsOk = pkg.exports['./client'] === './client.js' && pkg.exports['./cordis.patch.yml'] !== undefined;
   record('AC-P-01', '干净 profile 一条命令安装并出现设置页', missing.length === 0 && exportsOk && pkg.dsh.client.platform === 'web',
@@ -130,7 +130,7 @@ function repoFiles(repo) {
 
 // ---- AC-P-07：协议不匹配 ----
 {
-  const { runner, repo } = setup({ scenario: { FAKE_IPC_SCHEMA: '2' } });
+  const { runner, repo } = setup({ scenario: { FAKE_IPC_SCHEMA: '1' } });
   const summary = await runner.run({ trigger: 'tool' });
   record('AC-P-07', '版本不匹配 → CORE_INCOMPATIBLE 且不运行', summary.error?.code === 'CORE_INCOMPATIBLE' && repoFiles(repo).length === 0,
     `code=${summary.error?.code}\n${summary.error?.message ?? ''}`);

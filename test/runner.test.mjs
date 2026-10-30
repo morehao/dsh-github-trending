@@ -9,6 +9,9 @@ import { runner as runnerModule, state as stateModule, schedule as scheduleModul
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE_CORE = path.join(here, 'fixtures', 'fake-core.mjs');
 const ENV_KEY = 'DSHGT_TEST_MODEL_KEY';
+// 与 test/fixtures/fake-core.mjs 保持一致：契约 RunResult 的 contentHash 有固定形态。
+const HASH_WITH_KEY = `sha256:${'a'.repeat(64)}`;
+const HASH_NO_KEY = `sha256:${'b'.repeat(64)}`;
 
 function makeRepo() {
   const repo = mkdtempSync(path.join(tmpdir(), 'dshgt-repo-'));
@@ -65,10 +68,11 @@ test('成功运行：结果归一化 + 状态与历史落盘 + 密钥经通道�
   assert.equal(summary.prUrl, 'https://example.invalid/pr/1');
   assert.equal(summary.channel, 'fifo');
   // 假核心只有读到带 apiKey 的配置才会输出这个哈希：证明密钥确实经通道送达
-  assert.equal(summary.contentHash, 'hash-with-key');
+  assert.equal(summary.contentHash, HASH_WITH_KEY);
 
   const state = store.readState();
-  assert.equal(state.lastDigest.contentHash, 'hash-with-key');
+  assert.equal(state.lastDigest.contentHash, HASH_WITH_KEY);
+  assert.equal(state.lastDigest.contentHashAlgo, 'jcs-sha256-v1');
   assert.equal(state.pendingPr.url, 'https://example.invalid/pr/1');
   assert.equal(store.readHistory().length, 1);
   assert.equal(runner.running, undefined);
@@ -85,7 +89,7 @@ test('skipped 运行不覆盖 lastDigest，也不产生 pendingPr', async () => 
 });
 
 test('核心协议不匹配 → CORE_INCOMPATIBLE，且不产生任何文件级结果', async () => {
-  const { runner, store } = makeRunner({ scenario: { FAKE_IPC_SCHEMA: '2' } });
+  const { runner, store } = makeRunner({ scenario: { FAKE_IPC_SCHEMA: '1' } });
   const summary = await runner.run({ trigger: 'tool' });
   assert.equal(summary.ok, false);
   assert.equal(summary.error.code, 'CORE_INCOMPATIBLE');
@@ -173,9 +177,9 @@ test('代理模式：把代理一次性 token 作为 apiKey 传给核心（否�
   const summary = await runner.run({ trigger: 'tool' });
   assert.equal(summary.ok, true);
   assert.equal(summary.proxy, true);
-  // 假核心只有在配置里读到非空 apiKey 时才返回 hash-with-key；
+  // 假核心只有在配置里读到非空 apiKey 时才返回 HASH_WITH_KEY；
   // 代理模式下这个 apiKey 必须是一次的代理 token，而不是空串。
-  assert.equal(summary.contentHash, 'hash-with-key');
+  assert.equal(summary.contentHash, HASH_WITH_KEY);
 });
 
 test('默认按调度时区计算运行日期，并写进摘要与 lastDigest', async () => {

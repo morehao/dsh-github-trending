@@ -119,11 +119,11 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 ## 已知偏差（0.1.1）
 
-1. **核心尚无 stdin 信封**：核心当前的 `run` 只接受 `--config <path> --json`，插件据此传配置；`ok/startedAt/error.code` 形状的 `RunResult` 已兼容，核心补上后插件无需改。
+1. **结果信封**：核心 `run --config <path> --json` 输出契约 v2 `RunResult`（`ipcSchema=2`，可选 `branch/commit/prUrl/contentHash`）；插件只解析这一种形状，旧核心的 `runOutput` 不再兼容。
 2. **密钥传输**：POSIX 上配置经 **FIFO** 交给核心（文件系统里不出现明文）；Windows 无 FIFO，退化为 0600 临时文件并在读完后立即删除。
 3. **GitHub token** 经子进程环境变量传给核心（核心只认 `GITHUB_TOKEN`/`GH_TOKEN`）；不进 argv、不进配置、不进日志。
 4. **调度**用插件自己的 60 s tick（宿主 `schedule` 是会话本地提醒，覆盖不到无人值守场景）。
-5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（`sync-contract --ref vX.Y.Z` 会同步写入）。
+5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（用 `node scripts/set-core-version.mjs <x.y.z>` 写入）。
 6. **核心尚未打 tag**：`trendradar` 仓库还没有 Release，因此当前下载会得到「还没有发布」的明确提示；打上 `v0.1.0` 后无需改插件。
 
 ## 开发与发版
@@ -136,7 +136,7 @@ node scripts/ac/run.mjs # AC-P-01…13 的机械部分
 
 发版走 **tag 触发的 CI**（Trusted Publishing / OIDC，不需要 npm token）：合并 PR → 在 `main` 打注记 tag `vX.Y.Z` → CI 发 npm 并用注记正文建 Release。细节见 [docs/publishing.md](docs/publishing.md)。
 
-- 契约快照：`contract/`（schema + fixtures + `UPSTREAM.json`），由 `node scripts/sync-contract.mjs --ref <sha|vX.Y.Z>` 从核心仓库同步；ref 是 tag 时会同时把版本写进 `package.json` 的 `dsh.core.version`；`npm run check:contract` 校验哈希与生成类型
+- 契约来源：类型与校验器来自 npm 包 `@morehao/trendradar-contract`（`dependencies` 精确锁定；wire `ipcSchema=2` / `digestSchema=2`）；本地不再保留 `contract/` 快照与生成器；`npm run check:contract` 校验包版本与 wire 版本
 - 核心下载与缓存：`src/core/release.ts`（`ensureCore`），缓存位置 `$DSH_HOME/github-trending/core/v<version>/`
 - 宿主半 `src/`（tsup → `lib/`），客户端半 `client/`（esbuild → `client.js`，`window.__ModuleLoader__.load`）
 

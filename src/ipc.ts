@@ -1,24 +1,29 @@
 /**
  * 契约类型与运行时守卫。
  *
- * 类型来自 `contract/schema/ipc.v1.json` 的生成物（`ipc.gen.ts`）；本文件只放
- * 契约没有、但插件必须理解的东西：核心 `version --json` 的握手形状、核心 `run --json`
- * 的输出形状，以及把两种结果形状归一化成 `RunOutcome` 的解析器。
+ * 类型与运行时校验全部来自独立契约包 `@morehao/trendradar-contract`（wire:
+ * `ipcSchema=2` / `digestSchema=2`）。本文件只放插件理解契约所必需的两件事：
+ * 核心 `version --json` 的握手形状，以及把核心 `run --json` 的 `RunResult`
+ * 归一化成插件内部的 `RunOutcome`。
  *
- * 为什么同时接受两种形状：`contract/schema/ipc.v1.json` 定义的是 `RunResult`
- * （`ok`/`startedAt`/`error.code`），而当前核心的 `run --json` 输出的是一份更小的
- * `runOutput`（`files`/`skipped`/`branch`/`prUrl`/`digest.contentHash`），错误只走
- * stderr 文本。核心补上信封后，`parseRunResult` 无需改动即可接住。
+ * 只接受一种结果形状：契约包定义的 `RunResult`（`ipcSchema=2` / `command=run`），
+ * 用它自带的 ajv 校验器把关。旧核心那份只有 `files`/`digest` 的 `runOutput`
+ * 不再兼容——协议版本不匹配会在握手阶段被拦下，这里绝不「猜字段」。
  */
-import type { ErrorInfo, FileArtifact, RunResult } from './ipc.gen.js';
-import { IPC_SCHEMA_VERSION } from './ipc.gen.js';
+import { validators } from '@morehao/trendradar-contract';
+import type { ErrorInfo, FileArtifact, RunResult } from '@morehao/trendradar-contract';
 import type { AnyCode } from './errors.js';
 
-export type { ErrorCode, ErrorInfo, FileArtifact, RunRequest, RunResult, State, StateRun } from './ipc.gen.js';
-export { IPC_SCHEMA_VERSION };
+export type { ErrorCode, ErrorInfo, FileArtifact, RunRequest, RunResult, State, StateRun } from '@morehao/trendradar-contract';
+
+/** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v2.json` 的 wire 整数）。 */
+export const IPC_SCHEMA_VERSION = 2 as const;
 
 /** 插件能接受的 digest 契约版本（与核心 `version --json` 的 digestSchema 比对）。 */
-export const SUPPORTED_DIGEST_SCHEMA = 1;
+export const SUPPORTED_DIGEST_SCHEMA = 2 as const;
+
+/** 契约包 `contractVersion` 的主版本；0.x 期间同主版本即视为同一契约线。 */
+export const SUPPORTED_CONTRACT_MAJOR = 0;
 
 /** 核心 `version --json` 的输出。 */
 export interface VersionInfo {
@@ -26,6 +31,7 @@ export interface VersionInfo {
   commit?: string;
   ipcSchema: number;
   digestSchema: number;
+  contractVersion?: string;
   supportedProviders?: string[];
 }
 
@@ -103,18 +109,13 @@ export function parseVersionInfo(text: string): VersionInfo {
   return value;
 }
 
-function normalizeFiles(value: unknown): FileArtifact[] {
-  if (!Array.isArray(value)) return [];
-  const files: FileArtifact[] = [];
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.path !== 'string') continue;
-    files.push({
-      path: item.path,
-      bytes: typeof item.bytes === 'number' ? item.bytes : 0,
-      sha256: typeof item.sha256 === 'string' ? item.sha256 : '',
-    });
-  }
-  return files;
+/** 契约包 `RunResult` → 插件内部 `RunOutcome` 的唯一映射。 */
+export interface ParseRunOptions {
+  coreVersion: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  dryRun: boolean;
 }
 
 function normalizeError(value: unknown): RunError | undefined {
@@ -128,56 +129,31 @@ function normalizeError(value: unknown): RunError | undefined {
   };
 }
 
-export interface ParseRunOptions {
-  coreVersion: string;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  dryRun: boolean;
-}
-
 /**
  * 把核心 `run --json` 的 stdout 归一化成 `RunOutcome`。
  *
- * 两种形状的判别：有 `ipcSchema` 且 `command === 'run'` 就是契约 `RunResult`；
- * 否则按当前核心的 `runOutput` 处理。两者都不像就直接 `IPC_INVALID`，
- * 绝不「猜字段」——结果信封读错会把失败当成功写进状态。
+ * 唯一接受的形状是契约 `RunResult`（`ipcSchema=2` / `command=run`），并用契约包
+ * 自带的 ajv 校验器校验。任何其它形状直接 `IPC_INVALID`——结果信封读错会把失败
+ * 当成功写进状态。
  */
 export function parseRunResult(text: string, options: ParseRunOptions): RunOutcome {
   const value = parseJsonObject(text);
-  const contractShaped = value.ipcSchema === IPC_SCHEMA_VERSION && typeof value.ok === 'boolean' && value.command === 'run';
-
-  if (contractShaped) {
-    const result = value as unknown as RunResult;
-    return {
-      ok: result.ok,
-      skipped: result.skipped === true,
-      dryRun: options.dryRun,
-      files: normalizeFiles(result.files),
-      contentHash: typeof value.contentHash === 'string' ? value.contentHash : undefined,
-      branch: typeof value.branch === 'string' ? value.branch : undefined,
-      commit: typeof value.commit === 'string' ? value.commit : undefined,
-      prUrl: typeof value.prUrl === 'string' ? value.prUrl : undefined,
-      error: normalizeError(result.error),
-      warnings: Array.isArray(result.warnings) ? result.warnings.filter((item): item is string => typeof item === 'string') : [],
-      ...timing(options),
-      coreVersion: options.coreVersion,
-    };
+  if (value.command !== 'run' || value.ipcSchema !== IPC_SCHEMA_VERSION || !validators.runResult(value)) {
+    throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=2 / command=run）');
   }
-
-  if (!Array.isArray(value.files)) {
-    throw new IpcError('IPC_INVALID', '核心 run --json 既不是契约 RunResult，也不含 files 数组');
-  }
-  const digest = isRecord(value.digest) ? value.digest : undefined;
+  const result = value as unknown as RunResult;
+  const error = normalizeError(result.error);
   return {
-    ok: true,
-    skipped: value.skipped === true,
+    ok: result.ok,
+    skipped: result.skipped === true,
     dryRun: options.dryRun,
-    files: normalizeFiles(value.files),
-    contentHash: typeof digest?.contentHash === 'string' ? digest.contentHash : undefined,
-    branch: typeof value.branch === 'string' ? value.branch : undefined,
-    prUrl: typeof value.prUrl === 'string' ? value.prUrl : undefined,
-    warnings: [],
+    files: Array.isArray(result.files) ? result.files : [],
+    contentHash: typeof result.contentHash === 'string' ? result.contentHash : undefined,
+    branch: typeof result.branch === 'string' ? result.branch : undefined,
+    commit: typeof result.commit === 'string' ? result.commit : undefined,
+    prUrl: typeof result.prUrl === 'string' ? result.prUrl : undefined,
+    error,
+    warnings: Array.isArray(result.warnings) ? result.warnings.filter((item): item is string => typeof item === 'string') : [],
     ...timing(options),
     coreVersion: options.coreVersion,
   };

@@ -24,10 +24,10 @@ const ALLOWED_EXACT = new Set([
   'icon.svg',
   'client.js',
 ]);
-const ALLOWED_PREFIX = ['lib/', 'locale/', 'contract/'];
+const ALLOWED_PREFIX = ['lib/', 'locale/'];
 
 // 反向检查：少一个就是「能装但跑不起来」——lib 是宿主入口，client.js 是前端 bundle，
-// contract 是核心与 IPC 的契约快照，locale 缺了设置页整片空白。
+// locale 缺了设置页整片空白。
 const REQUIRED = [
   'package.json',
   'README.md',
@@ -39,9 +39,6 @@ const REQUIRED = [
   'client.js',
   'locale/en.json',
   'locale/zh.json',
-  'contract/UPSTREAM.json',
-  'contract/CONTRACT.sha256',
-  'contract/schema/ipc.v1.json',
 ];
 
 const cacheDir = await mkdtemp(join(tmpdir(), 'dsh-trending-pack-'));
