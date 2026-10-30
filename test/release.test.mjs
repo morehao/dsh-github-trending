@@ -130,7 +130,7 @@ test('force 忽略缓存重新下载', async () => {
 
 test('下载 → 可执行 → 真的能握手（整条 B 路径串起来）', async () => {
   const env = freshEnv();
-  const script = '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:"0.1.0",commit:"dl",ipcSchema:1,digestSchema:1,commit2:1})+"\\n")\n';
+  const script = '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:"0.3.0",commit:"dl",ipcSchema:2,digestSchema:2,contractVersion:"0.2.0",supportedProviders:["deepseek"]})+"\\n")\n';
   const fetchImpl = fakeFetch({ env, binary: Buffer.from(script) });
   const settings = config.normalizeSettings({
     model: { provider: 'deepseek', model: 'm' },
@@ -141,7 +141,7 @@ test('下载 → 可执行 → 真的能握手（整条 B 路径串起来）', a
   assert.equal(core.source, 'download');
   assert.equal(core.downloaded, true);
   const result = await handshake.handshake(core);
-  assert.equal(result.version.version, '0.1.0');
+  assert.equal(result.version.version, '0.3.0');
   assert.equal(result.version.commit, 'dl');
   // 第二次定位走缓存，且不再联网
   const offline = async () => {

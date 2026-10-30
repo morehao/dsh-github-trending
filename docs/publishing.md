@@ -112,16 +112,16 @@ gh release view v0.1.2 --json tagName,body --jq '{tag:.tagName,len:(.body|length
 
 | 步骤 | 脚本 | 拦什么 |
 |---|---|---|
-| 语法 | `check-syntax.mjs` | `scripts/`、`test/` 的 JS 语法；`locale/`、`contract/` 的 JSON 可解析性 |
+| 语法 | `check-syntax.mjs` | `scripts/`、`test/` 的 JS 语法；`locale/` 的 JSON 可解析性 |
 | 类型（host） | `tsc --noEmit` | `src/**` 类型错误 |
 | 类型（client） | `tsc -p tsconfig.client.json` | `client/**` 类型错误（bundle 冒烟兜不住的字段拼错） |
 | lockfile | `check-lockfile.mjs` | `resolved` 指向 npmmirror → CI `EALLOWREMOTE`（只在发版暴露） |
-| 契约 | `sync-contract.mjs --check` + `gen-ipc-types.mjs --check` | 快照哈希漂移、IPC 类型与 schema 不同步 |
+| 契约 | `check:contract`（跑 `test/contract.test.mjs`） | 依赖锁定的 `@morehao/trendradar-contract` 版本、wire（ipc/digest=2）、fixtures 与已安装包不一致 |
 | 构建 | `npm run build` | tsup / esbuild 失败 |
-| 命名/接线 | `check-naming.mjs` | 包名 / patch `name` / `export const name` 三处漂移；`dsh.core` 与契约不同源；`exports`/`files` 漏项 |
-| 打包白名单 | `check-pack.mjs` | tarball 混入 `.dsh/`、`src/`、`docs/`；缺 `lib/index.js`、`client.js`、契约或 locale |
+| 命名/接线 | `check-naming.mjs` | 包名 / patch `name` / `export const name` 三处漂移；核心版本非法、契约依赖未锁定；`exports`/`files` 漏项 |
+| 打包白名单 | `check-pack.mjs` | tarball 混入 `.dsh/`、`src/`、`docs/`；缺 `lib/index.js`、`client.js` 或 locale |
 | Release 正文 | `smoke-release-notes.mjs` | 投影与 git-kit 读回管道不一致；轻量 tag / 空正文被当成功 |
-| 单测 | `npm test` | 72 个离线用例 |
+| 单测 | `npm test` | 105 个离线用例 |
 | AC-P | `scripts/ac/run.mjs` | 11 条验收的机械部分（安装、密钥、幂等、取消、canonical…） |
 
 ## 约束
@@ -129,5 +129,5 @@ gh release view v0.1.2 --json tagName,body --jq '{tag:.tagName,len:(.body|length
 - **不本地 `npm publish` 正式版**：本地没有 OIDC，只会落到 2FA 手工链路，且没有 provenance。
 - 本地 `~/.npmrc` 若指向 npmmirror，所有查询命令都要显式 `--registry https://registry.npmjs.org`。
 - 发布失败只能补发（tag 已推不可改）：先看 https://status.npmjs.org，再核对 Trusted Publisher，最后 `gh run rerun <run-id>`。
-- **核心版本要一起看**：本包的 `dsh.core.version` 决定首次运行下载哪个 `trendradar` Release；它与 `contract/UPSTREAM.json` 的 `ref` 由 `scripts/sync-contract.mjs --ref vX.Y.Z` 同源写入，不要手改一处。
+- **核心版本要一起看**：本包的 `dsh.core.version` 决定首次运行下载哪个 `trendradar` Release，由 `scripts/set-core-version.mjs <x.y.z>` 写入，不要手改；契约 wire 版本（ipc/digest=2）由 `dependencies` 的 `@morehao/trendradar-contract` 决定。
 - **本机与 CI 同一条 Node 线**：`.nvmrc` 钉 `22.23.3`，提交前 `fnm use && npm run check`。本机设了 `NODE_USE_ENV_PROXY=1` 时会看到 `UNDICI-EHPA` 噪音（22 的 undici 实验性特性），用 `env -u NODE_USE_ENV_PROXY npm run check` 可跑干净；CI 不设该变量。

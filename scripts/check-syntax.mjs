@@ -35,8 +35,8 @@ for (const file of jsFiles) {
   }
 }
 
-// 2) JSON 可解析：locale 文案与 contract 快照都会被运行时直接读，坏一个字节就报在用户面前。
-const jsonFiles = [...walk('locale'), ...walk('contract')].filter((file) => file.endsWith('.json'));
+// 2) JSON 可解析：locale 文案会被运行时直接读，坏一个字节就报在用户面前。
+const jsonFiles = [...walk('locale')].filter((file) => file.endsWith('.json'));
 for (const file of jsonFiles) {
   try {
     JSON.parse(readFileSync(path.join(root, file), 'utf8'));

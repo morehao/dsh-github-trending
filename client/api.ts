@@ -74,6 +74,7 @@ export interface RunRecord {
   model: { provider: string; model: string };
   languages: string[];
   warnings: string[];
+  legacy?: boolean;
 }
 
 export interface CoreReleaseStatus {
@@ -144,7 +145,7 @@ export interface StatePayload {
   status: {
     running: { id: string; startedAt: string } | null;
     lastRunAt: string | null;
-    lastDigest: { date: string; contentHash: string; coreVersion: string } | null;
+    lastDigest: { date: string; contentHash: string; contentHashAlgo?: string; coreVersion: string } | null;
     lastResult: RunRecord | null;
     pendingPr: { url: string; createdAt: string; date?: string } | null;
     pendingPrState?: 'open' | 'closed' | 'merged' | 'unknown';

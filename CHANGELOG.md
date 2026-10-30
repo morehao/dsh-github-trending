@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 - 2026-10-31
+
+### 变更（含破坏性）
+
+- **契约改用独立 npm 包**：类型与运行时校验全部来自 `@morehao/trendradar-contract@0.2.0`（`dependencies` 精确锁定），删除仓库内 `contract/` 快照、`scripts/sync-contract.mjs`、`scripts/gen-ipc-types.mjs` 与 `src/ipc.gen.ts`。契约升级从此只改依赖版本。
+- **wire 升级到 v2**：`ipcSchema=2` / `digestSchema=2`，握手额外校验 `contractVersion` 主版本（0）。与核心 0.3.0 配套；混搭旧核心会被 `CORE_INCOMPATIBLE` 明确拦下。
+- **单一 RunResult 解析**：`parseRunResult` 只接受契约 v2 `RunResult`（用契约包自带 ajv 校验器），删除对旧核心 `runOutput` 的兼容分支；`branch` / `commit` / `prUrl` / `contentHash` 为可选字段。
+- **旧状态迁移**：读取时若 `lastDigest` 缺 `contentHashAlgo` 或 `coreVersion` 早于 0.3.0，判定为 legacy，清空 `lastDigest` 与绑定的 `pendingPr`；旧历史记录打 `legacy` 标。插件启动时（`migrateLegacyState`）把清洗结果落盘。
+- 新增 `scripts/set-core-version.mjs` 写 `dsh.core.version`（本版为 `0.3.0`）；`check:naming` 改为校验契约包依赖与 wire 版本。
+
 ## 0.2.0 - 2026-10-31
 
 ### 变更

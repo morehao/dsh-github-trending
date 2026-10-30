@@ -7,9 +7,9 @@
 
 | 改动 | 必跑 | 说明 |
 |---|---|---|
-| `src/**` | `npm run check` | 72 个离线用例覆盖 config / runner / schedule / state / routes / ipc / contract / release / quickfill / client bundle |
+| `src/**` | `npm run check` | 105 个离线用例覆盖 config / runner / schedule / state / routes / ipc / contract / release / quickfill / client bundle |
 | `client/**` | `npm run check` | `check:types`（`tsc -p tsconfig.client.json`）抓类型错误，`test/client-bundle.test.mjs` 用 React 存根跑 bundle 加载 |
-| `src/ipc.gen.ts`、`contract/**` | `npm run check:contract` | 快照哈希与 IPC 类型都由 `sync-contract` / `gen-ipc-types` 生成，不要手改 |
+| 契约依赖 / wire 版本 | `npm run check:contract` | 类型与校验器来自 npm 包 `@morehao/trendradar-contract`；升级只改依赖版本，不要手写/生成契约类型 |
 | `package.json` / `exports` / `files` / 命名 | `node scripts/check-naming.mjs` + `node scripts/check-pack.mjs` | CI 也跑；`exports` 缺 `./client`、`files` 漏 `lib` 会导致「能装、页面白屏」 |
 | `scripts/*.mjs` | `node --check <file>` + 对应冒烟 | `release-notes` 有自己的冒烟（`check:release-notes`） |
 | `scripts/ac/**`、`test/**` | `node scripts/ac/run.mjs` | 机械部分必须全绿，人工步骤按输出提示走 |
@@ -22,7 +22,7 @@ PR 与 push `main` 触发，**Node 22**，只按 lockfile 装依赖：
 
 1. `npm ci --ignore-scripts`
 2. `bash -n scripts/ci-publish.sh`
-3. `npm run check` → 语法 → host 类型 → client 类型 → lockfile 注册表 → 契约快照 → 构建 → 命名/接线 → 打包白名单 → Release 正文冒烟 → 单测 → AC-P
+3. `npm run check` → 语法 → host 类型 → client 类型 → lockfile 注册表 → 契约包版本/wire → 构建 → 命名/接线 → 打包白名单 → Release 正文冒烟 → 单测 → AC-P
 
 注意：
 
@@ -34,14 +34,14 @@ PR 与 push `main` 触发，**Node 22**，只按 lockfile 装依赖：
 
 ## 3. 打包与命名
 
-- 白名单（[check-pack.mjs](../../scripts/check-pack.mjs)）允许：`package.json`、`README.md`、`CHANGELOG.md`、`LICENSE`、`cordis.patch.yml`、`icon.svg`、`client.js`、`lib/`、`locale/`、`contract/`；必备文件少一个就红。
+- 白名单（[check-pack.mjs](../../scripts/check-pack.mjs)）允许：`package.json`、`README.md`、`CHANGELOG.md`、`LICENSE`、`cordis.patch.yml`、`icon.svg`、`client.js`、`lib/`、`locale/`；必备文件少一个就红。契约包是 `dependencies`，由 npm 安装，不进 tarball。
 - 不允许：`.dsh/`、`docs/`、`scripts/`、`test/`、`src/`、`client/`、`node_modules`、`*.tgz`。
 - 命名与接线（[check-naming.mjs](../../scripts/check-naming.mjs)）：
   - `package.json.name` == `cordis.patch.yml` 的 `insert[0].name`
   - `lib/index.ts` 的 `export const name` == `insert[0].id`
-  - `dsh.core.{repo,version}` 与 `contract/UPSTREAM.json` 同源
+  - `dsh.core.{repo,version}` 合法，`version` 由 `scripts/set-core-version.mjs` 写入
   - `exports["."]` 与 `main` / `types` 一致，`./client` → `./client.js`
-  - `files` 含 `lib` / `client.js` / `contract` / `locale`
+  - `files` 含 `lib` / `client.js` / `locale`
   - `publishConfig.access === "public"`
 
 ## 4. 发版清单

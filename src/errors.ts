@@ -1,5 +1,5 @@
 /**
- * 错误码：核心码（`ipc.v1` 的 17 个）+ 插件自己的码。
+ * 错误码：核心码（契约包 `ipc.v2` / `errors.v2` 的 17 个）+ 插件自己的码。
  *
  * 核心当前只在 stderr 打 `error: <CODE>: <message>`，模型/抓取的失败甚至没有码，
  * 所以这里承担两件事：
@@ -7,7 +7,7 @@
  *   2. 没有码时按稳定的文本特征归类，归类结果会标注 `inferred: true`，
  *      让界面能区分「核心说的」与「插件猜的」。
  */
-import type { ErrorCode } from './ipc.gen.js';
+import type { ErrorCode } from '@morehao/trendradar-contract';
 
 /** 插件在核心之外新增的码。前缀统一避免与核心码冲突。 */
 export const PLUGIN_CODES = [

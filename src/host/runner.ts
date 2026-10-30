@@ -14,7 +14,7 @@ import { IpcError, type RunOutcome } from '../ipc.js';
 import { handshake, type HandshakeResult } from '../core/handshake.js';
 import { locateCore } from '../core/locate.js';
 import { runCore } from '../core/run.js';
-import { newRunId, type RunRecord, type Store } from '../state.js';
+import { CONTENT_HASH_ALGO_V2, newRunId, type RunRecord, type Store } from '../state.js';
 import { inspectCore, type CoreStatus } from './core.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
@@ -334,6 +334,7 @@ export class Runner {
             lastDigest: {
               date: summary.date ?? new Date().toISOString().slice(0, 10),
               contentHash: summary.contentHash,
+              contentHashAlgo: CONTENT_HASH_ALGO_V2,
               coreVersion: summary.coreVersion,
             },
             ...(state.pendingPr !== undefined && summary.prUrl === undefined ? { pendingPr: state.pendingPr } : {}),

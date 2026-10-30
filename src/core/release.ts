@@ -10,8 +10,8 @@
  *   3. 流式下载到同目录临时文件，边写边算 sha256，匹配后 chmod 0755 + 原子 rename；
  *   4. 失败一律带 URL、版本与缓存目录，且**不留下半个文件**。
  *
- * 版本来源是 `package.json` 的 `dsh.core`（由 `sync-contract.mjs --ref vX.Y.Z` 自动写入），
- * 所以「插件用的核心版本」与「契约快照的来源 tag」是同一个值。
+ * 版本来源是 `package.json` 的 `dsh.core`（由 `scripts/set-core-version.mjs` 写入），
+ * 是「首次运行下载哪个核心 Release」的唯一来源。
  */
 import { createHash } from 'node:crypto';
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
@@ -49,7 +49,7 @@ function requireJson(): { dsh?: { core?: { repo?: unknown; version?: unknown } }
   return require('../package.json') as { dsh?: { core?: { repo?: unknown; version?: unknown } } };
 }
 
-/** 从本包的 package.json 读核心版本（`sync-contract --ref vX` 会同时更新它）。 */
+/** 从本包的 package.json 读核心版本（`scripts/set-core-version.mjs` 会更新它）。 */
 export function readCoreRelease(pkg?: { dsh?: { core?: { repo?: unknown; version?: unknown } } }): CoreRelease {
   const source = pkg ?? requireJson();
   const repo = source.dsh?.core?.repo;

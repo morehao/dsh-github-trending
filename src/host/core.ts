@@ -8,7 +8,7 @@ import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Settings } from '../config.js';
-import { IpcError } from '../ipc.js';
+import { IpcError, IPC_SCHEMA_VERSION, SUPPORTED_DIGEST_SCHEMA } from '../ipc.js';
 import { execCapture } from '../core/exec.js';
 import { inspectRelease, locateCore, type CoreLocation } from '../core/locate.js';
 import type { ReleaseDescriptor } from '../core/release.js';
@@ -174,7 +174,7 @@ export async function detectCoexistence(ownPath: string | undefined, options: { 
       };
     } else {
       const info = JSON.parse(result.stdout) as { version?: string; ipcSchema?: number; digestSchema?: number };
-      const compatible = info.ipcSchema === 1 && info.digestSchema === 1;
+      const compatible = info.ipcSchema === IPC_SCHEMA_VERSION && info.digestSchema === SUPPORTED_DIGEST_SCHEMA;
       status = {
         found: true,
         path: found,

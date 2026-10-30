@@ -51,7 +51,7 @@ test('/state 返回设置、核心状态、调度与历史', async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.settings.repo.path, repo);
   assert.equal(payload.core.state, 'ready');
-  assert.equal(payload.core.version, '0.1.0-fake');
+  assert.equal(payload.core.version, '0.3.0-fake');
   assert.equal(payload.schedule.enabled, true);
   assert.equal(payload.status.history.length, 0);
   assert.equal(payload.github.configured, false);

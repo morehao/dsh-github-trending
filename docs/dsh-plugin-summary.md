@@ -84,12 +84,12 @@
 ## 6. 与核心的交互
 
 - **一次性进程**：`spawn <core> run --json -`，stdin 写一个请求信封，stdout 读一个结果信封，跑完即退。无守护进程、无端口。
-- **握手**：运行前执行 `version --json`，比对 `ipcSchema` / `digestSchema`；不匹配报 `CORE_INCOMPATIBLE`，不做尽力兼容。
+- **握手**：运行前执行 `version --json`，比对 `ipcSchema` / `digestSchema`（均为 2）与 `contractVersion` 主版本（0）；不匹配报 `CORE_INCOMPATIBLE`，不做尽力兼容。
 - **定位顺序**：`TRENDING_DIGEST_CORE`（或设置里的核心路径，仅开发/排障）→ 本地缓存 → 从 GitHub Release 下载（`checksums.txt` 校验 sha256 后缓存）；都不行报 `CORE_NOT_DOWNLOADED`/`CORE_UNAVAILABLE`。
 - **凭据**：模型密钥与 GitHub token 只经 stdin 传入；不落盘、不进 argv、不进日志。
 - **取消**：用户取消或超时 → 终止进程；未收到结果信封视为失败，不提交任何状态。
 - **stdout 纪律**：只允许一个结果信封；核心日志走 stderr。
-- **契约快照**：`contract/` 整体随插件包分发——`schema/` 用于运行时校验，`fixtures/` 用于离线自检；由 `scripts/sync-contract.mjs --ref vX.Y.Z` 从产品仓库同步，`contract/UPSTREAM.json` 记录 ref 与 sha256，CI 用上游同 tag 重算哈希比对。不再单独发布契约 npm 包。
+- **契约来源**：类型与 ajv 校验器来自独立 npm 包 `@morehao/trendradar-contract`（`dependencies` 精确锁定；wire `ipcSchema=2` / `digestSchema=2`）。插件只解析契约 v2 `RunResult`；旧核心的 `runOutput` 不再兼容。CI 的 `check:contract` 校验包版本、wire 版本与 fixtures。
 
 ## 7. 错误码映射
 
@@ -165,13 +165,13 @@
 | 插件 locale 元数据 | 0.1.0 已实现：`locale/zh.json`、`locale/en.json`，`exports`/`files` 含 `./locale/*.json` |
 | `GIT_NOT_INSTALLED` 映射 | 0.1.0 已补进插件错误码表（落点：仓库区） |
 | 包名调整 | 已决定不改：`@morehao/dsh-github-trending` |
-| 契约快照同步脚本 + 哈希校验 | 0.1.0 已实现：`scripts/sync-contract.mjs --ref <sha>` + `npm run check:contract` |
+| 契约 npm 包接入 | 0.3.0 引入 `@morehao/trendradar-contract@0.2.0`，删除本地 `contract/` 快照与生成器；`npm run check:contract` 校验包版本/wire |
 
 ### 实现层偏差（0.1.0，均已写进 README「已知偏差」）
 
 | 偏差 | 原因 | 影响 |
 |---|---|---|
-| 用 `run --config <path> --json`，而非 stdin 信封 | 已提交契约 `ipc.v1.RunRequest` 只有 `configPath`，核心也尚未实现 stdin 分支 | 插件同时兼容两种结果形状；核心补上后插件不改 |
+| 用 `run --config <path> --json`，而非 stdin 信封 | 契约 `RunRequest` 的 `configPath` 是核心读取配置的入口 | 核心输出契约 v2 `RunResult`，插件只解析这一种形状 |
 | 配置经 FIFO 传入（Windows：0600 临时文件） | 核心只接受 `--config <path>`，而配置必须带 `apiKey` | POSIX 上明文不落盘；Windows 有短暂临时文件并立即删除 |
 | GitHub token 走子进程环境变量 | 核心只从 `GITHUB_TOKEN`/`GH_TOKEN` 读 | 不进 argv、不进配置、不进日志 |
 | 调度用插件自有 60 s tick | 宿主 `ctx.schedule`（rc.5）是**会话本地**提醒，需要 sessionId，冷会话不投递 | 无人值守可跑；不依赖会话 |

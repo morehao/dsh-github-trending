@@ -3,10 +3,12 @@
 //
 //   1. package.json 的 name  == cordis.patch.yml 的 insert[0].name（宿主 import() 的模块标识符）
 //   2. lib/index.ts 的 export const name == insert[0].id（cordis 配置树内的键）
-//   3. dsh.core.{repo,version} 与 contract/UPSTREAM.json 同源（publishing.md 的硬约束：不要手改一处）
-//   4. exports / files / dsh 段的接线与 main/types 对得上（缺 ./client 或 files 漏 lib 会「能装、白屏」）
+//   3. 契约单一来源：`@morehao/trendradar-contract` 依赖精确锁定，且安装到的包版本、
+//      wire 版本（ipcSchema/digestSchema=2、contractVersion 主版本 0）与插件实现一致
+//   4. dsh.core.{repo,version} 是「首次运行下载哪个核心 Release」的唯一来源，须为合法值
+//   5. exports / files / dsh 段的接线与 main/types 对得上（缺 ./client 或 files 漏 lib 会「能装、白屏」）
 //
-// 依赖 `lib/`：`npm run check` 里排在 build 之后（与兄弟仓的 check 顺序一致）。
+// 依赖 `lib/` 与 `node_modules`：`npm run check` 里排在 build 之后（与兄弟仓的 check 顺序一致）。
 import { readFile } from 'node:fs/promises';
 
 const read = async (p) => readFile(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -17,7 +19,6 @@ const fail = (msg) => {
 
 const pkg = JSON.parse(await read('package.json'));
 const patch = await read('cordis.patch.yml');
-const upstream = JSON.parse(await read('contract/UPSTREAM.json'));
 const { name: pluginName } = await import('../lib/index.js');
 
 // 极简读取：本仓 patch 只有一条 insert，取第一个 id / name 即可，不引入 YAML 依赖。
@@ -34,22 +35,38 @@ if (insertId && insertId !== pluginName) {
   fail(`插件名不一致：lib/index.ts（产物 lib/index.js）export const name=${pluginName}，insert[0].id=${insertId}`);
 }
 
-// dsh.core 是「首次运行下载哪个核心 Release」的唯一来源；它必须与契约快照同源（sync-contract 写入）。
+// dsh.core 是「首次运行下载哪个核心 Release」的唯一来源。版本号形如 0.3.0，repo 形如 owner/repo。
 const core = pkg.dsh?.core;
 if (!core) {
   fail('package.json 缺少 dsh.core（repo / version）');
 } else {
-  const ref = String(upstream.ref ?? '');
   const version = String(core.version ?? '');
-  if (version !== ref && `v${version}` !== ref) {
-    fail(`dsh.core.version=${version} 与 contract/UPSTREAM.json ref=${ref} 不同源（用 sync-contract --ref 同步）`);
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    fail(`dsh.core.version=${version || '(空)'} 不合法（应形如 0.3.0）`);
   }
   const repo = String(core.repo ?? '').replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
-  const upstreamRepo = String(upstream.repo ?? '')
-    .replace(/^https?:\/\/github\.com\//, '')
-    .replace(/\.git$/, '');
-  if (repo !== upstreamRepo) {
-    fail(`dsh.core.repo=${core.repo} 与 contract/UPSTREAM.json repo=${upstream.repo} 不一致`);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    fail(`dsh.core.repo=${core.repo || '(空)'} 不合法（应形如 owner/repo）`);
+  }
+}
+
+// 契约单一来源：依赖精确锁定、包版本与实际安装一致、wire 版本与插件实现一致。
+const CONTRACT = '@morehao/trendradar-contract';
+const contractSpec = pkg.dependencies?.[CONTRACT];
+if (typeof contractSpec !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(contractSpec)) {
+  fail(`dependencies["${CONTRACT}"] 必须是精确版本（如 0.2.0），实际 ${contractSpec ?? '(缺失)'}`);
+} else {
+  const installed = JSON.parse(await read(`node_modules/${CONTRACT}/package.json`)).version;
+  if (installed !== contractSpec) {
+    fail(`${CONTRACT} 已安装版本 ${installed} 与 dependencies 锁定的 ${contractSpec} 不一致（先 npm ci）`);
+  }
+  const versionMap = JSON.parse(await read(`node_modules/${CONTRACT}/version-map.json`));
+  const wire = (file) => versionMap[file]?.current;
+  if (wire('ipc.v2.json') !== 2) fail(`契约包 ipcSchema 应为 2，实际 ${wire('ipc.v2.json')}`);
+  if (wire('digest.v2.json') !== 2) fail(`契约包 digestSchema 应为 2，实际 ${wire('digest.v2.json')}`);
+  const contractVersion = String(wire('version-info.v2.json'));
+  if (contractVersion.split('.')[0] !== '0') {
+    fail(`契约包 contractVersion=${contractVersion} 主版本应为 0（与插件实现同一契约线）`);
   }
 }
 
@@ -75,7 +92,7 @@ if (pkg.publishConfig?.access !== 'public') {
 }
 
 const files = new Set(pkg.files ?? []);
-for (const required of ['lib', 'client.js', 'contract', 'locale', 'cordis.patch.yml', 'icon.svg']) {
+for (const required of ['lib', 'client.js', 'locale', 'cordis.patch.yml', 'icon.svg']) {
   if (!files.has(required)) fail(`files 缺少 ${required}（发布产物会缺文件）`);
 }
 
@@ -89,5 +106,5 @@ if (pkg.dsh?.client?.platform !== 'web') {
 console.log(
   process.exitCode
     ? '命名/接线校验失败'
-    : `命名/接线校验通过：包名 ${pkg.name} / 插件名 ${pluginName} / 核心 v${core.version} / exports ${Object.keys(exportsMap).length} 项`,
+    : `命名/接线校验通过：包名 ${pkg.name} / 插件名 ${pluginName} / 核心 v${core.version} / 契约 ${CONTRACT}@${contractSpec} / exports ${Object.keys(exportsMap).length} 项`,
 );

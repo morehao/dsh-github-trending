@@ -45,7 +45,7 @@ test('缓存命中：download=cached、source=cache（不联网）', async () =>
 test('覆盖路径：download=override，release 为空', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-override-'));
   const fake = path.join(dir, 'core');
-  writeFileSync(fake, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'9.9.9',ipcSchema:1,digestSchema:1})+'\\n')\n`);
+  writeFileSync(fake, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'9.9.9',ipcSchema:2,digestSchema:2,contractVersion:'0.2.0'})+'\\n')\n`);
   chmodSync(fake, 0o755);
   const status = await core.inspectCore(settingsFor({ corePath: fake }), { env: env(), fresh: true });
   assert.equal(status.state, 'ready');
