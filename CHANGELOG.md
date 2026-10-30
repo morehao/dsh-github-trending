@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2
+
+> 0.1.1 从未发布到 npm（tag 推上去后 CI 在 `npm ci` 就失败），0.1.2 是它的第一次真实发布。
+
+### 修复
+
+- lockfile 里 57 个 `resolved` 指向 `registry.npmmirror.com`，npm 11 在 CI 拒绝拉取（`EALLOWREMOTE`）；统一为 `registry.npmjs.org`，并加 `scripts/check-lockfile.mjs`（`npm run check` 会跑），把这类只在发版暴露的错误前移到 PR。
+
+### 发布链路
+
+- 新增 tag 触发的发布：`.github/workflows/release.yml`（OIDC Trusted Publishing，无 NPM_TOKEN）+ `scripts/ci-publish.sh`（版本守卫 / 幂等 / 失败回读后重试）+ `scripts/release-notes.mjs`（只投影注记 tag 正文）+ `docs/publishing.md`。
+- `check.yml` 在 PR/main 上跑 `npm run check` 与 AC 机械检查。
+
 ## 0.1.1
 
 分发方式变更：核心二进制不再走 npm 平台分包，改为 **GitHub Release 下载 + sha256 校验 + 本地缓存**（2026-10-30 决策 B）。
