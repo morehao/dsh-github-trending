@@ -45,8 +45,8 @@ const REQUIRED = [
 ];
 
 const cacheDir = await mkdtemp(join(tmpdir(), 'dsh-trending-pack-'));
-// 输出解析放在 scripts/lib/pack-json.mjs：npm 10 在部分环境会把日志混进 stdout，
-// 甚至输出两段 JSON（release run 41083620340 实测），直接 JSON.parse 会炸。
+// 输出解析放在 scripts/lib/pack-json.mjs：输出形状随 npm 版本变（npm 10 是数组，
+// npm 12 是按包名索引的对象；release run 41083620340 实测），直接 JSON.parse 会炸。
 let files;
 try {
   const { stdout } = await run(

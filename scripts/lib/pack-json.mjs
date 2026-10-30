@@ -1,12 +1,14 @@
 /**
  * 从 `npm pack --dry-run --json` 的输出里取出文件清单。
  *
- * 为什么不能直接 `JSON.parse(stdout)`：
- *   - npm 10 在某些环境（CI 的 10.9.9 实测）会把构建日志 / notice 混进 stdout；
- *   - 已在 release run 41083620340 复现过「两个 JSON 数组以逗号相连」的输出形态
- *     （`[...],\n[...]`），`parse` 会在第一个数组结束后报
- *     `Unexpected non-whitespace character after JSON`。
- * 因此这里扫描出所有**顶层平衡**的 JSON 值，逐个尝试，取第一个含 `files` 的数组。
+ * 为什么不能直接 `JSON.parse(stdout)`：输出的形状随 npm 版本变。
+ *   - npm 10（Node 22 自带）：顶层是**数组** `[{ files: [...] }]`；
+ *   - npm 12（release job 里 `npm install -g npm@latest` 之后）：顶层是**对象**
+ *     `{ "<包名>": { files: [...] } }`（release run 41083620340 实测）。
+ * 旧实现「首个 `[` 到最后一个 `]` 截取 + JSON.parse」在 npm 12 下会把 files 数组和后面的
+ * `bundled` 数组连起来，报 `Unexpected non-whitespace character after JSON`。
+ *
+ * 因此这里扫描出所有**顶层平衡**的 JSON 值，逐个解析，再递归找第一个含 `files` 的对象。
  */
 
 /** 从 `start` 处的 `[`/`{` 扫描到配对的收尾位置（字符串内的括号不计数），失败返回 -1。 */
@@ -50,6 +52,27 @@ export function extractJsonValues(text) {
   return values;
 }
 
+/** 递归找一个带 `files` 数组的对象，返回文件路径列表。 */
+function filesOf(value) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const files = filesOf(entry);
+      if (files !== null) return files;
+    }
+    return null;
+  }
+  if (value !== null && typeof value === 'object') {
+    if (Array.isArray(value.files)) {
+      return value.files.map((file) => file?.path).filter((p) => typeof p === 'string');
+    }
+    for (const inner of Object.values(value)) {
+      const files = filesOf(inner);
+      if (files !== null) return files;
+    }
+  }
+  return null;
+}
+
 /**
  * 返回 `npm pack` 清单里的文件路径数组。
  * @param {string} stdout
@@ -65,11 +88,8 @@ export function parsePackOutput(stdout) {
       tried.push(error.message);
       continue;
     }
-    const entries = Array.isArray(parsed) ? parsed : [parsed];
-    const first = entries[0];
-    if (first && Array.isArray(first.files)) {
-      return first.files.map((file) => file.path);
-    }
+    const files = filesOf(parsed);
+    if (files !== null) return files;
   }
   const head = JSON.stringify(stdout.slice(0, 200));
   const tail = JSON.stringify(stdout.slice(-120));

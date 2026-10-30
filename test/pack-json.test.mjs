@@ -6,6 +6,13 @@ import { extractJsonValues, parsePackOutput } from '../scripts/lib/pack-json.mjs
 const packJson = (paths) =>
   JSON.stringify([{ id: 'pkg@1.0.0', files: paths.map((p) => ({ path: p, size: 1, mode: 420 })) }]);
 
+test('npm 12：顶层是按包名索引的对象', () => {
+  const stdout = JSON.stringify({
+    'pkg@1.0.0': { id: 'pkg@1.0.0', files: [{ path: 'package.json' }, { path: 'lib/index.js' }], entryCount: 2 },
+  });
+  assert.deepEqual(parsePackOutput(stdout), ['package.json', 'lib/index.js']);
+});
+
 test('干净输出：直接取出文件清单', () => {
   assert.deepEqual(parsePackOutput(packJson(['package.json', 'lib/index.js'])), [
     'package.json',
