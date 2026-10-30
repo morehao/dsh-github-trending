@@ -4,7 +4,7 @@
 >
 > 仓库：`github.com/morehao/dsh-github-trending` ｜ 包名：`@morehao/dsh-github-trending` ｜ 上游产品：`github.com/morehao/trendradar`
 >
-> **实现状态（0.1.0）**：插件侧已落地（核心客户端、设置页、运行页、两个工具、调度、快速填充与回环代理、错误码、locale）。核心的平台包尚未发布，缺失时明确报 `CORE_UNAVAILABLE`。实现层与本文档的偏差集中列在 §14。
+> **实现状态（0.1.1）**：插件侧已落地（核心客户端、设置页、运行页、两个工具、调度、快速填充与回环代理、错误码、locale）。核心二进制改为 **GitHub Release 下载 + sha256 校验 + 本地缓存**（2026-10-30 决策 B，取消 npm 平台分包）；核心尚未打 tag 时明确报 `CORE_NOT_DOWNLOADED`/`CORE_UNAVAILABLE`。偏差集中列在 §14。
 
 ## 1. 它是什么
 
@@ -83,7 +83,7 @@
 
 - **一次性进程**：`spawn <core> run --json -`，stdin 写一个请求信封，stdout 读一个结果信封，跑完即退。无守护进程、无端口。
 - **握手**：运行前执行 `version --json`，比对 `ipcSchema` / `digestSchema`；不匹配报 `CORE_INCOMPATIBLE`，不做尽力兼容。
-- **定位顺序**：`TRENDING_DIGEST_CORE`（仅开发/排障）→ 平台包 `require.resolve`；都没有报 `CORE_UNAVAILABLE`。
+- **定位顺序**：`TRENDING_DIGEST_CORE`（或设置里的核心路径，仅开发/排障）→ 本地缓存 → 从 GitHub Release 下载（`checksums.txt` 校验 sha256 后缓存）；都不行报 `CORE_NOT_DOWNLOADED`/`CORE_UNAVAILABLE`。
 - **凭据**：模型密钥与 GitHub token 只经 stdin 传入；不落盘、不进 argv、不进日志。
 - **取消**：用户取消或超时 → 终止进程；未收到结果信封视为失败，不提交任何状态。
 - **stdout 纪律**：只允许一个结果信封；核心日志走 stderr。
@@ -170,7 +170,7 @@
 | GitHub token 走子进程环境变量 | 核心只从 `GITHUB_TOKEN`/`GH_TOKEN` 读 | 不进 argv、不进配置、不进日志 |
 | 调度用插件自有 60 s tick | 宿主 `ctx.schedule`（rc.5）是**会话本地**提醒，需要 sessionId，冷会话不投递 | 无人值守可跑；不依赖会话 |
 | 只支持 canonical 版式 | 核心自己落盘，插件重渲染会破坏「内容唯一实现」 | `template` 留待二期，设置页不暴露假开关 |
-| 平台包未发布 | 核心仓库尚无打包脚本 | 缺包时 `CORE_UNAVAILABLE`，附平台矩阵与修复指引 |
+| 二进制改由 Release 下载 | 六个 npm 平台包不划算（决策 B） | 首次运行联网下载 + 校验；缓存后离线；可用 `TRENDING_DIGEST_CORE` 完全绕过 |
 
 ## 15. 相关文档
 

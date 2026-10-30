@@ -76,6 +76,8 @@ export interface Settings {
   schedule: ScheduleSettings;
   /** 核心二进制覆盖；只在开发/排障时用，对应 TRENDING_DIGEST_CORE。 */
   corePath: string;
+  /** 缓存缺失时是否自动从 Release 下载核心（首次运行需要联网）。 */
+  coreAutoDownload: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: Settings = {
   output: { dir: 'trending' },
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai' },
   corePath: '',
+  coreAutoDownload: true,
 };
 
 /** 核心支持的 provider 默认端点（空字符串 = 必须由用户填）。 */
@@ -198,6 +201,7 @@ export function normalizeSettings(input: unknown): Settings {
       timezone: str(schedule.timezone, DEFAULT_SETTINGS.schedule.timezone),
     },
     corePath: str(raw.corePath, DEFAULT_SETTINGS.corePath).trim(),
+    coreAutoDownload: bool(raw.coreAutoDownload, DEFAULT_SETTINGS.coreAutoDownload),
   };
 }
 

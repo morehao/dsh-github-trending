@@ -23,6 +23,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [preflight, setPreflight] = React.useState<PreflightResult | null>(null);
   const [preflighting, setPreflighting] = React.useState(false);
   const [rechecking, setRechecking] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
   const [quickOpen, setQuickOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -87,6 +88,21 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       // 失败信息由 /state 的 core.message 展示
     } finally {
       setRechecking(false);
+    }
+  };
+
+  const downloadCore = async (): Promise<void> => {
+    setDownloading(true);
+    setProblems([]);
+    setMessage(null);
+    try {
+      await apiCall('POST', '/core/download', {});
+      setMessage(t('core.downloaded'));
+      await store.refresh({ quiet: true });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -162,12 +178,26 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         state.core.ipcSchema === undefined
           ? null
           : h('span', { className: 'dshgt-hint dshgt-mono' }, `ipc ${state.core.ipcSchema} · digest ${state.core.digestSchema ?? '?'}`),
+        state.core.release === undefined
+          ? null
+          : h('span', { className: 'dshgt-hint dshgt-mono' }, `${state.core.release.tag} · ${state.core.release.asset}`),
         h(
           'span',
-          { className: 'dshgt-hint dshgt-mono', title: state.core.path ?? '' },
-          state.core.source === 'package' ? t('core.package') : state.core.source === 'env' ? 'TRENDING_DIGEST_CORE' : state.core.path ?? '',
+          { className: 'dshgt-hint' },
+          state.core.download.state === 'override'
+            ? `覆盖路径：${state.core.override?.path ?? ''}`
+            : state.core.release?.cached === true
+              ? t('core.cached')
+              : t('core.notDownloaded'),
         ),
+        state.core.download.state === 'override'
+          ? null
+          : h(Btn, { small: true, onClick: () => void downloadCore(), disabled: downloading },
+              downloading ? t('core.downloading') : state.core.release?.cached === true ? t('core.redownload') : t('core.download')),
       ),
+      state.core.release === undefined
+        ? null
+        : h('p', { className: 'dshgt-hint dshgt-mono', style: { fontSize: 11 } }, `${state.core.release.url}  →  ${state.core.release.binaryPath}`),
       state.core.state === 'ready'
         ? null
         : h(Alert, { kind: 'err', title: t('core.label') }, h('div', null, state.core.message ?? ''), h('div', { className: 'dshgt-hint' }, t('core.order'))),

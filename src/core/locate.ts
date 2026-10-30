@@ -1,36 +1,35 @@
 /**
- * 定位核心二进制（FR-P-06 / AC-P-11）。
+ * 定位核心二进制（FR-P-06 / AC-P-11，D-08 修订为 Release 分发）。
  *
- * 顺序只有两条，且都不读 `PATH`：
- *   1. `TRENDING_DIGEST_CORE`（settings 里的 `corePath` 优先于环境变量）——仅开发/排障；
- *   2. 平台包 `@morehao/trendradar-core-<platform>-<arch>` 的 `bin` 入口。
+ * 顺序两条，且都不读 `PATH`：
+ *   1. `TRENDING_DIGEST_CORE` / settings.corePath —— 仅开发/排障；
+ *   2. Release 资产：本地缓存命中直接用，否则按 `package.json` 的 `dsh.core` 下载并校验。
  *
  * 为什么不读 PATH：PATH 是可被外部环境改写的东西，一旦核心版本来自 PATH，
  * 「同一配置产出同一内容」与幂等都失去确定性（ADR D-14）。PATH 上的同名 CLI
  * 只用于共存提示，不参与运行。
  */
-import { createRequire } from 'node:module';
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { IpcError } from '../ipc.js';
 import type { Settings } from '../config.js';
-
-export const PLATFORM_PACKAGE_PREFIX = '@morehao/trendradar-core';
+import {
+  describeRelease,
+  ensureCore,
+  readCoreRelease,
+  type CoreRelease,
+  type ReleaseDescriptor,
+} from './release.js';
 
 export interface CoreLocation {
   path: string;
-  source: 'settings' | 'env' | 'package';
-  packageName?: string;
-  /** 解析失败时给用户看的候选清单。 */
-  searched?: string[];
-}
-
-export function platformPackageName(
-  platform: NodeJS.Platform = process.platform,
-  arch: string = process.arch,
-): string {
-  return `${PLATFORM_PACKAGE_PREFIX}-${platform}-${arch}`;
+  source: 'settings' | 'env' | 'cache' | 'download';
+  release?: CoreRelease;
+  tag?: string;
+  /** 本次调用是否真的下载了（用于日志与状态提示）。 */
+  downloaded?: boolean;
+  sha256?: string;
 }
 
 function executable(file: string): boolean {
@@ -43,94 +42,85 @@ function executable(file: string): boolean {
   }
 }
 
-/** 从平台包的 package.json 里取 `bin` 入口；取不到就按约定路径兜底。 */
-function binCandidates(packageJsonPath: string, packageDir: string): string[] {
-  const candidates: string[] = [];
-  try {
-    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { bin?: unknown };
-    const bin = pkg.bin;
-    if (typeof bin === 'string') candidates.push(path.join(packageDir, bin));
-    else if (typeof bin === 'object' && bin !== null) {
-      const entry = (bin as Record<string, unknown>)['trendradar'];
-      if (typeof entry === 'string') candidates.push(path.join(packageDir, entry));
-    }
-  } catch {
-    // 读不到 package.json 不算致命：按约定兜底仍然可能命中。
-  }
-  candidates.push(path.join(packageDir, 'bin', 'trendradar'));
-  candidates.push(path.join(packageDir, 'trendradar'));
-  return candidates;
-}
-
 export interface LocateOptions {
   settings: Settings;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   arch?: string;
-  /** 测试注入：默认 `createRequire(import.meta.url)`。 */
-  resolve?: (id: string) => string;
+  /** 默认 true；false 时只查缓存（设置页探测用）。 */
+  allowDownload?: boolean;
+  forceDownload?: boolean;
+  fetchImpl?: typeof fetch;
+  release?: CoreRelease;
 }
 
-export function locateCore(options: LocateOptions): CoreLocation {
+export function overridePath(
+  settings: Settings,
+  env: NodeJS.ProcessEnv = process.env,
+): { path: string; source: 'settings' | 'env' } | undefined {
+  const fromSettings = settings.corePath.trim();
+  if (fromSettings !== '') {
+    return { path: path.isAbsolute(fromSettings) ? fromSettings : path.resolve(fromSettings), source: 'settings' };
+  }
+  const fromEnv = env.TRENDING_DIGEST_CORE?.trim() ?? '';
+  if (fromEnv !== '') return { path: path.isAbsolute(fromEnv) ? fromEnv : path.resolve(fromEnv), source: 'env' };
+  return undefined;
+}
+
+export async function locateCore(options: LocateOptions): Promise<CoreLocation> {
   const env = options.env ?? process.env;
-  const override = options.settings.corePath !== '' ? options.settings.corePath : env.TRENDING_DIGEST_CORE?.trim() ?? '';
-  const searched: string[] = [];
-  if (override !== '') {
-    const resolved = path.isAbsolute(override) ? override : path.resolve(override);
-    searched.push(resolved);
-    if (!existsSync(resolved)) {
+  const override = overridePath(options.settings, env);
+  if (override !== undefined) {
+    if (!existsSync(override.path)) {
       throw new IpcError(
         'CORE_UNAVAILABLE',
-        `TRENDING_DIGEST_CORE 指向的路径不存在：${resolved}。该变量只用于开发/排障，正常安装请删掉它。`,
+        `${override.source === 'settings' ? '设置里的 corePath' : 'TRENDING_DIGEST_CORE'} 指向的路径不存在：${override.path}。` +
+          '该覆盖只用于开发/排障，正常使用请清空它。',
       );
     }
-    if (!executable(resolved)) {
-      throw new IpcError('CORE_UNAVAILABLE', `TRENDING_DIGEST_CORE 指向的文件不可执行：${resolved}`);
+    if (!executable(override.path)) {
+      throw new IpcError('CORE_UNAVAILABLE', `${override.path} 不可执行（缺执行位或不是文件）`);
     }
-    return {
-      path: resolved,
-      source: options.settings.corePath !== '' ? 'settings' : 'env',
-      searched,
-    };
+    return { path: override.path, source: override.source };
   }
 
-  const platform = options.platform ?? process.platform;
-  const arch = options.arch ?? process.arch;
-  const packageName = platformPackageName(platform, arch);
-  const resolve = options.resolve ?? createRequire(import.meta.url);
-  try {
-    const packageJson = resolve(`${packageName}/package.json`);
-    const packageDir = path.dirname(packageJson);
-    for (const candidate of binCandidates(packageJson, packageDir)) {
-      searched.push(candidate);
-      if (executable(candidate)) {
-        return { path: candidate, source: 'package', packageName, searched };
-      }
-    }
-    throw new IpcError(
-      'CORE_UNAVAILABLE',
-      `平台包 ${packageName} 已安装，但找不到可执行的核心（找过：${searched.join('、')}）。重装插件可修复。`,
-    );
-  } catch (error) {
-    if (error instanceof IpcError) throw error;
-    throw new IpcError(
-      'CORE_UNAVAILABLE',
-      `找不到核心二进制：未设置 TRENDING_DIGEST_CORE，平台包 ${packageName} 也未安装。` +
-        `请重装插件（会带上对应平台的包）；支持的平台：darwin/linux/win32 × x64/arm64。`,
-    );
-  }
+  const result = await ensureCore({
+    ...(options.release === undefined ? {} : { release: options.release }),
+    env,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+    ...(options.arch === undefined ? {} : { arch: options.arch }),
+    ...(options.allowDownload === undefined ? {} : { allowDownload: options.allowDownload }),
+    ...(options.forceDownload === undefined ? {} : { force: options.forceDownload }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  return {
+    path: result.path,
+    source: result.source,
+    release: { repo: result.descriptor.repo, version: result.descriptor.version },
+    tag: result.descriptor.tag,
+    downloaded: result.source === 'download',
+    ...(result.sha256 === undefined ? {} : { sha256: result.sha256 }),
+  };
 }
 
-/** 平台包是否已安装（不执行），供设置页提前展示。 */
-export function packageInstalled(options: LocateOptions): boolean {
-  const platform = options.platform ?? process.platform;
-  const arch = options.arch ?? process.arch;
-  const packageName = platformPackageName(platform, arch);
-  const resolve = options.resolve ?? createRequire(import.meta.url);
+/** 只读的 Release 视图：不联网、不创建目录，供设置页展示「有没有、从哪来」。 */
+export function inspectRelease(
+  settings: Settings,
+  options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string; release?: CoreRelease } = {},
+): { descriptor?: ReleaseDescriptor; override?: { path: string; source: 'settings' | 'env' }; error?: string } {
+  const env = options.env ?? process.env;
+  const override = overridePath(settings, env);
+  if (override !== undefined) return { override };
   try {
-    resolve(`${packageName}/package.json`);
-    return true;
-  } catch {
-    return false;
+    const release = options.release ?? readCoreRelease();
+    return {
+      descriptor: describeRelease(release, {
+        env,
+        ...(options.platform === undefined ? {} : { platform: options.platform }),
+        ...(options.arch === undefined ? {} : { arch: options.arch }),
+      }),
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }

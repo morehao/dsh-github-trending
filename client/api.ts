@@ -76,12 +76,24 @@ export interface RunRecord {
   warnings: string[];
 }
 
+export interface CoreReleaseStatus {
+  repo: string;
+  tag: string;
+  asset: string;
+  url: string;
+  checksumsUrl: string;
+  cacheDir: string;
+  binaryPath: string;
+  cached: boolean;
+}
+
 export interface CoreStatus {
   state: 'ready' | 'unavailable' | 'incompatible';
   path?: string;
-  source?: 'settings' | 'env' | 'package';
-  packageName: string;
-  packageInstalled: boolean;
+  source?: 'settings' | 'env' | 'cache' | 'download';
+  release?: CoreReleaseStatus;
+  override?: { path: string; source: 'settings' | 'env' };
+  download: { state: 'cached' | 'missing' | 'override'; reason?: string };
   version?: string;
   commit?: string;
   ipcSchema?: number;

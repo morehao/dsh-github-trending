@@ -37,6 +37,9 @@ export interface RunSummary {
   logFile?: string;
   channel?: 'fifo' | 'tmpfile';
   proxy?: boolean;
+  /** 核心从哪来：env/settings 覆盖、缓存、还是本次下载。 */
+  coreSource?: 'settings' | 'env' | 'cache' | 'download';
+  coreTag?: string;
 }
 
 export interface RunRequestOptions {
@@ -113,7 +116,10 @@ export class Runner {
     let proxy: ProxyHandle | undefined;
 
     try {
-      const core = locateCore({ settings, env });
+      const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
+      if (core.downloaded === true) {
+        store.appendLog(logFile, `[core] 已下载核心 ${core.tag ?? ''} → ${core.path}`);
+      }
       const handshakeResult: HandshakeResult = await handshake(core, { signal: controller.signal });
       if (!handshakeResult.supportedProviders.includes(settings.model.provider)) {
         throw new IpcError(
@@ -167,7 +173,17 @@ export class Runner {
         onStderr: (line) => store.appendLog(logFile, line),
       });
       const outcome: RunOutcome = result.outcome;
-      const summary = this.summarize({ id, outcome, dryRun, ...(options.date === undefined ? {} : { date: options.date }), logFile, channel: result.channelKind, proxy: proxy !== undefined });
+      const summary = this.summarize({
+        id,
+        outcome,
+        dryRun,
+        ...(options.date === undefined ? {} : { date: options.date }),
+        logFile,
+        channel: result.channelKind,
+        proxy: proxy !== undefined,
+        coreSource: core.source,
+        ...(core.tag === undefined ? {} : { coreTag: core.tag }),
+      });
       this.record(summary, settings);
       return summary;
     } catch (error) {
@@ -202,6 +218,8 @@ export class Runner {
     logFile: string;
     channel?: 'fifo' | 'tmpfile';
     proxy: boolean;
+    coreSource?: RunSummary['coreSource'];
+    coreTag?: string;
   }): RunSummary {
     const { outcome } = input;
     const error =
@@ -232,6 +250,8 @@ export class Runner {
       logFile: input.logFile,
       ...(input.channel === undefined ? {} : { channel: input.channel }),
       proxy: input.proxy,
+      ...(input.coreSource === undefined ? {} : { coreSource: input.coreSource }),
+      ...(input.coreTag === undefined ? {} : { coreTag: input.coreTag }),
     };
   }
 

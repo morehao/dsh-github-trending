@@ -10,15 +10,30 @@ import path from 'node:path';
 import type { Settings } from '../config.js';
 import { IpcError } from '../ipc.js';
 import { execCapture } from '../core/exec.js';
-import { locateCore, packageInstalled, platformPackageName, type CoreLocation } from '../core/locate.js';
+import { inspectRelease, locateCore, type CoreLocation } from '../core/locate.js';
+import type { ReleaseDescriptor } from '../core/release.js';
 import { handshake } from '../core/handshake.js';
+
+/** Release 分发下的核心视图：用户一眼能看出「版本、下没下、从哪来」。 */
+export interface ReleaseStatus {
+  repo: string;
+  tag: string;
+  asset: string;
+  url: string;
+  checksumsUrl: string;
+  cacheDir: string;
+  binaryPath: string;
+  cached: boolean;
+}
 
 export interface CoreStatus {
   state: 'ready' | 'unavailable' | 'incompatible';
   path?: string;
   source?: CoreLocation['source'];
-  packageName: string;
-  packageInstalled: boolean;
+  /** Release 分发状态（有覆盖路径时只有 override，没有 release）。 */
+  release?: ReleaseStatus;
+  override?: { path: string; source: 'settings' | 'env' };
+  download: { state: 'cached' | 'missing' | 'override'; reason?: string };
   version?: string;
   commit?: string;
   ipcSchema?: number;
@@ -75,14 +90,33 @@ export async function inspectCore(settings: Settings, options: { env?: NodeJS.Pr
   if (!options.fresh && cached !== undefined && cached.key === key && Date.now() - cached.at < CACHE_TTL_MS) {
     return cached.status;
   }
-  const packageName = platformPackageName();
+  const view = inspectRelease(settings, { env });
+  const release: ReleaseStatus | undefined =
+    view.descriptor === undefined
+      ? undefined
+      : {
+          repo: view.descriptor.repo,
+          tag: view.descriptor.tag,
+          asset: view.descriptor.asset,
+          url: view.descriptor.url,
+          checksumsUrl: view.descriptor.checksumsUrl,
+          cacheDir: view.descriptor.cacheDir,
+          binaryPath: view.descriptor.binaryPath,
+          cached: view.descriptor.cached,
+        };
   const base: Omit<CoreStatus, 'state' | 'checkedAt' | 'supportedProviders'> = {
-    packageName,
-    packageInstalled: packageInstalled({ settings, env }),
+    ...(release === undefined ? {} : { release }),
+    ...(view.override === undefined ? {} : { override: view.override }),
+    download:
+      view.override !== undefined
+        ? { state: 'override' }
+        : release === undefined
+          ? { state: 'missing', reason: view.error ?? 'release 未配置' }
+          : { state: release.cached ? 'cached' : 'missing' },
   };
   const checkedAt = new Date().toISOString();
   try {
-    const core = locateCore({ settings, env });
+    const core = await locateCore({ settings, env, allowDownload: false });
     const result = await handshake(core, { timeoutMs: 5000 });
     const status: CoreStatus = {
       ...base,

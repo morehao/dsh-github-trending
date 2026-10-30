@@ -2,7 +2,7 @@
 
 > GitHub 趋势日报的 **DSH 入口**：每天定时 spawn 本地 [`trendradar`](https://github.com/morehao/trendradar) 核心，抓取 Trending、生成中文简介与当日总结，提交到你自己的仓库并自动合并 PR。
 
-**状态：0.1.0。** 插件侧（配置、调度、核心调用、状态与界面、两个工具）已完成；核心的平台二进制包（`@morehao/trendradar-core-*`）尚未发布，安装后运行会明确报 `CORE_UNAVAILABLE` 并给出修复指引——不会写空文件，也不会退回旧内容。
+**状态：0.1.1。** 插件侧（配置、调度、核心调用、状态与界面、两个工具）已完成。核心二进制走 **GitHub Release**：首次运行按 `os/arch` 下载、用 `checksums.txt` 校验 sha256、缓存到插件数据目录，之后离线复用。核心仓库打 tag 出资产之前，运行会明确报 `CORE_NOT_DOWNLOADED` / `CORE_UNAVAILABLE` 并给出下载地址——不会写空文件，也不会退回旧内容。
 
 ## 它做什么
 
@@ -35,11 +35,12 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - 一个本地 **git 仓库**（提交目标）与可写的远端
 - 模型：provider + 模型 ID + 密钥（或用宿主已配置的 provider；OAuth 类凭据不需要密钥）
 - Git 与 GitHub 凭据（PAT / Device Flow / 本机 `gh`），仅 push 与开 PR 需要
-- 核心二进制：随插件通过 `optionalDependencies` 获取的平台包（`@morehao/trendradar-core-<os>-<cpu>`）；开发/排障时可用环境变量 `TRENDING_DIGEST_CORE` 指向一个可执行的 `trendradar`
+- 核心二进制：首次运行从 `github.com/morehao/trendradar/releases` 下载（按 `os/arch`，sha256 校验后缓存）；之后离线复用。开发/排障时可用 `TRENDING_DIGEST_CORE`（或设置里的「核心路径」）指向一个可执行的 `trendradar`，此时完全不下载
 
 **访问哪里**
 
 - 本地核心进程（一次性的 `run` 子进程）
+- `github.com/morehao/trendradar/releases`：仅首次运行（或点「下载核心」）时下载二进制与其 `checksums.txt`；之后不再联网
 - 你配置的模型端点（由**核心**发起，插件不代发）
 - `api.github.com`（由**核心**发起 push/PR；插件本身不发 GitHub 请求）
 - 本机 `127.0.0.1` 上的临时回环代理（仅当宿主 provider 的凭据不可导出时，端口随机、一次性 token、运行结束即关闭）
@@ -72,7 +73,8 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | 实际支持范围由核心决定 |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
-| `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障） |
+| `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障；设了就完全不下载） |
+| `coreAutoDownload` | `true` | 缓存缺失时是否自动下载核心；关掉后只报 `CORE_NOT_DOWNLOADED`，由你在设置页点「下载核心」 |
 
 ## 两个工具
 
@@ -87,7 +89,9 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 | 码 | 含义 | 下一步 |
 |---|---|---|
-| `CORE_UNAVAILABLE` | 找不到核心（平台包缺失 / `TRENDING_DIGEST_CORE` 无效） | 重装插件，或指向可执行的 `trendradar` |
+| `CORE_NOT_DOWNLOADED` | 核心还没下载（缓存为空，且自动下载被关或尚未触发） | 设置页点「下载核心」，或指向可执行的 `trendradar` |
+| `CORE_CHECKSUM_MISMATCH` | 下载内容的 sha256 与 `checksums.txt` 不符（已被丢弃） | 重试；仍失败则手动下载放到缓存目录（代理可能改写内容） |
+| `CORE_UNAVAILABLE` | 下载失败 / 版本还没发布（404）/ 平台不在矩阵 / 覆盖路径无效 | 按提示里的 URL 与发布顺序处理 |
 | `CORE_INCOMPATIBLE` | 核心 `ipcSchema`/`digestSchema` 与插件不一致 | 升级插件（含平台包）到同一版本 |
 | `CORE_TIMEOUT` / `CORE_CANCELLED` | 超时 / 用户取消 | 不提交任何状态，也留不下半成品 |
 | `IPC_INVALID` | 核心 stdout 不是约定的结果信封 | 升级插件与核心 |
@@ -105,13 +109,14 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - 首次可在设置页「从本机 CLI 导入」一次性导入非敏感字段；**密钥不导入**
 - 别让两套定时同时开着：内容侧靠 `contentHash` 与 PR 复用兜底，模型消耗无法兜底
 
-## 已知偏差（0.1.0）
+## 已知偏差（0.1.1）
 
 1. **核心尚无 stdin 信封**：核心当前的 `run` 只接受 `--config <path> --json`，插件据此传配置；`ok/startedAt/error.code` 形状的 `RunResult` 已兼容，核心补上后插件无需改。
 2. **密钥传输**：POSIX 上配置经 **FIFO** 交给核心（文件系统里不出现明文）；Windows 无 FIFO，退化为 0600 临时文件并在读完后立即删除。
 3. **GitHub token** 经子进程环境变量传给核心（核心只认 `GITHUB_TOKEN`/`GH_TOKEN`）；不进 argv、不进配置、不进日志。
 4. **调度**用插件自己的 60 s tick（宿主 `schedule` 是会话本地提醒，覆盖不到无人值守场景）。
-5. **平台包未发布**：`@morehao/trendradar-core-<os>-<cpu>` 404 期间，运行会明确报 `CORE_UNAVAILABLE`；发布顺序是先核心包、后插件。
+5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（`sync-contract --ref vX.Y.Z` 会同步写入）。
+6. **核心尚未打 tag**：`trendradar` 仓库还没有 Release，因此当前下载会得到「还没有发布」的明确提示；打上 `v0.1.0` 后无需改插件。
 
 ## 开发
 
@@ -121,7 +126,8 @@ npm run check          # typecheck + 契约校验 + 构建 + 全部测试
 node scripts/ac/run.mjs # AC-P-01…13 的机械部分
 ```
 
-- 契约快照：`contract/`（schema + fixtures + `UPSTREAM.json`），由 `node scripts/sync-contract.mjs --ref <sha>` 从核心仓库同步；`npm run check:contract` 校验哈希与生成类型
+- 契约快照：`contract/`（schema + fixtures + `UPSTREAM.json`），由 `node scripts/sync-contract.mjs --ref <sha|vX.Y.Z>` 从核心仓库同步；ref 是 tag 时会同时把版本写进 `package.json` 的 `dsh.core.version`；`npm run check:contract` 校验哈希与生成类型
+- 核心下载与缓存：`src/core/release.ts`（`ensureCore`），缓存位置 `$DSH_HOME/github-trending/core/v<version>/`
 - 宿主半 `src/`（tsup → `lib/`），客户端半 `client/`（esbuild → `client.js`，`window.__ModuleLoader__.load`）
 
 ## 许可
