@@ -55,6 +55,17 @@ npm trust github @morehao/dsh-github-trending \
    gh release view v0.1.2
    ```
 
+## 排障（2026-10-30 实测）
+
+| 现象 | 真实原因 | 处理 |
+|---|---|---|
+| publish 步骤 `ENEEDAUTH`，npm 只让你 `npm login` | **OIDC 交换被拒**：该包没有 Trusted Publisher，registry 的交换端点回 `404 ... package not found`；npm 对所有 OIDC 失败都静默跳过，最后只报「没登录」 | 先建 TP（见上）；把 `NPM_CONFIG_LOGLEVEL=verbose` 打开才能看到 `oidc ... package not found` 这一行 |
+| `npm trust` 看起来跑完了，但 TP 没生效 | 交互确认 `Do you want to proceed? (y/N)` **默认是 N**，回车即放弃（`EXIT=1`） | 加 `-y` 跳过确认，或明确输入 `y` |
+| publish 成功（`PUT 202` + `+ pkg@ver`），但 `npm view` 看不到该版本 | registry 异步处理 + packument CDN 缓存，可能几分钟才可见；`dist-tags` 端点通常先更新 | 不要据此重发：用版本端点确认 — `curl -s -o /dev/null -w '%{http_code}' https://registry.npmjs.org/@scope%2fname/<version>`（200 = 已发布，且 `dist.attestations` 存在说明带 provenance） |
+| publish 前 `npm ci` 报 `EALLOWREMOTE` | lockfile 的 `resolved` 指向了国内镜像 | `check:lockfile` 会拦；把 `registry.npmmirror.com` 换成 `registry.npmjs.org`（tarball 与 integrity 不变） |
+
+重发不用新打 tag：本仓 `release.yml` 支持 `workflow_dispatch`（输入要发的 tag），`gh workflow run release.yml -f tag=vX.Y.Z` 即可；脚本对「已发布」是幂等跳过。
+
 ## 约束
 
 - **不本地 `npm publish` 正式版**：本地没有 OIDC，只会落到 2FA 手工链路，且没有 provenance。
