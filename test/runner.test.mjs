@@ -353,6 +353,7 @@ test('预览生成失败不阻断运行，结果照常写盘', async () => {
   assert.equal(record.ok, true);
   assert.equal(record.preview, undefined);
   assert.ok(events.some((item) => item.event === 'preview.skip'));
+});
 
 test('触发来源经环境变量传给核心：schedule → schedule，tool → manual', async () => {
   const scheduled = makeRunner({ scenario: { FAKE_ECHO_TRIGGER: '1' } });
@@ -384,5 +385,4 @@ test('push 失败带 reason：stale info → stale-lease，提示可自愈', asy
   assert.match(summary.error.hint, /fetch --prune/);
   assert.doesNotMatch(summary.error.hint, /non-fast-forward/);
   assert.equal(store.readHistory()[0].errorReason, 'stale-lease');
-});
 });
