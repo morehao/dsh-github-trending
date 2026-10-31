@@ -16,6 +16,7 @@ import {
   apiCall,
   type DefaultSelection,
   type GithubProbeResult,
+  type Period,
   type PreflightResult,
   type QuickfillResponse,
   type RepoBranchResult,
@@ -499,8 +500,9 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         options: [
           { value: 'daily', label: t('scope.daily') },
           { value: 'weekly', label: t('scope.weekly') },
+          { value: 'monthly', label: t('scope.monthly') },
         ],
-        onChange: (value: string) => update((next) => { next.trending.since = value === 'weekly' ? 'weekly' : 'daily'; }),
+        onChange: (value: string) => update((next) => { next.trending.since = value === 'weekly' ? 'weekly' : value === 'monthly' ? 'monthly' : 'daily'; }),
       }),
       h('span', { className: 'dshgt-hint' }, t('scope.topN')),
       h(Input, { mono: true, width: 70, value: String(draft.trending.topN), onInput: (value: string) => update((next) => { next.trending.topN = Math.round(Number(value) || 0); }) }),
@@ -527,6 +529,22 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       h(Input, { mono: true, width: 110, value: draft.schedule.time, onInput: (value: string) => update((next) => { next.schedule.time = value; }) }),
       h('span', { className: 'dshgt-hint' }, t('schedule.timezone')),
       h(Input, { mono: true, width: 170, value: draft.schedule.timezone, onInput: (value: string) => update((next) => { next.schedule.timezone = value; }) }),
+    ),
+    h(
+      Row,
+      { label: t('schedule.periods') },
+      ...(['daily', 'weekly', 'monthly'] as Period[]).map((period) =>
+        h(Toggle, {
+          key: period,
+          checked: draft.schedule.periods.includes(period),
+          onChange: (on: boolean) => update((next) => {
+            const set = new Set(next.schedule.periods);
+            if (on) set.add(period); else set.delete(period);
+            next.schedule.periods = (['daily', 'weekly', 'monthly'] as Period[]).filter((p) => set.has(p));
+          }),
+          label: t(`scope.${period}`),
+        }),
+      ),
     ),
     h('p', { className: 'dshgt-hint' }, t('schedule.source')),
   );

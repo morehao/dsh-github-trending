@@ -10,7 +10,7 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { normalizeSettings, type Settings } from './config.js';
+import { normalizeSettings, type Period, type Settings } from './config.js';
 import { HISTORY_FILE, SETTINGS_FILE, STATE_FILE, dataDir } from './paths.js';
 
 export const HISTORY_LIMIT = 30;
@@ -64,6 +64,8 @@ export interface RunRecord {
   files: number;
   /** 运行所属的调度时区日期（YYYY-MM-DD）；旧记录可能没有。 */
   date?: string;
+  /** 本次产出周期（daily|weekly|monthly）；旧记录可能没有。 */
+  period?: Period;
   contentHash?: string;
   branch?: string;
   commit?: string;
@@ -87,8 +89,10 @@ export interface PendingPr {
 
 export interface PluginState {
   lastRunAt?: string;
-  /** 最近一次成功（ok=true，含 skipped）的运行时间；调度用它锁当天。 */
+  /** 最近一次成功（ok=true，含 skipped）的运行时间；工具与界面读它。 */
   lastSuccessAt?: string;
+  /** 各周期最近一次成功的 ISO 时间；调度按「周期 + 本地日期」判重。 */
+  periodSuccess?: Partial<Record<Period, string>>;
   lastDigest?: DigestIdentity;
   lastResult?: RunRecord;
   pendingPr?: PendingPr;

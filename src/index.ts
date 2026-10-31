@@ -83,9 +83,9 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
     store,
     isRunning: () => runner.running !== undefined,
     getTimer: () => get('timer') as TimerService | undefined,
-    run: async () => {
-      const summary = await runner.run({ trigger: 'schedule' });
-      log('schedule.run', { ok: summary.ok, skipped: summary.skipped, error: summary.error?.code });
+    run: async (_trigger, period) => {
+      const summary = await runner.run({ trigger: 'schedule', period });
+      log('schedule.run', { period, ok: summary.ok, skipped: summary.skipped, error: summary.error?.code });
     },
     onError: (error) =>
       ctx.logger?.warn?.(`[dsh-github-trending] 定时运行失败：${error instanceof Error ? error.message : String(error)}`),

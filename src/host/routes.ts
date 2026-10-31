@@ -15,6 +15,7 @@ import {
   validateSettings,
   mergeSettingsSection,
   sectionOfField,
+  isPeriod,
   SETTINGS_SECTIONS,
   type Settings,
   type SettingsSection,
@@ -206,6 +207,7 @@ async function dispatch(
     const summary = await deps.runner.run({
       dryRun: body.dryRun === true,
       ...(typeof body.date === 'string' && body.date !== '' ? { date: body.date } : {}),
+      ...(isPeriod(body.period) ? { period: body.period } : {}),
       trigger: 'manual',
     });
     return { summary };

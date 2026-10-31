@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-10-31
+
+### 变更
+
+- **适配核心 0.4.0 的三周期产物布局**：`dsh.core.version` 升到 `0.4.0`。核心产物改为 `trending/<period>/<bucket>/<name>.{md,json}`（daily/weekly/monthly），分支为 `trending/<period>/<name>`；插件每次运行按标的周期传 `run --period daily|weekly|monthly`，保证「抓取窗口 = 标注周期」。
+- **预览按周期选取**：从本次 artifact 里挑本期 digest 的 `.md`（daily=`YYYY-MM-DD.md`、weekly=`YYYY-Wnn.md`、monthly=`YYYY-MM.md`），并排除 `index.md`；日榜预览行为不变。
+- **调度按周期**：新增 `schedule.periods`（日/周/月多选，默认 `daily`）。日榜每天、周榜周日（ISO 周末）、月榜月末触发；去重键含周期与本地日期，同一周期当天只成功一次；「下次运行」取所有已启用周期里最近的一次。
+- `trending_run` 工具与 `POST /run` 增加可选 `period` 参数（缺省用 `trending.since`）。
+
 ## 0.3.2 - 2026-10-31
 
 ### 改进

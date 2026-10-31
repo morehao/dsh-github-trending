@@ -4,6 +4,7 @@
  * 工具名是**稳定对外接口**：一旦发布不再改名；需要新能力时新增工具。
  * 参数方言用宿主 `dsh-tools` 的「内联 required: true」，输出用标准 JSON Schema。
  */
+import { isPeriod } from './config.js';
 import type { Runner } from './host/runner.js';
 import type { Scheduler } from './host/schedule.js';
 import type { RunRecord, Store } from './state.js';
@@ -81,21 +82,23 @@ export function createTrendingRunTool(runner: Runner) {
   return {
     name: 'trending_run',
     description:
-      '执行一次 GitHub 趋势日报：定位并握手本地核心，spawn 一次 run，返回结构化摘要（文件数、commit、PR、错误码）。' +
+      '执行一次 GitHub 趋势榜单：定位并握手本地核心，spawn 一次 run，返回结构化摘要（文件数、commit、PR、错误码）。' +
       'dryRun=true 只抓取与渲染、不写文件也不提交。同日同内容重跑会返回 skipped=true（零新增 commit）。',
     parameters: {
       dryRun: { type: 'boolean', description: '只试跑：不写文件、不提交、不开 PR' },
       date: { type: 'string', description: '指定日期（YYYY-MM-DD）；省略则用调度时区的今天' },
+      period: { type: 'string', enum: ['daily', 'weekly', 'monthly'], description: '产出周期；省略则用设置里的默认周期' },
     },
     output: {
       schema: RUN_OUTPUT_SCHEMA,
       render: (_args: unknown, value: { markdown?: string }) => [{ type: 'text', text: typeof value?.markdown === 'string' ? value.markdown : '' }],
     },
-    async execute(args: { dryRun?: boolean; date?: string } = {}, exec: { signal?: AbortSignal } = {}) {
+    async execute(args: { dryRun?: boolean; date?: string; period?: string } = {}, exec: { signal?: AbortSignal } = {}) {
       void exec;
       const summary = await runner.run({
         dryRun: args.dryRun === true,
         ...(typeof args.date === 'string' && args.date !== '' ? { date: args.date } : {}),
+        ...(isPeriod(args.period) ? { period: args.period } : {}),
         trigger: 'tool',
       });
       const lines: string[] = [];

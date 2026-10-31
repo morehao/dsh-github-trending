@@ -7,6 +7,9 @@
 export const API = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 
+/** 榜单周期（与 core 0.4.0 的 `--period` 一致）。 */
+export type Period = 'daily' | 'weekly' | 'monthly';
+
 export interface ApiFailure extends Error {
   code?: string;
 }
@@ -88,6 +91,7 @@ export interface RunRecord {
   durationMs: number;
   files: number;
   date?: string;
+  period?: Period;
   contentHash?: string;
   branch?: string;
   commit?: string;
@@ -153,9 +157,9 @@ export interface SettingsShape {
   repo: { path: string; baseBranch: string; remote: string; commitMode: 'branch' | 'direct'; authorName: string; authorEmail: string };
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };
   github: { authMode: 'pat' | 'gh'; tokenRef: string };
-  trending: { since: 'daily' | 'weekly'; languages: string[]; topN: number };
+  trending: { since: Period; languages: string[]; topN: number };
   output: { dir: string };
-  schedule: { enabled: boolean; time: string; timezone: string };
+  schedule: { enabled: boolean; time: string; timezone: string; periods: Period[] };
   corePath: string;
 }
 
@@ -164,7 +168,7 @@ export interface StatePayload {
   settings: SettingsShape;
   core: CoreStatus;
   coexistence: CoexistenceStatus;
-  schedule: { enabled: boolean; time: string; timezone: string; nextRunAt?: string; lastRunDate?: string; source: 'timer' };
+  schedule: { enabled: boolean; time: string; timezone: string; periods: Period[]; nextRunAt?: string; lastRunDate?: string; source: 'timer' };
   status: {
     running: { id: string; startedAt: string } | null;
     lastRunAt: string | null;

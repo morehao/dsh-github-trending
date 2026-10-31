@@ -7,7 +7,7 @@
  */
 import { spawn } from 'node:child_process';
 
-import { toCoreConfig, toYaml, type Settings } from '../config.js';
+import { toCoreConfig, toYaml, type Period, type Settings } from '../config.js';
 import { classifyStderr, redact } from '../errors.js';
 import {
   IpcError,
@@ -35,6 +35,8 @@ export interface RunCoreOptions {
   /** GitHub token；核心只从 env 读（GITHUB_TOKEN/GH_TOKEN）。 */
   token?: string;
   date?: string;
+  /** 本次运行的标的周期（daily|weekly|monthly）；核心 `--period` 覆盖抓取 since。 */
+  period: Period;
   dryRun: boolean;
   /** 谁触发的运行：核心用它在定时运行时尊重「人工关闭的 PR」。 */
   trigger?: 'manual' | 'schedule';
@@ -69,10 +71,11 @@ function errorFrom(stderr: string, exitCode: number | null): RunError {
   };
 }
 
-export function buildCoreArgs(channelPath: string, options: { dryRun: boolean; date?: string }): string[] {
+export function buildCoreArgs(channelPath: string, options: { dryRun: boolean; date?: string; period?: Period }): string[] {
   const args = ['run', '--config', channelPath, '--json'];
   if (options.dryRun) args.push('--dry-run');
   if (options.date !== undefined && options.date !== '') args.push('--date', options.date);
+  if (options.period !== undefined) args.push('--period', options.period);
   return args;
 }
 
@@ -81,10 +84,10 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
   const startedAt = nowIso();
   const started = Date.now();
   const channel = await openConfigChannel();
-  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride))}\n`;
+  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period))}\n`;
   const secrets = [options.apiKey, options.token, ...(options.secrets ?? [])];
 
-  const child = spawn(options.core.path, buildCoreArgs(channel.path, { dryRun: options.dryRun, date: options.date }), {
+  const child = spawn(options.core.path, buildCoreArgs(channel.path, { dryRun: options.dryRun, date: options.date, period: options.period }), {
     env: sanitizedEnv(process.env, {
       GITHUB_TOKEN: options.token,
       GH_TOKEN: options.token,

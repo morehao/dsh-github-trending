@@ -107,3 +107,60 @@ test('失败不锁当天：间隔后可重试，但最多 2 次', async () => {
   assert.equal(failures, 2);
   scheduler.stop();
 });
+
+test('周/月触发日：周日与月末（本地时区）', () => {
+  // 2026-11-01 是周日；2026-10-31 是周六/月末。
+  assert.equal(schedule.isPeriodTriggerDay('weekly', new Date('2026-11-01T02:00:00Z'), 'Asia/Shanghai'), true);
+  assert.equal(schedule.isPeriodTriggerDay('weekly', new Date('2026-10-31T02:00:00Z'), 'Asia/Shanghai'), false);
+  assert.equal(schedule.isPeriodTriggerDay('monthly', new Date('2026-10-31T02:00:00Z'), 'Asia/Shanghai'), true);
+  assert.equal(schedule.isPeriodTriggerDay('monthly', new Date('2026-10-30T02:00:00Z'), 'Asia/Shanghai'), false);
+  assert.equal(schedule.isPeriodTriggerDay('daily', new Date('2026-10-30T02:00:00Z'), 'Asia/Shanghai'), true);
+});
+
+test('nextOccurrenceFor：周榜落在下一个周日、月榜落在月末', () => {
+  const cfg = { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily'] };
+  // 2026-10-28（周三）出发 → 下一个周日 2026-11-01 08:30 上海 = 00:30Z
+  assert.equal(schedule.nextOccurrenceFor('weekly', new Date('2026-10-28T02:00:00Z'), cfg).toISOString(), '2026-11-01T00:30:00.000Z');
+  // 2026-10-15 出发 → 月末 2026-10-31 08:30 上海 = 00:30Z
+  assert.equal(schedule.nextOccurrenceFor('monthly', new Date('2026-10-15T00:00:00Z'), cfg).toISOString(), '2026-10-31T00:30:00.000Z');
+});
+
+async function makeMultiScheduler(periods, scenarioNow, ran) {
+  const { state: stateModule } = await import('../lib/internal.js');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-sched-multi-')) });
+  store.writeSettings({ schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods } });
+  const scheduler = new schedule.Scheduler({
+    store,
+    isRunning: () => false,
+    getTimer: () => undefined,
+    run: async (_trigger, period) => {
+      ran.push(period);
+      const state = store.readState();
+      store.writeState({ ...state, periodSuccess: { ...(state.periodSuccess ?? {}), [period]: scenarioNow } });
+    },
+  });
+  return scheduler;
+}
+
+test('三周期并行：周日跑 daily+weekly，且同一周期当天不重复', async () => {
+  const ran = [];
+  const now = '2026-11-01T00:35:00Z';
+  const scheduler = await makeMultiScheduler(['daily', 'weekly', 'monthly'], now, ran);
+  assert.equal(await scheduler.tick(new Date(now)), 'ran');
+  assert.deepEqual(ran.sort(), ['daily', 'weekly']); // 周日：非月末 → 无 monthly
+  assert.equal(await scheduler.tick(new Date('2026-11-01T00:40:00Z')), 'skipped');
+  assert.deepEqual(ran.sort(), ['daily', 'weekly']);
+  scheduler.stop();
+});
+
+test('三周期并行：月末跑 daily+monthly', async () => {
+  const ran = [];
+  const now = '2026-10-31T00:35:00Z';
+  const scheduler = await makeMultiScheduler(['daily', 'weekly', 'monthly'], now, ran);
+  assert.equal(await scheduler.tick(new Date(now)), 'ran');
+  assert.deepEqual(ran.sort(), ['daily', 'monthly']); // 月末：周六非周日 → 无 weekly
+  scheduler.stop();
+});

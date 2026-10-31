@@ -76,7 +76,7 @@
 | `pr.deleteBranchAfterMerge` | `true` | |
 | `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
 | `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名 |
-| `trending.since` | `daily` | `daily` / `weekly` |
+| `trending.since` | `daily` | `daily` / `weekly` / `monthly`（单次运行周期，抓取窗口=标的周期） |
 | `trending.languages` | `[all, typescript, python, go, rust]` | 支持范围由核心决定，插件只选择 |
 | `trending.topN` | `25` | 上限；实际条数以核心解析结果为准 |
 | `summary.enabled` | `true` | 关掉则只落原始字段 |
@@ -84,6 +84,7 @@
 | `output.json` | `true` | 是否同时写 JSON |
 | `layout.mode` | `canonical` | 默认逐字节采用核心产出；`template` 只做字段映射 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 复用宿主 `schedule` 服务 |
+| `schedule.periods` | `daily` | 定时自动产出的周期（日/周/月多选）：日=每天、周=周日、月=月末 |
 
 > 已删除的配置项：`source.type`、`source.instanceUrl`（内容来源只剩本地二进制）、`core.path`（只保留 `TRENDING_DIGEST_CORE` 环境变量作为开发/排障逃逸口）。
 

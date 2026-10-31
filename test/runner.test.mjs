@@ -386,3 +386,56 @@ test('push 失败带 reason：stale info → stale-lease，提示可自愈', asy
   assert.doesNotMatch(summary.error.hint, /non-fast-forward/);
   assert.equal(store.readHistory()[0].errorReason, 'stale-lease');
 });
+
+test('daily 预览：真实产物含根 index.md 时仍挑日期 .md', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: `daily/2026-10/${DATED}.md`, content: '# daily' },
+        { path: 'index.md', content: '# index' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.period, 'daily');
+  assert.equal(summary.preview.file, `daily/2026-10/${DATED}.md`);
+  assert.equal(store.readPreview(summary.id).text, '# daily');
+});
+
+test('周榜预览：按周期期望名挑 YYYY-Wnn.md，排除 index.md', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: 'weekly/2026/2026-W44.md', content: '# weekly' },
+        { path: 'index.md', content: '# index' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: '2026-11-01', period: 'weekly' });
+  assert.equal(summary.period, 'weekly');
+  assert.equal(summary.preview.file, 'weekly/2026/2026-W44.md');
+  assert.equal(store.readPreview(summary.id).text, '# weekly');
+});
+
+test('月榜预览：按周期期望名挑 YYYY-MM.md', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: 'monthly/2026/2026-10.md', content: '# monthly' },
+        { path: 'index.md', content: '# index' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: '2026-10-31', period: 'monthly' });
+  assert.equal(summary.period, 'monthly');
+  assert.equal(summary.preview.file, 'monthly/2026/2026-10.md');
+  assert.equal(store.readPreview(summary.id).text, '# monthly');
+});
+
+test('period 落进摘要与历史（schedule 触发按周期）', async () => {
+  const { runner, store } = makeRunner();
+  const summary = await runner.run({ trigger: 'schedule', period: 'weekly' });
+  assert.equal(summary.period, 'weekly');
+  assert.equal(store.readHistory()[0].period, 'weekly');
+  assert.equal(store.readState().periodSuccess.weekly !== undefined, true);
+});
