@@ -11,8 +11,22 @@ import type { Settings } from '../config.js';
 import { IpcError, IPC_SCHEMA_VERSION, SUPPORTED_DIGEST_SCHEMA } from '../ipc.js';
 import { execCapture } from '../core/exec.js';
 import { inspectRelease, locateCore, type CoreLocation } from '../core/locate.js';
-import type { ReleaseDescriptor } from '../core/release.js';
+import { readCoreRelease, type ReleaseDescriptor } from '../core/release.js';
 import { handshake } from '../core/handshake.js';
+
+/** `owner/repo`（可选带前后 `v`）→ `https://github.com/owner/repo`；非 GitHub 形态返回 undefined。 */
+export function coreRepoFromSource(repo: string | undefined): string | undefined {
+  let ownerRepo = repo;
+  if (ownerRepo === undefined) {
+    try {
+      ownerRepo = readCoreRelease().repo;
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof ownerRepo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(ownerRepo)) return undefined;
+  return `https://github.com/${ownerRepo}`;
+}
 
 /** Release 分发下的核心视图：用户一眼能看出「版本、下没下、从哪来」。 */
 export interface ReleaseStatus {
@@ -39,6 +53,8 @@ export interface CoreStatus {
   ipcSchema?: number;
   digestSchema?: number;
   supportedProviders: string[];
+  /** 核心开源仓库（`https://github.com/<owner>/<repo>`），来自 package.json 的 `dsh.core.repo`。 */
+  repository?: string;
   code?: string;
   message?: string;
   hint?: string;
@@ -104,7 +120,11 @@ export async function inspectCore(settings: Settings, options: { env?: NodeJS.Pr
           binaryPath: view.descriptor.binaryPath,
           cached: view.descriptor.cached,
         };
+  // 核心仓库地址：优先取本次定位到的 Release 仓，其次退回 package.json 的 dsh.core.repo。
+  // 解析不到就不给，界面据此隐藏外链，而不是拼一个可能 404 的地址。
+  const coreRepository = coreRepoFromSource(release?.repo);
   const base: Omit<CoreStatus, 'state' | 'checkedAt' | 'supportedProviders'> = {
+    ...(coreRepository === undefined ? {} : { repository: coreRepository }),
     ...(release === undefined ? {} : { release }),
     ...(view.override === undefined ? {} : { override: view.override }),
     download:
