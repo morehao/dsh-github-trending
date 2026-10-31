@@ -60,6 +60,11 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
   }
 }
 
+/** 操作回执：成功只是「刚才那步成功了」，到时自动收起；失败要留到用户下一次操作。 */
+type Notice = { kind: 'ok' | 'err'; text: string };
+
+const NOTICE_TTL_MS = 5000;
+
 function sectionEquals(a: SettingsShape, b: SettingsShape, section: SectionId): boolean {
   return JSON.stringify(sectionSlice(a, section)) === JSON.stringify(sectionSlice(b, section));
 }
@@ -79,7 +84,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [savingSection, setSavingSection] = React.useState<SectionId | null>(null);
   const [savedSection, setSavedSection] = React.useState<SectionId | null>(null);
   const [problems, setProblems] = React.useState<Array<{ field: string; message: string }>>([]);
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
   const [preflight, setPreflight] = React.useState<PreflightResult | null>(null);
   const [preflighting, setPreflighting] = React.useState(false);
   const [rechecking, setRechecking] = React.useState(false);
@@ -103,6 +108,17 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   React.useEffect(() => {
     setProblems([]);
   }, [section]);
+
+  // 成功回执到点自动收起；换了一条提示就重新计时，旧计时器因对象不同不会误清新提示。
+  React.useEffect(() => {
+    if (notice === null || notice.kind !== 'ok') return undefined;
+    const timer = setTimeout(() => {
+      setNotice((current) => (current === notice ? null : current));
+    }, NOTICE_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const notify = (kind: Notice['kind'], text: string): void => setNotice({ kind, text });
 
   const repoPath = draft === null ? '' : draft.repo.path;
 
@@ -162,13 +178,13 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         setDraft((current) => (current === null ? current : applySection(current, result.settings, section)));
         setDirtySections((current) => ({ ...current, [section]: false }));
         setSavedSection(section);
-        setMessage(null);
+        setNotice(null);
         await store.refresh({ quiet: true });
       } else {
         setProblems(result.problems ?? []);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      notify('err', error instanceof Error ? error.message : String(error));
     } finally {
       setSavingSection(null);
     }
@@ -203,13 +219,13 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const downloadCore = async (): Promise<void> => {
     setDownloading(true);
     setProblems([]);
-    setMessage(null);
+    setNotice(null);
     try {
       await apiCall('POST', '/core/download', {});
-      setMessage(t('core.downloaded'));
+      notify('ok', t('core.downloaded'));
       await store.refresh({ quiet: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      notify('err', error instanceof Error ? error.message : String(error));
     } finally {
       setDownloading(false);
     }
@@ -241,13 +257,13 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         setDraft(payload.settings);
         setDirtySections({ ...EMPTY_DIRTY });
         setSavedSection(null);
-        setMessage(t('settings.import.done', { fields: payload.imported.join('、') }));
+        notify('ok', t('settings.import.done', { fields: payload.imported.join('、') }));
         await store.refresh({ quiet: true });
       } else {
-        setMessage(payload.problems[0] ?? t('settings.import.empty'));
+        notify('err', payload.problems[0] ?? t('settings.import.empty'));
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      notify('err', error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -258,7 +274,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       null,
       2,
     );
-    void navigator.clipboard?.writeText(redacted).then(() => setMessage(t('settings.copied')));
+    void navigator.clipboard?.writeText(redacted).then(() => notify('ok', t('settings.copied')));
   };
 
   if (state === null || draft === null) {
@@ -647,7 +663,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       problems.length > 0
         ? h(Alert, { kind: 'err', title: t('error.prefix') }, h('ul', { style: { margin: 0, paddingLeft: 16 } }, problems.map((problem, index) => h('li', { key: index }, `${problem.field}：${problem.message}`))))
         : null,
-      message === null ? null : h(Alert, { kind: 'ok' }, message),
+      notice === null ? null : h(Alert, { kind: notice.kind }, notice.text),
       h(
         'div',
         { className: 'dshgt-footer' },
