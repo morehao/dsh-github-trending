@@ -65,7 +65,11 @@ for (const item of Object.values(meta.outputs)) {
   }
 }
 for (const input of Object.keys(meta.inputs)) {
-  if (!input.startsWith('client/')) problems.push(`产物包含了 client/ 之外的源码：${input}`);
+  if (input.startsWith('client/') || input.startsWith('node_modules/')) continue;
+  // 依赖包可能经 symlink 解析到仓库外（如 link: 的共享包 / file: 的本地包）：外部源码允许，
+  // 本仓的 src/ 与 lib/ 仍然一律禁止进客户端产物。
+  if (path.relative(root, path.resolve(root, input)).startsWith('..')) continue;
+  problems.push(`产物包含了本仓 client/ 之外的源码：${input}`);
 }
 if (problems.length > 0) {
   console.error('client 构建校验失败：');

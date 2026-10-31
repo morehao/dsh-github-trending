@@ -10,6 +10,7 @@ import { Runner } from './host/runner.js';
 import { readPluginInfo } from './host/plugin-info.js';
 import { Scheduler } from './host/schedule.js';
 import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
+import { createUpdateService } from './host/update.js';
 import { createTrendingHistoryTool, createTrendingRunTool } from './tools.js';
 
 export const name = 'dsh-github-trending';
@@ -91,7 +92,18 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
   });
 
   const pluginInfo = readPluginInfo();
+  const update = createUpdateService({
+    get,
+    env,
+    meta: {
+      name: pluginInfo.name,
+      version: VERSION,
+      ...(pluginInfo.repository === undefined ? {} : { repository: pluginInfo.repository }),
+    },
+    logger: log,
+  });
   const handler = createRoutes({
+    update,
     store,
     runner,
     scheduler,

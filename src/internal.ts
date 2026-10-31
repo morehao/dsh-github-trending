@@ -27,5 +27,6 @@ export * as runner from './host/runner.js';
 export * as pluginInfo from './host/plugin-info.js';
 export * as schedule from './host/schedule.js';
 export * as routes from './host/routes.js';
+export * as updateService from './host/update.js';
 export * as importCli from './host/import-cli.js';
 export * as tools from './tools.js';

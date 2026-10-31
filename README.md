@@ -42,6 +42,13 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - 预览是运行结束时的派生副本：你在仓库里事后编辑 canonical 文件，不会改变这次记录。
 - 关于入口在左轨底部：包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。
 
+## 插件更新
+
+- 关于弹层里会显示当前版本与 npm 上的最新版：打开时静默检查一次（Host 侧缓存 5 分钟），也可以点「检查更新」强制重查。只跟随 npm 的 `latest` 稳定版。
+- 确认后由宿主 `pluginManager` 重装本插件（`installBundle`；已装同 spec 时走 `removeBundle → installBundle`，失败会尝试装回原版本），完成后需要重启 DSH 生效。
+- 本地安装（`link:` / `file:` / `workspace:`）**不提供一键更新**：那会把开发链接换成 npm 版。此时只显示 `dsh plugin --profile <name> add @morehao/dsh-github-trending@latest` 供复制。
+- 更新引擎来自共享包 [`@morehao/dsh-plugin-kit`](https://www.npmjs.com/package/@morehao/dsh-plugin-kit)（`./update` + `./update/client`），本仓只做上下文与 `execCapture` 接线；`GET /update` / `POST /update` 与其它路由一样要求自定义头、`no-store`，业务失败返回 409 + `UPDATE_FAILED` + `updateCode`。
+
 ## 它需要什么 / 它访问哪里 / 它不上传什么
 
 **需要什么**

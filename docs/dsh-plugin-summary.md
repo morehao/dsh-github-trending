@@ -42,6 +42,9 @@
 
 预览的数据边界：运行成功后 Host 只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内、≤512 KB、sha256 一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、上限 30）；`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
 
+插件自更新：关于弹层打开时静默检查 npm 最新版（Host 缓存 5 分钟），确认后经宿主 `pluginManager` 重装插件（`link:` / `file:` / `workspace:` 安装只给手动命令），引擎来自共享包 `@morehao/dsh-plugin-kit`。
+
+
 侧栏入口图标是趋势折线；不要把卡片塞进导航行（v0.1.4 曾因此占满侧栏）。
 
 ## 4. 两个工具
