@@ -4,7 +4,7 @@
  * 日志不是实时流：按需 `GET /log?id=`，Host 只回最后 64 KB。运行入口统一走
  * `useRunController`，运行中禁用重复触发。
  */
-import { Alert, Btn, copyText, duration, h, shortHash, shortTime, React } from './ui.js';
+import { Alert, Btn, copyText, duration, formatTokens, h, shortHash, shortTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import { getLog, type DigestTarget, type RunRecord, type StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
@@ -201,6 +201,9 @@ export function RunsView(props: RunsProps): any {
                   record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
                 ),
                 h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
+                record.tokens === undefined
+                  ? null
+                  : h('span', { className: 'dshgt-run-tokens dshgt-mono', title: t('run.usage.tokens') }, `${formatTokens(record.tokens)} tok`),
                 h('span', { className: 'dshgt-run-duration' }, duration(record.durationMs)),
                 h('span', { className: 'dshgt-run-chev' }, '›'),
               ),
@@ -241,7 +244,9 @@ export function RunsView(props: RunsProps): any {
                       ),
                       detailItem(t, 'runs.detail.warnings', record.warnings.length === 0 ? t('runs.detail.none') : record.warnings.join('；')),
                       detailItem(t, 'runs.detail.files', `${record.files} · ${duration(record.durationMs)}`),
+                      detailItem(t, 'runs.detail.tokens', record.tokens === undefined ? t('runs.detail.tokensNone') : h('span', { className: 'dshgt-mono' }, `${formatTokens(record.tokens)} tokens`)),
                     ),
+                    record.releases === undefined ? null : ReleasesDetail({ t, record }),
                     record.legacy === true ? h('div', { className: 'dshgt-hint' }, t('runs.legacyHint')) : null,
                     h(
                       'div',
@@ -267,7 +272,38 @@ export function RunsView(props: RunsProps): any {
             );
           }),
         ),
+    state.status.totalTokens === undefined
+      ? null
+      : h('div', { className: 'dshgt-runs-foot dshgt-hint' }, t('runs.footer.total', { total: formatTokens(state.status.totalTokens) })),
     logId === null ? null : h(LogDrawer, { t, runId: logId, onClose: () => setLogId(null) }),
+  );
+}
+
+/** 发版订阅阶段明细（历史记录展开时展示；只读 summary 字段）。 */
+function ReleasesDetail(props: { t: Translate; record: RunRecord }): any {
+  const { t, record } = props;
+  const r = record.releases;
+  if (r === undefined || !r.enabled) {
+    return h('div', { className: 'dshgt-releases-detail' }, h('span', { className: 'dshgt-hint' }, t('releases.empty')));
+  }
+  const stats: Array<[string, number | undefined]> = [
+    [t('releases.stat.repos'), r.repos],
+    [t('releases.stat.new'), r.newReleases],
+    [t('releases.stat.summarized'), r.summarized],
+    [t('releases.stat.degraded'), r.degraded],
+    [t('releases.stat.failed'), r.failed],
+    [t('releases.stat.skipped'), r.skipped],
+  ];
+  return h(
+    'div',
+    { className: 'dshgt-releases-detail' },
+    h(
+      'div',
+      { className: 'dshgt-releases-stats' },
+      stats
+        .filter(([, value]) => value !== undefined)
+        .map(([label, value]) => h('span', { className: 'dshgt-releases-stat', key: label }, h('span', { className: 'dshgt-hint' }, label), h('span', { className: 'dshgt-mono' }, String(value)))),
+    ),
   );
 }
 

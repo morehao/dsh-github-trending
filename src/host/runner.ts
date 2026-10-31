@@ -20,6 +20,7 @@ import {
   newRunId,
   PREVIEW_MAX_BYTES,
   type PreviewMeta,
+  type ReleasesSummary,
   type RunRecord,
   type Store,
 } from '../state.js';
@@ -61,6 +62,10 @@ export interface RunSummary {
   logFile?: string;
   channel?: 'fifo' | 'tmpfile';
   proxy?: boolean;
+  /** 本次任务 token 总量（榜单 + 订阅阶段，含订阅）；两者都缺省则缺省。 */
+  tokens?: number;
+  /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
+  releases?: ReleasesSummary;
   /** 核心从哪来：env/settings 覆盖、缓存、还是本次下载。 */
   coreSource?: 'settings' | 'env' | 'cache' | 'download';
   coreTag?: string;
@@ -149,6 +154,37 @@ export function periodFileBase(period: Period, date: string): string {
   if (period === 'monthly') return date.slice(0, 7);
   if (period === 'weekly') return isoWeekName(date);
   return date;
+}
+
+/**
+ * 从契约 `RunOutcome` 投影出「token 总量」与「发版摘要」：
+ * - `tokens` = usage.totalTokens + releases.usage.totalTokens（含订阅阶段）；
+ *   两个来源都缺省则 `tokens` 缺省（历史显示 `—`）。
+ * - `releases` 只在 outcome 带 `releases` 块时才有（旧核心或 enabled=false 都无）。
+ */
+export function projectUsage(outcome: RunOutcome): { tokens?: number; releases?: ReleasesSummary } {
+  const usageTokens = outcome.usage?.totalTokens;
+  const releasesTokens = outcome.releases?.usage?.totalTokens;
+  let tokens: number | undefined;
+  if (typeof usageTokens === 'number' || typeof releasesTokens === 'number') {
+    tokens = (typeof usageTokens === 'number' ? usageTokens : 0) + (typeof releasesTokens === 'number' ? releasesTokens : 0);
+  }
+  const releases: ReleasesSummary | undefined =
+    outcome.releases === undefined
+      ? undefined
+      : {
+          enabled: outcome.releases.enabled,
+          repos: outcome.releases.repos,
+          newReleases: outcome.releases.newReleases,
+          ...(outcome.releases.summarized === undefined ? {} : { summarized: outcome.releases.summarized }),
+          ...(outcome.releases.degraded === undefined ? {} : { degraded: outcome.releases.degraded }),
+          ...(outcome.releases.failed === undefined ? {} : { failed: outcome.releases.failed }),
+          ...(outcome.releases.skipped === undefined ? {} : { skipped: outcome.releases.skipped }),
+        };
+  return {
+    ...(tokens === undefined ? {} : { tokens }),
+    ...(releases === undefined ? {} : { releases }),
+  };
 }
 
 export class Runner {
@@ -387,6 +423,7 @@ export class Runner {
       ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
       ...(outcome.skipReason === undefined ? {} : { skipReason: outcome.skipReason }),
       ...(error === undefined ? {} : { error }),
+      ...projectUsage(outcome),
       warnings: outcome.warnings,
       logFile: input.logFile,
       ...(input.channel === undefined ? {} : { channel: input.channel }),
@@ -439,10 +476,14 @@ export class Runner {
     };
 
     // 排除索引页与 readme：真正的 digest 是本期唯一那份 `.md`。
+    // 同时排除 `releases/` 前缀——发版摘要产物与 trending 同 commit，但**不是**本期
+    // digest 预览；混进来会让「唯一 digest 预览」语义失效。
     const markdown = outcome.files.filter((file) => {
       const ext = path.extname(file.path).toLowerCase();
       const base = path.basename(file.path).toLowerCase();
-      return ext === '.md' && base !== 'readme.md' && base !== 'index.md';
+      const normalized = file.path.replace(/\\/g, '/');
+      const inReleases = normalized === 'releases' || normalized.startsWith('releases/');
+      return ext === '.md' && base !== 'readme.md' && base !== 'index.md' && !inReleases;
     });
     if (markdown.length === 0) return skip('no-markdown');
 
@@ -524,6 +565,8 @@ export class Runner {
       ...(summary.commit === undefined ? {} : { commit: summary.commit }),
       ...(summary.prUrl === undefined ? {} : { prUrl: summary.prUrl }),
       ...(summary.preview === undefined ? {} : { preview: summary.preview }),
+      ...(summary.tokens === undefined ? {} : { tokens: summary.tokens }),
+      ...(summary.releases === undefined ? {} : { releases: summary.releases }),
       coreVersion: summary.coreVersion,
       model: { provider: settings.model.provider, model: settings.model.model },
       languages: settings.trending.languages,

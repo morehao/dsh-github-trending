@@ -274,6 +274,51 @@ test('多个 .md 且没有当天文件时不猜，不生成预览', async () => 
   assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'ambiguous'));
 });
 
+test('preview 排除 releases/ 前缀：只挑本期 digest，不把发版 md 当预览', async () => {
+  const { runner } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: `trending/${DATED}.md`, content: 'digest' },
+        { path: 'releases/vercel_next.js.md', content: 'release' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview.file, `trending/${DATED}.md`);
+});
+
+test('只有 releases/*.md 时没有 digest 预览（不被误选）', async () => {
+  const events = [];
+  const { runner } = makeRunner({
+    logger: (event, data) => events.push({ event, data }),
+    scenario: { FAKE_ARTIFACTS: JSON.stringify([{ path: 'releases/oven_sh_bun.md', content: 'rel' }]) },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview, undefined);
+  assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'no-markdown'));
+});
+
+test('usage + releases 投影进摘要与历史：tokens = 榜单 + 订阅', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_USAGE: '140', FAKE_RELEASES: '6,9,60,1,0,2' },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.tokens, 200); // 140 + 60
+  assert.equal(summary.releases.repos, 6);
+  assert.equal(summary.releases.newReleases, 9);
+  assert.equal(summary.releases.degraded, 1);
+  const record = store.readHistory()[0];
+  assert.equal(record.tokens, 200);
+  assert.equal(record.releases.newReleases, 9);
+});
+
+test('旧核心无 usage/releases：tokens/releases 缺省', async () => {
+  const { runner } = makeRunner();
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.tokens, undefined);
+  assert.equal(summary.releases, undefined);
+});
+
 test('路径穿越 / 绝对路径：不读 repo 外的文件', async () => {
   const outsideDir = mkdtempSync(path.join(tmpdir(), 'dshgt-outside-'));
   const outside = path.join(outsideDir, 'evil.md');

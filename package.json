@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@morehao/dsh-plugin-kit": "0.1.0",
-    "@morehao/trendradar-contract": "0.2.0"
+    "@morehao/trendradar-contract": "0.3.0"
   },
   "dsh": {
     "bundle": {
@@ -59,7 +59,7 @@
     },
     "core": {
       "repo": "morehao/trendradar",
-      "version": "0.4.0"
+      "version": "0.6.0"
     },
     "client": {
       "platform": "web",

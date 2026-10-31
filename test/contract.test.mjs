@@ -33,9 +33,13 @@ test('wire 版本是 v2（ipcSchema=2 / digestSchema=2 / contractVersion 主版�
   assert.equal(String(versionMap['version-info.v2.json'].current).split('.')[0], '0');
 });
 
-test('v2 fixtures 全部通过 ajv 校验', () => {
+test('v2 fixtures 全部通过对应的 ajv 校验', () => {
+  // 契约 0.3.0 起 fixtures 同时含 digest 与 release 两类；
+  // release* 走 releases 校验器，其余走 digest 校验器。
   for (const [name, fixture] of Object.entries(fixtures)) {
-    assert.equal(validators.digest(fixture), true, `fixture ${name} 未通过 digest 校验`);
+    const isRelease = name.startsWith('release');
+    const ok = isRelease ? validators.releases(fixture) : validators.digest(fixture);
+    assert.equal(ok, true, `fixture ${name} 未通过 ${isRelease ? 'releases' : 'digest'} 校验`);
   }
 });
 

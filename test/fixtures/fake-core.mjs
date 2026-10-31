@@ -33,6 +33,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { readFileSync as readStdinSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -156,6 +157,37 @@ if (command === 'run') {
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
   const files = artifactsFor(config, skipped);
+  // 契约 0.3.0：可选 usage / releases 块。用 FAKE_USAGE_* / FAKE_RELEASES_* 控制。
+  const usageSpec = process.env.FAKE_USAGE;
+  let usage;
+  if (usageSpec === 'unknown') {
+    usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, usageKnown: false, calls: 0, retries: 0, batches: 0, cacheHits: 0 };
+  } else if (usageSpec !== undefined && usageSpec !== '') {
+    const total = Number(usageSpec);
+    usage = { promptTokens: Math.floor(total * 0.8), completionTokens: Math.floor(total * 0.2), totalTokens: total, cachedTokens: 0, usageKnown: true, calls: 1, retries: 0, batches: 1, cacheHits: 0 };
+  }
+  const releasesSpec = process.env.FAKE_RELEASES;
+  let releases;
+  if (releasesSpec !== undefined && releasesSpec !== '') {
+    if (releasesSpec === 'off') {
+      releases = { enabled: false, repos: 0, newReleases: 0, durationMs: 0, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, usageKnown: false, calls: 0, retries: 0, batches: 0, cacheHits: 0 } };
+    } else {
+      // 形如 "repos,newReleases,tokens[,degraded,failed,skipped]"
+      const [repos, newReleases, tokens, degraded, failed, skippedCount] = releasesSpec.split(',').map((part) => Number(part));
+      const rTotal = Number.isFinite(tokens) ? tokens : 0;
+      releases = {
+        enabled: true,
+        repos,
+        newReleases,
+        ...(Number.isFinite(degraded) ? { degraded } : {}),
+        ...(Number.isFinite(failed) ? { failed } : {}),
+        ...(Number.isFinite(skippedCount) ? { skipped: skippedCount } : {}),
+        summarized: newReleases,
+        durationMs: 1000,
+        usage: { promptTokens: Math.floor(rTotal * 0.8), completionTokens: Math.floor(rTotal * 0.2), totalTokens: rTotal, cachedTokens: 0, usageKnown: true, calls: 1, retries: 0, batches: 1, cacheHits: 0 },
+      };
+    }
+  }
   process.stdout.write(
     JSON.stringify({
       ipcSchema: 2,
@@ -174,10 +206,84 @@ if (command === 'run') {
             prUrl: 'https://example.invalid/pr/1',
             contentHash: hasKey ? HASH_WITH_KEY : HASH_NO_KEY,
           }),
+      ...(usage === undefined ? {} : { usage }),
+      ...(releases === undefined ? {} : { releases }),
       warnings: process.env.FAKE_ECHO_TRIGGER === '1' ? [`trigger=${process.env.TRENDRADAR_TRIGGER ?? ''}`] : [],
     }) + '\n',
   );
   process.exit(0);
+}
+
+if (command === 'subscribe') {
+  // 读 RunRequest from stdin（`subscribe --json`）。
+  let request = {};
+  try {
+    const raw = readStdinSync(0, 'utf8');
+    request = raw.trim() === '' ? {} : JSON.parse(raw);
+  } catch (error) {
+    process.stderr.write(`error: CONFIG_INVALID: cannot read RunRequest: ${String(error?.message ?? error)}\n`);
+    process.exit(1);
+  }
+  const action = request.action;
+  const repoArg = request.repo;
+  const configPath = typeof request.configPath === 'string' ? request.configPath : '';
+  let config = '';
+  try {
+    config = readFileSync(configPath, 'utf8');
+  } catch {
+    config = '';
+  }
+  // 和真核心一样从配置推导数据仓里的订阅文件；缺省落到 configPath 同级，保证断得住。
+  const repoRoot = repoPathFromConfig(config) || path.dirname(configPath || '.');
+  const outMatch = /^\s*dir:\s*"((?:[^"\\]|\\.)*)"\s*$/m.exec(config);
+  const outputDir = outMatch === null ? 'trending' : JSON.parse(`"${outMatch[1]}"`);
+  const subsFile = path.join(repoRoot, outputDir, 'subscriptions.fake.json');
+  const readList = () => {
+    try {
+      const value = JSON.parse(readFileSync(subsFile, 'utf8'));
+      return Array.isArray(value) ? value : [];
+    } catch {
+      return [];
+    }
+  };
+  const writeList = (list) => {
+    mkdirSync(path.dirname(subsFile), { recursive: true });
+    writeFileSync(subsFile, JSON.stringify(list));
+  };
+  const now = new Date().toISOString();
+  const envelope = (ok, errorCode, errorMessage) => {
+    const out = { ipcSchema: 2, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [] };
+    if (!ok) out.error = { code: errorCode, message: errorMessage, retriable: false };
+    process.stdout.write(JSON.stringify(out) + '\n');
+    process.exit(ok ? 0 : 1);
+  };
+  if (process.env.FAKE_SUBSCRIBE_FAIL === '1') {
+    envelope(false, 'CONFIG_INVALID', 'fake subscribe failure');
+  }
+  if (action === 'list') {
+    for (const repo of readList()) process.stdout.write(`${repo}\n`);
+    envelope(true);
+  }
+  if (action === 'add') {
+    const list = readList();
+    if (!repoArg || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoArg)) {
+      envelope(false, 'CONFIG_INVALID', `invalid repo ${repoArg ?? ''}`);
+    }
+    if (!list.includes(repoArg)) {
+      list.push(repoArg);
+      writeList(list);
+    }
+    envelope(true);
+  }
+  if (action === 'remove') {
+    const list = readList();
+    if (!list.includes(repoArg)) {
+      envelope(false, 'CONFIG_INVALID', `repo ${repoArg ?? ''} not subscribed`);
+    }
+    writeList(list.filter((repo) => repo !== repoArg));
+    envelope(true);
+  }
+  envelope(false, 'CONFIG_INVALID', `unknown subscribe action ${action}`);
 }
 
 process.stderr.write(`unknown command ${command}\n`);

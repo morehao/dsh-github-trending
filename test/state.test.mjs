@@ -167,3 +167,20 @@ test('recordRun 持久化 date / commit / preview（正文不进 history）', ()
   assert.deepEqual(persisted.records[0].preview, preview);
   assert.equal(JSON.stringify(persisted).includes('正文'), false);
 });
+
+test('tokens / releases 摘要落盘，旧记录缺省兼容', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-tokens-')) });
+  store.recordRun({ ...record(1), tokens: 7800, releases: { enabled: true, repos: 6, newReleases: 9, summarized: 8, degraded: 1 } });
+  store.recordRun({ ...record(2) }); // 无 tokens/releases
+  const history = store.readHistory();
+  assert.equal(history[0].tokens, undefined);
+  assert.equal(history[1].tokens, 7800);
+  assert.deepEqual(history[1].releases, { enabled: true, repos: 6, newReleases: 9, summarized: 8, degraded: 1 });
+});
+
+test('sumTokens 只累加有的记录；全无返回 undefined', () => {
+  const mk = (id, tokens) => ({ ...record(id), ...(tokens === undefined ? {} : { tokens }) });
+  assert.equal(stateModule.sumTokens([mk(1, 100), mk(2, 250), mk(3)]), 350);
+  assert.equal(stateModule.sumTokens([mk(1), mk(2)]), undefined);
+  assert.equal(stateModule.sumTokens([]), undefined);
+});

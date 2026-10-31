@@ -17,6 +17,7 @@ import { SettingsView } from './settings.js';
 import { OverviewView } from './overview.js';
 import { RunsView } from './runs.js';
 import { DigestView } from './digest.js';
+import { SubscriptionsView } from './subscriptions.js';
 import { AboutDialog } from './about.js';
 import { IdentityBar } from './identity-bar.js';
 import { SidebarPanelIcon } from './panel-icon.js';
@@ -34,12 +35,13 @@ interface Slots {
   inject: (name: string, factory: () => unknown) => () => void;
 }
 
-type ViewId = 'overview' | 'digest' | 'runs' | 'settings';
+type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'settings';
 
 const NAV: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: 'overview', label: 'nav.overview', icon: 'grid' },
   { id: 'digest', label: 'nav.digest', icon: 'doc' },
   { id: 'runs', label: 'nav.runs', icon: 'list' },
+  { id: 'subscriptions', label: 'nav.subscriptions', icon: 'rss' },
   { id: 'settings', label: 'nav.settings', icon: 'sliders' },
 ];
 
@@ -80,6 +82,15 @@ function navIcon(name: string, size = 16): any {
       common,
       h('path', { d: 'M8 6h12M8 12h12M8 18h12' }),
       h('path', { d: 'M4 6h.01M4 12h.01M4 18h.01' }),
+    );
+  }
+  if (name === 'rss') {
+    return h(
+      'svg',
+      common,
+      h('path', { d: 'M5 5a14 14 0 0 1 14 14' }),
+      h('path', { d: 'M5 11a8 8 0 0 1 8 8' }),
+      h('circle', { cx: 6, cy: 18, r: 1.6 }),
     );
   }
   return h(
@@ -149,6 +160,7 @@ export function apply(ctx: any): void {
     }, []);
     const openRuns = React.useCallback((): void => setView('runs'), []);
     const openSettings = React.useCallback((): void => setView('settings'), []);
+    const openSubscriptions = React.useCallback((): void => setView('subscriptions'), []);
     const openAbout = React.useCallback((): void => setAboutOpen(true), []);
     const state = value.state;
     const plugin = state?.plugin;
@@ -193,7 +205,9 @@ export function apply(ctx: any): void {
             })
           : view === 'runs'
             ? h(RunsView, { t, store: value, controller, onOpenDigest: openDigest })
-            : h(SettingsView, { t, store: value, pickDirectory });
+            : view === 'subscriptions'
+              ? h(SubscriptionsView, { t, store: value, onOpenSettings: openSettings })
+              : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
 
     return h(
       'div',

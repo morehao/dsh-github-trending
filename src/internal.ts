@@ -24,6 +24,7 @@ export * as preflight from './host/preflight.js';
 export * as proxy from './host/proxy.js';
 export * as pendingPr from './host/pending-pr.js';
 export * as runner from './host/runner.js';
+export * as subscribe from './host/subscribe.js';
 export * as pluginInfo from './host/plugin-info.js';
 export * as schedule from './host/schedule.js';
 export * as routes from './host/routes.js';

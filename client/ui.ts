@@ -173,6 +173,14 @@ export function shortHash(hash: string | undefined): string {
   return typeof hash === 'string' && hash !== '' ? hash.slice(0, 10) : '—';
 }
 
+/** token 数量的展示：<1万原样千分位，≥1万用 k/M 缩略便于历史表紧凑。 */
+export function formatTokens(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '—';
+  if (value < 10_000) return value.toLocaleString('en-US');
+  if (value < 1_000_000) return `${(value / 1000).toFixed(1)}k`.replace('.0k', 'k');
+  return `${(value / 1_000_000).toFixed(1)}M`.replace('.0M', 'M');
+}
+
 export function localTime(iso: string | null | undefined): string {
   if (iso === null || iso === undefined) return '—';
   const date = new Date(iso);

@@ -11,10 +11,21 @@
  * 不再兼容——协议版本不匹配会在握手阶段被拦下，这里绝不「猜字段」。
  */
 import { validators } from '@morehao/trendradar-contract';
-import type { ErrorInfo, FileArtifact, RunResult } from '@morehao/trendradar-contract';
+import type { ErrorInfo, FileArtifact, RunResult, Usage, ReleasesReport, SubscriptionList } from '@morehao/trendradar-contract';
 import type { AnyCode } from './errors.js';
 
-export type { ErrorCode, ErrorInfo, FileArtifact, RunRequest, RunResult, State, StateRun } from '@morehao/trendradar-contract';
+export type {
+  ErrorCode,
+  ErrorInfo,
+  FileArtifact,
+  RunRequest,
+  RunResult,
+  State,
+  StateRun,
+  Usage,
+  ReleasesReport,
+  SubscriptionList,
+} from '@morehao/trendradar-contract';
 
 /** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v2.json` 的 wire 整数）。 */
 export const IPC_SCHEMA_VERSION = 2 as const;
@@ -55,6 +66,10 @@ export interface RunOutcome {
   prUrl?: string;
   /** 核心给出的跳过原因：merged | pr-closed | unchanged（可选，旧核心没有）。 */
   skipReason?: string;
+  /** 榜单阶段 token 用量（契约 Usage，可选；旧核心没有）。不拆维度，只取 totalTokens。 */
+  usage?: Usage;
+  /** 发版订阅阶段报告（契约 ReleasesReport，可选；旧核心/releases.enabled=false 时没有）。 */
+  releases?: ReleasesReport;
   error?: RunError;
   warnings: string[];
   startedAt: string;
@@ -156,6 +171,8 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
     commit: typeof result.commit === 'string' ? result.commit : undefined,
     prUrl: typeof result.prUrl === 'string' ? result.prUrl : undefined,
     skipReason: typeof skipReason === 'string' && skipReason !== '' ? skipReason : undefined,
+    ...(result.usage === undefined ? {} : { usage: result.usage }),
+    ...(result.releases === undefined ? {} : { releases: result.releases }),
     error,
     warnings: Array.isArray(result.warnings) ? result.warnings.filter((item): item is string => typeof item === 'string') : [],
     ...timing(options),
@@ -165,4 +182,57 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
 
 function timing(options: ParseRunOptions) {
   return { startedAt: options.startedAt, finishedAt: options.finishedAt, durationMs: options.durationMs };
+}
+
+/** 订阅命令的结果：list 带回 repos，add/remove 只看 ok/error。 */
+export interface SubscribeOutcome {
+  ok: boolean;
+  repos: string[];
+  error?: RunError;
+}
+
+/** 订阅命令的一个动作（契约 `RunRequest.action`）。 */
+export type SubscribeAction = 'list' | 'add' | 'remove';
+
+const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/**
+ * 解析核心 `subscribe --json` 的 stdout。
+ *
+ * 核心先由 `runSubscribe` 把 `list` 的结果**逐行**打到 stdout（每行一个 owner/repo），
+ * 再由 `emitSubscribeResult` 把契约 RunResult 信封打到 stdout（`command:"subscribe"`，
+ * 只带 `ok/error`，**不含 repos**）。因此：
+ *   - 信封是**最后一段 JSON**；它前面的非空行才是 list 的仓库列表；
+ *   - 信封 `command` 是 `"subscribe"`（不在契约 RunResult 枚举里，故不能直接用
+ *     `validators.runResult` 校验），这里只按 envelope 必需字段做轻量校验。
+ * 任何形状不对都抛 `IPC_INVALID`：订阅结果读错会把失败当成功。
+ */
+export function parseSubscribeResult(text: string): SubscribeOutcome {
+  const trimmed = text.trim();
+  if (trimmed === '') throw new IpcError('IPC_INVALID', '核心 subscribe 输出为空');
+  const lines = trimmed.split('\n');
+  const lastLine = (lines[lines.length - 1] ?? '').trim();
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(lastLine);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new IpcError('IPC_INVALID', `核心 subscribe 未以结果信封结尾：${detail}`);
+  }
+  if (!isRecord(envelope) || envelope.ipcSchema !== IPC_SCHEMA_VERSION || typeof envelope.ok !== 'boolean') {
+    throw new IpcError('IPC_INVALID', '核心 subscribe --json 不是契约信封（ipcSchema=2 / ok）');
+  }
+  const error = normalizeError(envelope.error);
+  // 信封之前的行为 list 结果；过滤空行与任何非 owner/repo 形态的噪声行。
+  const repos: string[] = [];
+  for (const line of lines.slice(0, -1)) {
+    const value = line.trim();
+    if (value === '') continue;
+    if (REPO_PATTERN.test(value)) repos.push(value);
+  }
+  return {
+    ok: envelope.ok === true,
+    repos,
+    ...(error === undefined ? {} : { error }),
+  };
 }

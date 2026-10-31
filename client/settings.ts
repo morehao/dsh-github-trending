@@ -27,12 +27,12 @@ import { credentialView } from './credential.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
 
-type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'schedule';
+type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'summarize' | 'releases' | 'schedule';
 
 /** 分区顺序，与左侧 tab 一致；用于「是否还有未保存改动」的判定。 */
-const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'schedule'];
+const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases', 'schedule'];
 
-const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, schedule: false };
+const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, summarize: false, releases: false, schedule: false };
 
 function cloneSettings(settings: SettingsShape): SettingsShape {
   return JSON.parse(JSON.stringify(settings)) as SettingsShape;
@@ -51,6 +51,10 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
       return { github: settings.github };
     case 'scope':
       return { trending: settings.trending };
+    case 'summarize':
+      return { summarize: settings.summarize };
+    case 'releases':
+      return { releases: settings.releases };
     case 'schedule':
       return { schedule: settings.schedule };
   }
@@ -67,7 +71,7 @@ function applySection(target: SettingsShape, source: SettingsShape, section: Sec
   return next;
 }
 
-export function SettingsView(props: { t: Translate; store: StoreValue; onClose?: () => void; pickDirectory?: () => Promise<string | undefined> }): any {
+export function SettingsView(props: { t: Translate; store: StoreValue; onClose?: () => void; pickDirectory?: () => Promise<string | undefined>; initialSection?: SectionId; onOpenSubscriptions?: () => void }): any {
   const { t, store } = props;
   const state = store.state;
   const [draft, setDraft] = React.useState<SettingsShape | null>(null);
@@ -81,7 +85,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [rechecking, setRechecking] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [quickOpen, setQuickOpen] = React.useState(false);
-  const [section, setSection] = React.useState<SectionId>('source');
+  const [section, setSection] = React.useState<SectionId>(props.initialSection ?? 'source');
   const [branchInfo, setBranchInfo] = React.useState<RepoBranchResult | null>(null);
   const [branchLoading, setBranchLoading] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
@@ -288,6 +292,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     { id: 'repo', label: t('st.repo') },
     { id: 'auth', label: t('st.auth') },
     { id: 'scope', label: t('st.scope') },
+    { id: 'summarize', label: t('st.summarize') },
+    { id: 'releases', label: t('st.releases') },
     { id: 'schedule', label: t('st.schedule') },
   ];
 
@@ -544,13 +550,81 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     h('p', { className: 'dshgt-hint' }, t('schedule.source')),
   );
 
+  const summarizeCard = h(
+    Card,
+    { title: t('card.summarize.title'), hint: t('card.summarize.hint') },
+    h(
+      Row,
+      { label: t('summarize.batchSize') },
+      h(Input, { mono: true, width: 90, value: String(draft.summarize.batchSize), onInput: (value: string) => update((next) => { next.summarize.batchSize = Math.round(Number(value) || 0); }) }),
+    ),
+    h(
+      Row,
+      { label: t('summarize.maxRetries') },
+      h(Input, { mono: true, width: 90, value: String(draft.summarize.maxRetries), onInput: (value: string) => update((next) => { next.summarize.maxRetries = Math.round(Number(value) || 0); }) }),
+    ),
+    h(
+      Row,
+      { label: t('summarize.enrich') },
+      h(Select, {
+        value: draft.summarize.enrich,
+        options: [
+          { value: 'none', label: t('summarize.enrich.none') },
+          { value: 'repo', label: t('summarize.enrich.repo') },
+          { value: 'readme', label: t('summarize.enrich.readme') },
+        ],
+        onChange: (value: string) => update((next) => { next.summarize.enrich = value === 'repo' ? 'repo' : value === 'readme' ? 'readme' : 'none'; }),
+      }),
+    ),
+    h(
+      Row,
+      { label: t('summarize.readmeChars') },
+      h(Input, { mono: true, width: 90, value: String(draft.summarize.readmeChars), onInput: (value: string) => update((next) => { next.summarize.readmeChars = Math.round(Number(value) || 0); }) }),
+    ),
+    draft.summarize.enrich === 'none' ? null : h(Alert, { kind: 'warn' }, h('div', null, t('summarize.enrichNote'))),
+    h('p', { className: 'dshgt-hint' }, t('summarize.usageNote')),
+  );
+
+  const releasesCard = h(
+    Card,
+    {
+      title: t('card.releases.title'),
+      hint: t('card.releases.hint'),
+      extra: props.onOpenSubscriptions === undefined ? undefined : h(Btn, { small: true, onClick: () => props.onOpenSubscriptions?.() }, t('releases.manage')),
+    },
+    h(
+      Row,
+      { label: t('releases.enabled') },
+      h(Toggle, { checked: draft.releases.enabled, onChange: (value: boolean) => update((next) => { next.releases.enabled = value; }) }),
+      h('span', { className: 'dshgt-hint' }, t('releases.enabled.hint')),
+    ),
+    h(
+      Row,
+      { label: t('releases.includePrerelease') },
+      h(Toggle, { checked: draft.releases.includePrerelease, onChange: (value: boolean) => update((next) => { next.releases.includePrerelease = value; }) }),
+    ),
+    h(
+      Row,
+      { label: t('releases.includeDrafts') },
+      h(Toggle, { checked: draft.releases.includeDrafts, onChange: (value: boolean) => update((next) => { next.releases.includeDrafts = value; }) }),
+    ),
+    h(
+      Row,
+      { label: t('releases.notesChars') },
+      h(Input, { mono: true, width: 90, value: String(draft.releases.maxNotesChars), onInput: (value: string) => update((next) => { next.releases.maxNotesChars = Math.round(Number(value) || 0); }) }),
+    ),
+    h('p', { className: 'dshgt-hint' }, t('releases.note')),
+  );
+
   const currentCard =
     section === 'source' ? sourceCard
       : section === 'model' ? modelCard
         : section === 'repo' ? repoCard
           : section === 'auth' ? authCard
             : section === 'scope' ? scopeCard
-              : scheduleCard;
+              : section === 'summarize' ? summarizeCard
+                : section === 'releases' ? releasesCard
+                  : scheduleCard;
 
   return h(
     'div',
