@@ -254,6 +254,17 @@ export const CSS = `
 .dshgt-about .dshgt-kv{grid-template-columns:110px 1fr;}
 .dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;word-break:break-all;}
 .dshgt-about .dshgt-kv a:hover{text-decoration:underline;}
+.dshgt-update{margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-update-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.dshgt-update-head h4{margin:0;font-size:13px;font-weight:600;}
+.dshgt-update-head .dshgt-hint{font-size:11.5px;}
+.dshgt-update-line{margin:6px 0 0;font-size:12.5px;color:var(--gt-muted);line-height:1.55;}
+.dshgt-update-err{color:var(--gt-err);}
+.dshgt-update-warn{margin:6px 0 0;font-size:12px;color:var(--gt-warn);line-height:1.55;}
+.dshgt-update-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px;}
+.dshgt-update-manual{margin-top:9px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--gt-warn) 35%,var(--gt-border));border-radius:8px;background:color-mix(in srgb,var(--gt-warn) 6%,var(--gt-card));}
+.dshgt-update-manual .dshgt-update-warn{margin:0 0 6px;}
+.dshgt-update-cmd{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.5;color:var(--gt-fg);word-break:break-all;user-select:all;}
 
 @media (max-width:1100px){
   .dshgt-app{grid-template-columns:190px minmax(0,1fr);}

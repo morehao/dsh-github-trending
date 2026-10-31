@@ -2,6 +2,16 @@
 
 ## 未发布
 
+### 新增
+
+- **插件自更新**：关于弹层显示当前版本与 npm 最新版，打开时静默检查（Host 侧 5 分钟缓存），也可手动「检查更新」（`GET /update?fresh=1`）。确认后经宿主 `pluginManager` 重装本插件：`installBundle` 返回 `already-installed` 时走 `removeBundle → installBundle`，remove 之后安装失败会尝试装回原版本，成功后提示重启 DSH 生效。`link:` / `file:` / `workspace:` 安装不提供一键更新，只给 `dsh plugin --profile <name> add ...@latest` 供复制；没有 `pluginManager` 时同样退化为手动命令。
+- **共享引擎 `@morehao/dsh-plugin-kit`**：更新引擎（查版本 / semver / registry 计划 / 安装路径 / 事件）与客户端状态机放进共享包，本仓新增 `src/host/update.ts` 只做 `ctx.get` 与 `execCapture` 接线；`POST /update` 的业务失败返回 409 + `UPDATE_FAILED` + `updateCode`，不占 500。
+- 客户端构建守卫允许依赖包源码进入 bundle（`link:` / `file:` 依赖会解析到仓库外），本仓 `src/`、`lib/` 仍禁止进客户端产物。
+
+### 修复
+
+- **关于弹层拿不到主题变量**：`AboutDialog` 挂在 `.dshgt-root` 之外，`--gt-*` 没定义，弹层背景/边框退化成透明、文字对比度极低。现在弹层外面包一层 `.dshgt-root` 再进 mask。
+
 ### 修复
 
 - **日报里的表格不再被拍平成一个段落**：`client/markdown-core.ts` 补上 GFM 管道表解析——表头 + 分隔行（`---` / `:---` / `:---:` / `---:` 决定列对齐）+ 数据行，单元格按行内规则解析（链接、粗体、行内代码），支持反引号里的 `|` 与 `\|` 转义；表头/分隔行列数不一致或缺少分隔行时退回段落，不丢内容。`client/markdown.ts` 渲染 `table` / `thead` / `tbody` / `th` / `td` 并按对齐写 `text-align`；此前整张表会被当成「一行满是 `|` 的文字」。

@@ -253,3 +253,42 @@ export function getPreview(runId: string, signal?: AbortSignal): Promise<Preview
 export function getLog(runId: string, signal?: AbortSignal): Promise<LogPayload> {
   return apiCall<LogPayload>('GET', `/log?id=${encodeURIComponent(runId)}`, undefined, signal === undefined ? {} : { signal });
 }
+
+export type PluginInstallKind = 'registry' | 'link' | 'file' | 'workspace' | 'unknown';
+export type PluginUpdateApplication = 'applied' | 'restart-required' | 'overridden';
+
+export interface PluginUpdateView {
+  packageName: string;
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  checkFailed: boolean;
+  canApply: boolean;
+  installKind: PluginInstallKind;
+  installSpec?: string;
+  manualCommand: string;
+  applying: boolean;
+  checkedAt?: string;
+}
+
+export interface PluginUpdateResult {
+  application: PluginUpdateApplication;
+  restartRequired?: boolean;
+  updatedVersion: string;
+  steps?: string[];
+}
+
+/** 检查插件自身的 npm 最新版；`fresh` 绕过 Host 侧 5 分钟缓存。 */
+export async function getPluginUpdate(options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<PluginUpdateView> {
+  const query = options.fresh === true ? '?fresh=1' : '';
+  const payload = await apiCall<{ update: PluginUpdateView }>('GET', `/update${query}`, undefined, {
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  return payload.update;
+}
+
+/** 经宿主 pluginManager 重装本插件；失败时 Host 返回 409 + UPDATE_FAILED。 */
+export async function applyPluginUpdate(): Promise<PluginUpdateResult> {
+  const payload = await apiCall<{ result: PluginUpdateResult }>('POST', '/update', {});
+  return payload.result;
+}

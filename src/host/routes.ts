@@ -8,6 +8,8 @@
  */
 import type http from 'node:http';
 
+import { PluginUpdateError, type Updater } from '@morehao/dsh-plugin-kit/update';
+
 import {
   normalizeSettings,
   validateSettings,
@@ -45,6 +47,8 @@ export interface RouteDeps {
   /** 注入用：pendingPr 对账的 fetch 实现（测试不联网）。 */
   fetchImpl?: typeof fetch;
   version: string;
+  /** 自更新服务（共享包引擎）；缺省时 /update 返回 404，不影响其它路由。 */
+  update?: Updater;
   /** 包名与仓库地址都来自 package.json，由 src/index.ts 传入。 */
   pluginName?: string;
   repository?: string;
@@ -99,6 +103,18 @@ export function createRoutes(deps: RouteDeps) {
       if (!response.writableEnded) sendJson(response, 200, { ok: true, ...result });
     } catch (error) {
       if (response.writableEnded) return;
+      if (error instanceof PluginUpdateError) {
+        // 更新失败是可预期的业务结果（link 安装 / 无 pluginManager / 安装失败），用 409 而不是 500。
+        deps.logger?.('update.failed', { code: error.code, message: error.message });
+        sendJson(response, 409, {
+          ok: false,
+          code: 'UPDATE_FAILED',
+          updateCode: error.code,
+          message: redact(error.message),
+          update: deps.update?.view() ?? null,
+        });
+        return;
+      }
       const code = error instanceof IpcError ? error.code : 'INTERNAL';
       const message = redact(error instanceof Error ? error.message : String(error));
       deps.logger?.('route.error', { pathname, method, code, message });
@@ -119,6 +135,20 @@ async function dispatch(
   const settings = deps.store.readSettings();
 
   if (method === 'GET' && pathname === '/state') return statePayload(deps, settings);
+
+  if (method === 'GET' && pathname === '/update') {
+    if (deps.update === undefined) throw new IpcError('NOT_FOUND', '自更新服务不可用');
+    const update = await deps.update.check({ fresh: url.searchParams.get('fresh') === '1' });
+    return { update };
+  }
+
+  if (method === 'POST' && pathname === '/update') {
+    if (deps.update === undefined) throw new IpcError('NOT_FOUND', '自更新服务不可用');
+    const body = await readBody(request);
+    const version = typeof body.version === 'string' && body.version.trim() !== '' ? body.version.trim() : undefined;
+    const result = await deps.update.apply(version === undefined ? {} : { version });
+    return { result, update: deps.update.view() };
+  }
 
   if (method === 'GET' && pathname === '/core') {
     const core = await inspectCore(settings, { env, fresh: url.searchParams.get('fresh') === '1' });
