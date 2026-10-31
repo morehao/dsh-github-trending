@@ -29,17 +29,20 @@
 
 ## 3. 页面结构
 
-顶层两个 tab：**设置** / **运行**。
+侧栏入口是导航行里的小图标 + 「GitHub 趋势」标签；点它进入工作台。工作台四个视图：
 
-| 页面 | 内容 |
+| 视图 | 内容 |
 |---|---|
-| 设置 | 内容来源（本地二进制）· 模型 · 归档仓库 · GitHub 认证 · 榜单范围 · 调度；底部一行排障入口（复制脱敏配置 / 查看核心日志） |
-| 运行 · 本次 | 立即运行 / 试跑 / 重置 · 9 步进度 · 最近结果 · 错误卡 |
-| 运行 · 历史 | 最近 30 条记录：日期 / 结果（成功、降级、失败）/ 内容 / 耗时 / commit 与 PR |
+| 概览 | 下次运行 / 就绪检查（核心、模型、仓库、GitHub）/ 上次交付（状态、commit、PR、预览、阅读本期）/ 最近 7 天；运行中只显示开始时间、已用时、取消 |
+| 日报 | 最近 30 天有记录的日期切换；渲染 / 原文；文件路径、大小、复制路径、PR；失败 / 无变更 / 试跑 / 旧记录 / 副本缺失各有空状态 |
+| 运行记录 | 最近 30 条；筛选全部 / 失败 / 试跑；展开 commit / hash / branch / PR / warnings；只读日志抽屉；legacy 标记 |
+| 设置 | 沿用 #13 的六个 tab（内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度）；「内容来源」只有状态与核心操作（重新检查 / 下载），其余 tab 逐 tab 保存 |
 
-侧栏入口是导航行里的一个小图标 + 「GitHub 趋势」标签（与「插件」「自动化任务」同级），点它切到运行页；状态摘要与「立即运行 / 试跑」都在运行页里。不要把卡片塞进导航行（v0.1.4 曾因此占满侧栏）。
+左轨常驻下次运行摘要、就绪 N/4、包名 / 版本 / GitHub 入口；点包名打开「关于」弹层（完整包名可复制、仓库外链、MIT、核心版本、运行环境）。主题跟随宿主 token；不实现原型的主题切换、URL hash 与示例徽标。
 
-图标是一枚趋势折线，**侧栏入口与设置对话框左栏的「GitHub 趋势」共用同一枚**：宿主的设置导航按 section id 从闭名单选 glyph，第三方分区一律回退成齿轮，而 `settings.section` 只投影 id / order / label、没法传 icon，所以客户端在对话框挂载后认领自己那一行（可见文本等于本分区 label）并换成同一枚折线（见 `client/panel-icon.ts` 的 `installSettingsNavIcon`）。`settings.section` 以后支持 icon 字段时删掉这段即可。
+预览的数据边界：运行成功后 Host 只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内、≤512 KB、sha256 一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、上限 30）；`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
+
+侧栏入口图标是趋势折线；不要把卡片塞进导航行（v0.1.4 曾因此占满侧栏）。
 
 ## 4. 两个工具
 
@@ -128,15 +131,16 @@
 
 ## 11. 安全与隐私
 
-- 密钥与 token 只存 `ctx.credentials`，运行时解析、经 stdin 传给核心；不写配置文件、不进日志、不进 git diff。
+- 密钥与 token 只存 `ctx.credentials`，运行时解析、经 FIFO（POSIX）或 0600 临时文件（Windows，读完即删）交给核心；不写配置文件、不进日志、不进 argv。
 - 只与三类目标通信：本地核心进程、用户配置的模型端点、`api.github.com`。**不向作者控制的任何服务器发送数据**。
 - 回环代理（OAuth 类 provider）只监听 `127.0.0.1`，随机端口、一次性 token，随运行结束关闭。
+- 预览副本：只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内（词法 + realpath）、≤512 KB、sha256 与契约一致；复制到插件数据目录，不写用户仓库、不 commit、不改工作树。读取失败不阻断运行。
 
 ## 12. 市场合规
 
 - 发布到公共 npm，`publishConfig.access: public`；`files` 包含 host 入口、客户端 bundle、`cordis.patch.yml`、locales、icon。
 - `engines.dsh` 与 `peerDependencies` 对齐宿主版本区间；`dsh.bundle.patch` 指向 `cordis.patch.yml`。
-- README 必须披露：安装时经 `optionalDependencies` 获取平台二进制；运行时访问用户配置的模型端点与 `api.github.com`；不上传用户仓库信息。
+- README 必须披露：首次运行从 GitHub Release 下载核心二进制（sha256 校验）；运行时访问用户配置的模型端点与 `api.github.com`；不上传用户仓库信息。
 
 ## 13. 验收清单
 

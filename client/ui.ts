@@ -179,3 +179,22 @@ export function localTime(iso: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString();
 }
+
+/** 复制失败不抛错：按钮只是便利动作，不阻塞任何流程。 */
+export async function copyText(value: string): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || navigator.clipboard === undefined) return false;
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 本地时间的「月-日 时:分」紧凑格式；用于运行列表。 */
+export function shortTime(iso: string | null | undefined): string {
+  if (iso === null || iso === undefined) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}

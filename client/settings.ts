@@ -5,8 +5,10 @@
  * 编辑在本地 `draft` 里进行，只有点「保存设置」才 POST /config —— 与规格
  * 「禁止静默复制」「保存前预检」一致；快速填充也要用户再点一次确认。
  *
- * 默认只暴露普通用户需要的字段；`TRENDING_DIGEST_CORE`（核心路径）与手动
- * `凭据引用` 收进「高级设置」，避免把开发/排障概念摊在首屏。
+ * 只暴露普通用户需要的字段：「内容来源」是状态与核心操作（重新检查 / 下载），
+ * 没有可编辑项，因此不出现「保存本页」；`TRENDING_DIGEST_CORE` 不提供界面入口
+ * （需要时用环境变量或直接改 settings.json），手动 `凭据引用` 也不露出（由快速
+ * 填充自动带入）。避免把开发/排障概念摊在首屏，也避免出现「点了没反应」的开关。
  */
 import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, duration, h, localTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
@@ -20,6 +22,7 @@ import {
   type SettingsShape,
 } from './api.js';
 import type { StoreValue } from './store.js';
+import { credentialView } from './credential.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
 
@@ -77,7 +80,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [rechecking, setRechecking] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [quickOpen, setQuickOpen] = React.useState(false);
-  const [advanced, setAdvanced] = React.useState(false);
   const [section, setSection] = React.useState<SectionId>('source');
   const [branchInfo, setBranchInfo] = React.useState<RepoBranchResult | null>(null);
   const [branchLoading, setBranchLoading] = React.useState(false);
@@ -85,6 +87,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [githubTest, setGithubTest] = React.useState<GithubProbeResult | null>(null);
 
   const anyDirty = SECTIONS.some((id) => dirtySections[id]);
+  // 「内容来源」只有状态与核心操作（重新检查 / 下载），没有可保存的字段。
+  const sectionEditable = section !== 'source';
 
   React.useEffect(() => {
     if (state !== null && !anyDirty) setDraft(state.settings);
@@ -334,11 +338,11 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     state.coexistence.found
       ? h(Alert, { kind: 'warn', title: t('coexist.title') }, h('div', { className: 'dshgt-mono', style: { fontSize: 12 } }, `${state.coexistence.path ?? ''} ${state.coexistence.version ?? ''}`), h('div', null, state.coexistence.message ?? ''), h('div', { className: 'dshgt-hint' }, t('coexist.hint')))
       : null,
-    advanced
-      ? h(Row, { label: 'TRENDING_DIGEST_CORE' }, h(Input, { mono: true, width: 420, value: draft.corePath, placeholder: '/path/to/trendradar', onInput: (value: string) => update((next) => { next.corePath = value; }) }), h('span', { className: 'dshgt-hint' }, t('core.path.advancedHint')))
-      : null,
   );
 
+  // 用 draft 的 mode + 服务端解析结果合成文案：刚点完「沿用 DSH 配置」还没保存时，
+  // 也应该先看到「沿用 DSH 凭据」，而不是旧模式下的「未配置」。
+  const modelCredential = credentialView({ mode: draft.model.mode, credential: state.model.credential }, t);
   const modelCard = h(
     Card,
     {
@@ -355,7 +359,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         options: providers.map((provider) => ({ value: provider, label: provider })),
         onChange: (value: string) => update((next) => { next.model.provider = value; }),
       }),
-      h('span', { className: 'dshgt-hint' }, state.model.mode === 'proxy' ? t('model.mode.proxy') : t('model.mode.direct')),
+      h('span', { className: 'dshgt-hint' }, draft.model.mode === 'proxy' ? t('model.mode.proxy') : t('model.mode.direct')),
     ),
     h(Row, { label: t('model.baseURL') }, h(Input, {
       mono: true,
@@ -376,21 +380,12 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       }),
       h(Btn, { small: true, onClick: () => void runPreflight(), disabled: preflighting }, preflighting ? t('model.preflighting') : t('model.preflight')),
     ),
-    advanced
-      ? h(
-          Row,
-          { label: t('model.keyRef') },
-          h(Input, { mono: true, width: 220, value: draft.model.apiKeyRef, onInput: (value: string) => update((next) => { next.model.apiKeyRef = value; }) }),
-          h('span', { className: 'dshgt-hint' }, t('model.keyRef.advancedHint')),
-        )
-      : h(
-          Row,
-          { label: t('model.credential') },
-          h(Pill, { kind: state.model.credential.configured ? 'ok' : 'err' },
-            state.model.credential.configured ? `${t('auth.configured')}${state.model.credential.source === null ? '' : ` · ${state.model.credential.source}`}` : t('auth.missing'),
-          ),
-          h('span', { className: 'dshgt-hint' }, t('model.credential.hint')),
-        ),
+    h(
+      Row,
+      { label: t('model.credential') },
+      h(Pill, { kind: modelCredential.kind }, modelCredential.label),
+      h('span', { className: 'dshgt-hint' }, modelCredential.hint),
+    ),
     h(
       Row,
       { label: t('model.params') },
@@ -577,26 +572,27 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       h(
         'div',
         { className: 'dshgt-footer' },
-        h(
-          Btn,
-          {
-            variant: 'primary',
-            onClick: () => void save(section),
-            disabled: savingSection !== null || !dirtySections[section],
-            title: t('settings.saveSection.hint'),
-          },
-          savingSection === section
-            ? t('settings.saving')
-            : dirtySections[section]
-              ? t('settings.saveSection')
-              : savedSection === section
-                ? t('settings.saved')
-                : t('settings.saveSection'),
-        ),
-        h('span', { className: 'dshgt-hint' }, t('settings.saveSection.hint')),
+        sectionEditable
+          ? h(
+              Btn,
+              {
+                variant: 'primary',
+                onClick: () => void save(section),
+                disabled: savingSection !== null || !dirtySections[section],
+                title: t('settings.saveSection.hint'),
+              },
+              savingSection === section
+                ? t('settings.saving')
+                : dirtySections[section]
+                  ? t('settings.saveSection')
+                  : savedSection === section
+                    ? t('settings.saved')
+                    : t('settings.saveSection'),
+            )
+          : null,
+        sectionEditable ? h('span', { className: 'dshgt-hint' }, t('settings.saveSection.hint')) : null,
         h(Btn, { onClick: () => void importCli() }, t('settings.import')),
         h(Btn, { onClick: copyConfig }, t('settings.copyConfig')),
-        h(Btn, { onClick: () => setAdvanced(!advanced) }, advanced ? t('settings.advanced.hide') : t('settings.advanced')),
       ),
     ),
     quickOpen

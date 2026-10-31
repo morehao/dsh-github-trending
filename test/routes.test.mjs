@@ -31,7 +31,15 @@ store.writeSettings({
 const runner = new runnerModule.Runner({ store, get: () => undefined, env });
 const scheduler = new scheduleModule.Scheduler({ store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined });
 const server = http.createServer(
-  routes.createRoutes({ store, runner, scheduler, get: () => undefined, env, version: '0.1.0-test' }),
+  routes.createRoutes({
+    store,
+    runner,
+    scheduler,
+    get: () => undefined,
+    env,
+    version: '0.1.0-test',
+    repository: 'https://github.com/morehao/dsh-github-trending',
+  }),
 );
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}${routes.ROUTE_PREFIX}`;
@@ -55,6 +63,7 @@ test('/state 返回设置、核心状态、调度与历史', async () => {
   assert.equal(payload.schedule.enabled, true);
   assert.equal(payload.status.history.length, 0);
   assert.equal(payload.github.configured, false);
+  assert.equal(payload.plugin.repository, 'https://github.com/morehao/dsh-github-trending');
 });
 
 test('/config 校验并保存；非法时 400 且不落盘', async () => {
@@ -163,4 +172,62 @@ test('/config 分段保存只校验并写入当前分区（不被其它分区阻
   assert.equal(after.repo.path, repo);
   assert.equal(after.model.model, before.model.model); // 非目标分区不被覆盖
   assert.equal(after.trending.topN, before.trending.topN);
+});
+
+// ——— 预览与 30 条历史 ———
+
+function recordFor(id, extra = {}) {
+  return {
+    id,
+    at: new Date().toISOString(),
+    kind: 'run',
+    ok: true,
+    skipped: false,
+    durationMs: 1000,
+    files: 1,
+    coreVersion: '0.3.0',
+    model: { provider: 'deepseek', model: 'deepseek-chat' },
+    languages: ['all'],
+    warnings: [],
+    ...extra,
+  };
+}
+
+test('GET /preview 返回预览正文；非法 id / 未知 id / 无副本 / 文件缺失都能区分', async () => {
+  store.writePreview('preview-run', '# 预览正文');
+  store.recordRun(recordFor('preview-run', { preview: { file: 'trending/2026-10-30.md', bytes: 16, sha256: 'a'.repeat(64) } }));
+  store.recordRun(recordFor('legacy-run'));
+  store.recordRun(recordFor('orphan-run', { preview: { file: 'trending/2026-10-29.md', bytes: 1, sha256: 'b'.repeat(64) } }));
+
+  const okResponse = await fetch(`${base}/preview?id=preview-run`, { headers: HEADER });
+  assert.equal(okResponse.status, 200);
+  const okPayload = await okResponse.json();
+  assert.equal(okPayload.ok, true);
+  assert.equal(okPayload.id, 'preview-run');
+  assert.deepEqual(okPayload.preview, { text: '# 预览正文', truncated: false });
+
+  const invalid = await fetch(`${base}/preview?id=../../etc/passwd`, { headers: HEADER });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, 'CONFIG_INVALID');
+
+  const unknown = await fetch(`${base}/preview?id=no-such-run`, { headers: HEADER });
+  assert.equal(unknown.status, 404);
+  assert.equal((await unknown.json()).code, 'NOT_FOUND');
+
+  const noMeta = await fetch(`${base}/preview?id=legacy-run`, { headers: HEADER });
+  assert.equal(noMeta.status, 404);
+
+  const orphan = await fetch(`${base}/preview?id=orphan-run`, { headers: HEADER });
+  assert.equal(orphan.status, 404);
+
+  const noHeader = await fetch(`${base}/preview?id=preview-run`);
+  assert.equal(noHeader.status, 403);
+});
+
+test('/state 返回 30 条历史（不再截到 10）', async () => {
+  for (let index = 0; index < 35; index += 1) store.recordRun(recordFor(`history-${index}`));
+  const response = await fetch(`${base}/state`, { headers: HEADER });
+  const payload = await response.json();
+  assert.equal(payload.status.history.length, 30);
+  assert.equal(payload.status.history[0].id, 'history-34');
 });

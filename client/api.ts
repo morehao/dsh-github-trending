@@ -38,6 +38,13 @@ export async function apiCall<T = Record<string, any>>(
   return json as T;
 }
 
+export interface PreviewMeta {
+  file: string;
+  bytes: number;
+  sha256: string;
+  truncated?: boolean;
+}
+
 export interface RunSummary {
   id: string;
   ok: boolean;
@@ -49,7 +56,9 @@ export interface RunSummary {
   files: number;
   contentHash?: string;
   branch?: string;
+  commit?: string;
   prUrl?: string;
+  preview?: PreviewMeta;
   skipReason?: string;
   error?: {
     code: string;
@@ -78,9 +87,12 @@ export interface RunRecord {
   skipReason?: string;
   durationMs: number;
   files: number;
+  date?: string;
   contentHash?: string;
   branch?: string;
+  commit?: string;
   prUrl?: string;
+  preview?: PreviewMeta;
   coreVersion: string;
   model: { provider: string; model: string };
   languages: string[];
@@ -148,7 +160,7 @@ export interface SettingsShape {
 }
 
 export interface StatePayload {
-  plugin: { name: string; version: string };
+  plugin: { name: string; version: string; repository?: string };
   settings: SettingsShape;
   core: CoreStatus;
   coexistence: CoexistenceStatus;
@@ -219,4 +231,25 @@ export interface GithubProbeResult {
   source?: string;
   code?: string;
   message?: string;
+}
+
+export interface PreviewPayload {
+  id: string;
+  preview: { text: string; truncated: boolean };
+}
+
+export interface LogPayload {
+  id: string;
+  exists: boolean;
+  text: string;
+}
+
+/** 读一次运行的预览副本；只接受 runId，路径永远由 Host 决定。 */
+export function getPreview(runId: string, signal?: AbortSignal): Promise<PreviewPayload> {
+  return apiCall<PreviewPayload>('GET', `/preview?id=${encodeURIComponent(runId)}`, undefined, signal === undefined ? {} : { signal });
+}
+
+/** 读一次运行的事后日志（Host 只回最后 64 KB，不是实时流）。 */
+export function getLog(runId: string, signal?: AbortSignal): Promise<LogPayload> {
+  return apiCall<LogPayload>('GET', `/log?id=${encodeURIComponent(runId)}`, undefined, signal === undefined ? {} : { signal });
 }

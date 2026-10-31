@@ -4,7 +4,8 @@
  * 这里是「谁在跑」的唯一入口：HTTP 路由、工具、定时器都走 `Runner.run()`，
  * 因此同一时刻最多一个运行（`Runner` 自己拒绝并发第二个）。
  */
-import { existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Settings } from '../config.js';
@@ -14,7 +15,14 @@ import { IpcError, type RunOutcome } from '../ipc.js';
 import { handshake, type HandshakeResult } from '../core/handshake.js';
 import { locateCore } from '../core/locate.js';
 import { runCore } from '../core/run.js';
-import { CONTENT_HASH_ALGO_V2, newRunId, type RunRecord, type Store } from '../state.js';
+import {
+  CONTENT_HASH_ALGO_V2,
+  newRunId,
+  PREVIEW_MAX_BYTES,
+  type PreviewMeta,
+  type RunRecord,
+  type Store,
+} from '../state.js';
 import { inspectCore, type CoreStatus } from './core.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
@@ -32,7 +40,9 @@ export interface RunSummary {
   files: number;
   contentHash?: string;
   branch?: string;
+  commit?: string;
   prUrl?: string;
+  preview?: PreviewMeta;
   /** 核心给出的跳过原因（merged / pr-closed / unchanged）。 */
   skipReason?: string;
   error?: {
@@ -66,6 +76,8 @@ export interface RunnerDeps {
   env?: NodeJS.ProcessEnv;
   /** 运行结束（成功或失败）后回调，用于刷新调度/界面缓存。 */
   onFinished?: (summary: RunSummary) => void;
+  /** 预览副本这类「可失败但不阻断运行」的事件走这里，不写进 warnings。 */
+  logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
 function repoProblem(repoPath: string): { code: string; message: string } | undefined {
@@ -93,6 +105,19 @@ function runDate(settings: Settings, now: Date = new Date()): string {
   } catch {
     return now.toISOString().slice(0, 10);
   }
+}
+
+/** target 是否严格位于 root 目录内（root 自身不算）。 */
+function isInside(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** 契约 artifact 的 sha256 可能带 `sha256:` 前缀、大小写不一；统一成小写 hex 再比。 */
+function normalizeSha256(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const hex = value.trim().replace(/^sha256:/i, '').toLowerCase();
+  return /^[0-9a-f]{64}$/.test(hex) ? hex : undefined;
 }
 
 export class Runner {
@@ -222,6 +247,14 @@ export class Runner {
         coreSource: core.source,
         ...(core.tag === undefined ? {} : { coreTag: core.tag }),
       });
+      const preview = this.capturePreview({
+        id,
+        date,
+        settings,
+        outcome,
+        secrets: [apiKey, github.token],
+      });
+      if (preview !== undefined) summary.preview = preview;
       this.record(summary, settings);
       return summary;
     } catch (error) {
@@ -287,6 +320,7 @@ export class Runner {
       files: outcome.files.length,
       ...(outcome.contentHash === undefined ? {} : { contentHash: outcome.contentHash }),
       ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
+      ...(outcome.commit === undefined ? {} : { commit: outcome.commit }),
       ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
       ...(outcome.skipReason === undefined ? {} : { skipReason: outcome.skipReason }),
       ...(error === undefined ? {} : { error }),
@@ -317,6 +351,83 @@ export class Runner {
     };
   }
 
+  /**
+   * 从本次核心返回的 artifact 清单里选当天的 `.md`，只读复制到 previews/。
+   *
+   * 这是插件**唯一**读取用户仓库的场景，而且只读核心自己刚写出的那一份：
+   * - 路径必须在 `repo.path` 内（词法 + realpath 各判一次，挡 `..`/绝对路径/符号链接）；
+   * - 上限 512 KB、拒绝 NUL、sha256 必须与契约声明一致；
+   * - 任何一步失败都只记日志，返回 undefined；运行结果不受影响。
+   */
+  private capturePreview(input: {
+    id: string;
+    date?: string;
+    settings: Settings;
+    outcome: RunOutcome;
+    secrets: Array<string | undefined>;
+  }): PreviewMeta | undefined {
+    const { outcome, settings, date, id } = input;
+    if (!outcome.ok || outcome.dryRun || outcome.skipped || date === undefined) return undefined;
+    const skip = (reason: string, extra: Record<string, unknown> = {}): undefined => {
+      this.deps.logger?.('preview.skip', { id, reason, ...extra });
+      return undefined;
+    };
+
+    const markdown = outcome.files.filter((file) => {
+      const ext = path.extname(file.path).toLowerCase();
+      return ext === '.md' && path.basename(file.path).toLowerCase() !== 'readme.md';
+    });
+    if (markdown.length === 0) return skip('no-markdown');
+
+    const dated = markdown.filter((file) => path.basename(file.path) === `${date}.md`);
+    const chosen = dated.length > 0 ? dated[0] : markdown.length === 1 ? markdown[0] : undefined;
+    if (chosen === undefined) return skip('ambiguous', { candidates: markdown.length });
+
+    const repoPath = settings.repo.path;
+    const resolved = path.resolve(repoPath, chosen.path);
+    if (!isInside(repoPath, resolved)) return skip('outside-repo', { path: chosen.path });
+
+    // realpath：如果用户仓库或目标文件本身是软链接，词法检查不够。
+    let fileReal: string;
+    try {
+      const repoReal = realpathSync(repoPath);
+      fileReal = realpathSync(resolved);
+      if (!isInside(repoReal, fileReal)) return skip('symlink-outside-repo', { path: chosen.path });
+    } catch {
+      return skip('missing-file', { path: chosen.path });
+    }
+
+    let buffer: Buffer;
+    try {
+      const stat = statSync(fileReal);
+      if (!stat.isFile()) return skip('not-a-file', { path: chosen.path });
+      if (stat.size > PREVIEW_MAX_BYTES) return skip('too-large', { bytes: stat.size });
+      buffer = readFileSync(fileReal);
+    } catch {
+      return skip('read-failed', { path: chosen.path });
+    }
+    if (buffer.includes(0)) return skip('contains-nul', { path: chosen.path });
+
+    const declared = normalizeSha256(chosen.sha256);
+    const actual = createHash('sha256').update(buffer).digest('hex');
+    if (declared === undefined || declared !== actual) {
+      return skip('sha-mismatch', { path: chosen.path, declared: declared ?? null, actual });
+    }
+
+    const text = redact(buffer.toString('utf8'), input.secrets);
+    const stored = Buffer.from(text, 'utf8');
+    try {
+      this.deps.store.writePreview(id, text);
+    } catch {
+      return skip('write-failed', { path: chosen.path });
+    }
+    return {
+      file: path.relative(repoPath, resolved).split(path.sep).join('/'),
+      bytes: stored.length,
+      sha256: createHash('sha256').update(stored).digest('hex'),
+    };
+  }
+
   /** 写历史与状态；同一天的 skipped 运行不覆盖 lastDigest。 */
   private record(summary: RunSummary, settings: Settings): void {
     const store = this.deps.store;
@@ -336,9 +447,12 @@ export class Runner {
       ...(summary.skipReason === undefined ? {} : { skipReason: summary.skipReason }),
       durationMs: summary.durationMs,
       files: summary.files,
+      ...(summary.date === undefined ? {} : { date: summary.date }),
       ...(summary.contentHash === undefined ? {} : { contentHash: summary.contentHash }),
       ...(summary.branch === undefined ? {} : { branch: summary.branch }),
+      ...(summary.commit === undefined ? {} : { commit: summary.commit }),
       ...(summary.prUrl === undefined ? {} : { prUrl: summary.prUrl }),
+      ...(summary.preview === undefined ? {} : { preview: summary.preview }),
       coreVersion: summary.coreVersion,
       model: { provider: settings.model.provider, model: settings.model.model },
       languages: settings.trending.languages,

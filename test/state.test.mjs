@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { state as stateModule } from '../lib/internal.js';
@@ -114,4 +114,54 @@ test('日志写入可读回，且目录里不残留临时文件', () => {
   assert.match(store.readLog(file), /line one/);
   const leftovers = readdirSync(store.dir).filter((name) => name.endsWith('.tmp'));
   assert.deepEqual(leftovers, []);
+});
+
+test('预览副本：写入可读回、权限 0600、目录 0700', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-preview-')) });
+  store.writePreview('run-1', '# 日报\n\n内容');
+  const file = path.join(store.dir, 'previews', 'run-1.md');
+  assert.equal(readFileSync(file, 'utf8'), '# 日报\n\n内容');
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal(statSync(store.previewsPath).mode & 0o777, 0o700);
+  assert.deepEqual(store.readPreview('run-1'), { text: '# 日报\n\n内容', truncated: false });
+  const leftovers = readdirSync(store.previewsPath).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []);
+});
+
+test('预览副本：不存在返回 undefined；超过上限截断并标记', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-preview2-')) });
+  assert.equal(store.readPreview('missing'), undefined);
+  store.writePreview('big', 'x'.repeat(2048));
+  const cut = store.readPreview('big', 100);
+  assert.equal(cut.truncated, true);
+  assert.equal(cut.text.length, 100);
+});
+
+test('预览副本最多保留 30 份，按 mtime 淘汰最旧', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-preview3-')) });
+  const base = Math.floor(Date.now() / 1000) - 3600;
+  for (let index = 0; index < 35; index += 1) {
+    store.writePreview(`run-${index}`, `content ${index}`);
+    const file = path.join(store.previewsPath, `run-${index}.md`);
+    utimesSync(file, base + index, base + index);
+  }
+  // 再写一份触发裁剪（保持 30 份）
+  store.writePreview('run-latest', 'latest');
+  const names = readdirSync(store.previewsPath).filter((name) => name.endsWith('.md'));
+  assert.equal(names.length, 30);
+  assert.equal(names.includes('run-0.md'), false);
+  assert.equal(names.includes('run-latest.md'), true);
+  assert.equal(names.includes('run-34.md'), true);
+  assert.equal(existsSync(path.join(store.previewsPath, 'run-0.md')), false);
+});
+
+test('recordRun 持久化 date / commit / preview（正文不进 history）', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-preview4-')) });
+  const preview = { file: 'trending/2026-10-30.md', bytes: 5, sha256: 'a'.repeat(64) };
+  store.recordRun({ ...record(1), date: '2026-10-30', commit: 'deadbeef', preview });
+  const persisted = JSON.parse(readFileSync(store.historyPath, 'utf8'));
+  assert.equal(persisted.records[0].date, '2026-10-30');
+  assert.equal(persisted.records[0].commit, 'deadbeef');
+  assert.deepEqual(persisted.records[0].preview, preview);
+  assert.equal(JSON.stringify(persisted).includes('正文'), false);
 });

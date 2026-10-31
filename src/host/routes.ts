@@ -45,6 +45,9 @@ export interface RouteDeps {
   /** 注入用：pendingPr 对账的 fetch 实现（测试不联网）。 */
   fetchImpl?: typeof fetch;
   version: string;
+  /** 包名与仓库地址都来自 package.json，由 src/index.ts 传入。 */
+  pluginName?: string;
+  repository?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -99,7 +102,7 @@ export function createRoutes(deps: RouteDeps) {
       const code = error instanceof IpcError ? error.code : 'INTERNAL';
       const message = redact(error instanceof Error ? error.message : String(error));
       deps.logger?.('route.error', { pathname, method, code, message });
-      const status = code === 'CONFIG_INVALID' ? 400 : 500;
+      const status = code === 'CONFIG_INVALID' ? 400 : code === 'NOT_FOUND' ? 404 : 500;
       sendJson(response, status, { ok: false, code, message });
     }
   };
@@ -243,6 +246,20 @@ async function dispatch(
     return { import: { ...result, settings: result.settings === undefined ? undefined : result.settings } };
   }
 
+  if (method === 'GET' && pathname === '/preview') {
+    const id = url.searchParams.get('id') ?? '';
+    if (!/^[A-Za-z0-9-]+$/.test(id)) throw new IpcError('CONFIG_INVALID', '非法的运行 id');
+    const state = deps.store.readState();
+    const history = deps.store.readHistory();
+    const record = history.find((item) => item.id === id) ?? (state.lastResult?.id === id ? state.lastResult : undefined);
+    if (record === undefined || record.preview === undefined) {
+      throw new IpcError('NOT_FOUND', '没有这次运行的预览副本');
+    }
+    const preview = deps.store.readPreview(id);
+    if (preview === undefined) throw new IpcError('NOT_FOUND', '预览副本不存在或已被清理');
+    return { id, preview };
+  }
+
   if (method === 'GET' && pathname === '/log') {
     const id = url.searchParams.get('id') ?? '';
     if (!/^[A-Za-z0-9-]+$/.test(id)) throw new IpcError('CONFIG_INVALID', '非法的运行 id');
@@ -258,7 +275,8 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
   const env = deps.env ?? process.env;
   const credentials = credentialServices(deps.get);
   const state = deps.store.readState();
-  const history = deps.store.readHistory().slice(0, 10);
+  // 30 条 = 最近 30 天窗口的数据源；日期切换不再额外请求历史接口。
+  const history = deps.store.readHistory();
   const core = await inspectCore(settings, { env });
   const coexistence = await detectCoexistence(core.path, { env });
   const modelCredential = await describeRef(credentials, settings.model.apiKeyRef, env);
@@ -283,7 +301,11 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
   }
 
   return {
-    plugin: { name: '@morehao/dsh-github-trending', version: deps.version },
+    plugin: {
+      name: deps.pluginName ?? '@morehao/dsh-github-trending',
+      version: deps.version,
+      ...(deps.repository === undefined ? {} : { repository: deps.repository }),
+    },
     settings,
     core,
     coexistence,

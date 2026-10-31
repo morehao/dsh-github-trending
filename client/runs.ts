@@ -1,196 +1,264 @@
 /**
- * 运行页：本次（运行入口 / 9 步 / 最近结果 / 错误）+ 历史（最近 30 条）。
+ * 运行记录：最近 30 条列表 + 展开详情 + 只读日志抽屉。
  *
- * 进度是**粗粒度**的：核心只在结束时给一个结果信封，所以「抓取/总结/渲染/提交/PR」
- * 这几步在一次运行内只能显示为「进行中」，不能伪造逐段百分比。
+ * 日志不是实时流：按需 `GET /log?id=`，Host 只回最后 64 KB。运行入口统一走
+ * `useRunController`，运行中禁用重复触发。
  */
-import { Alert, Btn, Card, Inline, KV, Pill, Toggle, duration, h, localTime, React, shortHash } from './ui.js';
+import { Alert, Btn, copyText, duration, h, shortHash, shortTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
-import { apiCall, type RunSummary } from './api.js';
+import { getLog, type RunRecord, type StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
+import type { RunController } from './run-controller.js';
+import { LiveRun } from './live-run.js';
+import { reasonHint, skipHint } from './error-copy.js';
 
-const STEP_KEYS = ['resolve', 'handshake', 'spawn', 'fetch', 'summarize', 'render', 'commit', 'pr', 'state'];
-const CORE_STEPS = new Set(['fetch', 'summarize', 'render', 'commit', 'pr']);
+type Filter = 'all' | 'failed' | 'dry';
+const FILTERS: Array<{ id: Filter; key: string }> = [
+  { id: 'all', key: 'runs.filter.all' },
+  { id: 'failed', key: 'runs.filter.failed' },
+  { id: 'dry', key: 'runs.filter.dry' },
+];
 
-export function RunsView(props: { t: Translate; store: StoreValue; page?: boolean }): any {
-  const { t, store } = props;
-  const [tab, setTab] = React.useState<'now' | 'history'>('now');
-  const [dryRun, setDryRun] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  const [summary, setSummary] = React.useState<RunSummary | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const state = store.state;
+export interface RunsProps {
+  t: Translate;
+  store: StoreValue;
+  controller: RunController;
+  onOpenDigest: (date?: string) => void;
+}
 
-  const run = async (): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    setSummary(null);
-    try {
-      const result = await apiCall<{ summary: RunSummary }>('POST', '/run', { dryRun });
-      setSummary(result.summary);
-      await store.refresh({ quiet: true });
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancel = async (): Promise<void> => {
-    try {
-      await apiCall('POST', '/run/cancel', {});
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    }
-  };
-
-  if (state === null) {
-    return h('div', { className: 'dshgt-root' }, h('p', { className: 'dshgt-hint' }, store.error ?? t('quickfill.loading')));
+function recordSummary(t: Translate, record: RunRecord): string {
+  if (!record.ok) {
+    return [record.errorCode, record.errorMessage].filter((item) => item !== undefined && item !== '').join(' · ') || t('state.failed');
   }
+  if (record.skipped) return skipHint(t, record.skipReason, t('runs.noChange'));
+  if (record.kind === 'dry-run') return t('runs.dryHint');
+  if (record.branch !== undefined) return record.branch;
+  if (record.commit !== undefined) return record.commit;
+  if (record.prUrl !== undefined) return t('runs.prCreated');
+  return '—';
+}
 
-  const running = state.status.running !== null;
-  const pendingPr = state.status.pendingPr;
-  const shown = summary;
-  const lastRecord = state.status.history[0] === undefined ? null : state.status.history[0];
-  // 摘要（刚跑完）与历史记录字段不同：摘要没有 at，用当前时间兜底展示
-  const last = shown === null ? lastRecord : { ...lastRecord, ...shown, at: new Date().toISOString(), model: { provider: state.settings.model.provider, model: state.settings.model.model } };
-  const failedStep = shown !== null && !shown.ok ? stepFromError(shown.error?.area) : null;
+function prStatus(t: Translate, state: StatePayload, record: RunRecord): { label: string; kind: 'warn' | 'ok' } | null {
+  if (record.prUrl === undefined) return null;
+  const pending = state.status.pendingPr;
+  if (pending !== null && pending.url === record.prUrl) {
+    return { label: state.status.pendingPrState === 'unknown' ? t('runs.prUnknown') : t('runs.pendingPr'), kind: 'warn' };
+  }
+  return { label: t('runs.prCreated'), kind: 'ok' };
+}
+
+function LogDrawer(props: { t: Translate; runId: string; onClose: () => void }): any {
+  const { t, runId } = props;
+  const [loading, setLoading] = React.useState(true);
+  const [text, setText] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setText('');
+    getLog(runId, controller.signal)
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setText(payload.text);
+        setLoading(false);
+      })
+      .catch((failure: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(failure instanceof Error ? failure.message : String(failure));
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [runId]);
+
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') props.onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [props]);
 
   return h(
     'div',
-    { className: 'dshgt-root' },
+    { className: 'dshgt-modal-mask', onClick: (event: any) => { if (event.target === event.currentTarget) props.onClose(); } },
     h(
       'div',
-      { className: 'dshgt-head' },
-      h('span', { className: 'dshgt-title' }, t('section.title')),
-      h('span', { className: 'dshgt-sub' }, t('card.source.hint')),
-      h('span', { style: { marginLeft: 'auto' } }, h(Pill, { kind: running || busy ? 'warn' : 'ok' }, running || busy ? t('run.running') : t('run.idle'))),
+      { className: 'dshgt-modal dshgt-log-modal', role: 'dialog', 'aria-modal': 'true' },
+      h(
+        'div',
+        { className: 'dshgt-log-head' },
+        h('h3', { className: 'dshgt-log-title' }, t('log.title')),
+        h('span', { className: 'dshgt-hint dshgt-mono' }, runId),
+        h(Btn, { small: true, onClick: () => props.onClose() }, t('log.close')),
+      ),
+      loading ? h('p', { className: 'dshgt-hint' }, t('log.loading')) : null,
+      error === null ? null : h(Alert, { kind: 'err' }, error),
+      loading || error !== null ? null : text === '' ? h('p', { className: 'dshgt-hint' }, t('log.empty')) : h('pre', { className: 'dshgt-log-pre' }, text),
+      h(
+        'div',
+        { className: 'dshgt-log-foot' },
+        h(
+          Btn,
+          {
+            small: true,
+            disabled: text === '',
+            onClick: () => {
+              void copyText(text).then((okResult) => {
+                if (!okResult) return;
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1600);
+              });
+            },
+          },
+          copied ? t('log.copied') : t('log.copy'),
+        ),
+        h('span', { className: 'dshgt-hint' }, t('log.truncated')),
+      ),
     ),
-    h(
-      'div',
-      { className: 'dshgt-tabs', role: 'tablist' },
-      h('button', { type: 'button', className: 'dshgt-tab', role: 'tab', 'aria-selected': tab === 'now' ? 'true' : 'false', onClick: () => setTab('now') }, t('run.now')),
-      h('button', { type: 'button', className: 'dshgt-tab', role: 'tab', 'aria-selected': tab === 'history' ? 'true' : 'false', onClick: () => setTab('history') }, t('run.history')),
-    ),
-    tab === 'now'
-      ? h(
-          'div',
-          { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-          h(
-            Card,
-            { title: t('run.now'), hint: 'spawn → 单次运行 → 退出' },
-            h(
-              Inline,
-              null,
-              h(Btn, { variant: 'primary', onClick: () => void run(), disabled: busy || running }, t('run.button')),
-              h(Toggle, { checked: dryRun, label: t('run.dryRun'), onChange: setDryRun }),
-              running || busy ? h(Btn, { variant: 'danger', onClick: () => void cancel() }, t('run.cancel')) : null,
-            ),
-            pendingPr === null
-              ? null
-              : h(
-                  Alert,
-                  { kind: 'warn', title: t('run.pendingPr') },
-                  h('div', null, h('a', { href: pendingPr.url, target: '_blank', rel: 'noreferrer' }, pendingPr.url)),
-                  h('div', { className: 'dshgt-hint' }, t('run.pendingPr.hint')),
-                ),
-            error === null ? null : h(Alert, { kind: 'err' }, error),
-            h(
-              'ul',
-              { className: 'dshgt-steps' },
-              STEP_KEYS.map((key) => {
-                const stepState = running || busy ? (CORE_STEPS.has(key) ? 'pending' : key === 'resolve' || key === 'handshake' || key === 'spawn' ? 'active' : 'pending') : shown === null ? 'pending' : failedStep === key ? 'failed' : 'done';
-                const label = { done: '✓', active: '…', failed: '✗', pending: '—' }[stepState];
-                return h('li', { key, className: 'dshgt-step', 'data-state': stepState }, h('span', null, t(`step.${key}`)), h('span', { className: 'st' }, label));
-              }),
-            ),
-          ),
-          last === null
-            ? h(Card, { title: t('run.last.title') }, h('p', { className: 'dshgt-hint' }, t('run.last.none')))
-            : h(
-                Card,
-                { title: t('run.last.title'), extra: h(Pill, { kind: last.ok ? (last.skipped ? 'warn' : 'ok') : 'err' }, last.skipped ? t('state.skipped') : last.ok ? t('state.ok') : t('state.failed')) },
-                h(KV, {
-                  items: [
-                    [t('col.date'), localTime(last.at)],
-                    [t('run.usage.core'), last.coreVersion || '—'],
-                    [t('run.usage.files'), String(last.files)],
-                    [t('run.usage.duration'), duration(last.durationMs)],
-                    [t('run.usage.hash'), h('span', { className: 'dshgt-mono' }, shortHash(last.contentHash))],
-                    [t('run.usage.branch'), h('span', { className: 'dshgt-mono' }, last.branch ?? '—')],
-                    [t('run.usage.pr'), last.prUrl === undefined ? '—' : h('a', { href: last.prUrl, target: '_blank', rel: 'noreferrer' }, last.prUrl)],
-                    ['model', `${state.settings.model.provider} / ${state.settings.model.model || '—'}`],
-                  ],
-                }),
-                last.skipped && typeof last.skipReason === 'string' ? h('p', { className: 'dshgt-hint' }, t(`skip.${last.skipReason}`)) : null,
-                last.warnings.length === 0 ? null : h('p', { className: 'dshgt-hint' }, last.warnings.join('；')),
-              ),
-          shown !== null && shown.error !== undefined
-            ? h(
-                Card,
-                { title: t('run.error.title') },
-                h(Alert, { kind: 'err', title: `${t('error.prefix')} ${shown.error.code}` },
-                  h('div', null, shown.error.message),
-                  h('div', { className: 'dshgt-hint' }, reasonHint(t, shown.error.reason) ?? shown.error.hint),
-                  shown.error.inferred ? h('div', { className: 'dshgt-hint' }, '（错误码由插件按核心 stderr 推断）') : null,
-                ),
-                shown.logFile === undefined ? null : h('p', { className: 'dshgt-hint' }, `日志：${shown.logFile}`),
-              )
-            : null,
-        )
-      : h(HistoryTable, { t, records: state.status.history }),
   );
 }
 
-/** reason → 本地化提示；未知 reason 返回 null，让调用方回落到核心的 hint。 */
-function reasonHint(t: Translate, reason: string | undefined): string | null {
-  if (reason === undefined || reason === '') return null;
-  const key = `err.reason.${reason}`;
-  const text = t(key);
-  return text === key ? null : text;
-}
+export function RunsView(props: RunsProps): any {
+  const { t, store, controller } = props;
+  const [filter, setFilter] = React.useState<Filter>('all');
+  const [openId, setOpenId] = React.useState<string | null>(null);
+  const [logId, setLogId] = React.useState<string | null>(null);
+  const state = store.state;
 
-function stepFromError(area: string | undefined): string {
-  switch (area) {
-    case 'core':
-      return 'resolve';
-    case 'model':
-      return 'summarize';
-    case 'repo':
-    case 'auth':
-      return 'commit';
-    default:
-      return 'state';
+  if (state === null) {
+    return h('div', { className: 'dshgt-empty' }, store.error ?? t('quickfill.loading'));
   }
-}
 
-function HistoryTable(props: { t: Translate; records: Array<Record<string, any>> }): any {
-  const { t, records } = props;
+  const history = state.status.history;
+  const records = history.filter((record) => {
+    if (filter === 'failed') return !record.ok;
+    if (filter === 'dry') return record.kind === 'dry-run';
+    return true;
+  });
+
   return h(
-    Card,
-    { title: t('run.history.title'), hint: t('run.history.hint') },
-    records.length === 0
-      ? h('p', { className: 'dshgt-hint' }, t('run.history.empty'))
-      : h(
-          'table',
-          { className: 'dshgt-table' },
-          h('thead', null, h('tr', null, [t('col.date'), t('col.result'), t('col.files'), t('col.duration'), t('col.commit'), t('col.error')].map((label) => h('th', { key: label }, label)))),
+    'div',
+    { className: 'dshgt-view dshgt-runs' },
+    controller.running ? h(LiveRun, { t, controller, startedAt: controller.startedAt }) : null,
+    controller.error === null ? null : h('div', { className: 'dshgt-alert err' }, controller.error),
+    h(
+      'div',
+      { className: 'dshgt-runs-head' },
+      h('span', { className: 'dshgt-hint' }, t('runs.count', { count: history.length })),
+      h(
+        'div',
+        { className: 'dshgt-runs-filter' },
+        FILTERS.map((item) =>
           h(
-            'tbody',
-            null,
-            records.map((record: Record<string, any>) =>
-              h(
-                'tr',
-                { key: String(record.id) },
-                h('td', { className: 'dshgt-mono' }, localTime(record.at)),
-                h('td', null, h(Pill, { kind: record.ok ? (record.skipped ? 'warn' : 'ok') : 'err' }, record.kind === 'dry-run' ? t('state.dry') : record.skipped ? t('state.skipped') : record.ok ? t('state.ok') : t('state.failed'))),
-                h('td', { className: 'dshgt-mono' }, String(record.files ?? 0)),
-                h('td', { className: 'dshgt-mono' }, duration(Number(record.durationMs ?? 0))),
-                h('td', { className: 'dshgt-mono' }, [record.branch, record.prUrl].filter(Boolean).join(' · ') || '—'),
-                h('td', { className: 'dshgt-mono', title: record.errorMessage ?? undefined }, record.errorCode === undefined ? '—' : record.errorReason === undefined ? record.errorCode : `${record.errorCode} · ${record.errorReason}`),
-              ),
-            ),
+            'button',
+            {
+              key: item.id,
+              type: 'button',
+              className: 'dshgt-chip',
+              'aria-pressed': filter === item.id ? 'true' : 'false',
+              onClick: () => setFilter(item.id),
+            },
+            t(item.key),
           ),
         ),
+      ),
+    ),
+    records.length === 0
+      ? h('div', { className: 'dshgt-empty' }, t('runs.empty'))
+      : h(
+          'div',
+          { className: 'dshgt-run-list' },
+          records.map((record) => {
+            const open = openId === record.id;
+            const pr = prStatus(t, state, record);
+            return h(
+              'div',
+              { className: `dshgt-run-item${open ? ' open' : ''}`, key: record.id },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshgt-run-row',
+                  'aria-expanded': open ? 'true' : 'false',
+                  onClick: () => setOpenId(open ? null : record.id),
+                },
+                h('span', { className: `dshgt-lamp ${record.ok ? (record.skipped || record.kind === 'dry-run' ? 'warn' : 'ok') : 'err'}` }),
+                h('span', { className: 'dshgt-run-date' }, shortTime(record.at)),
+                h(
+                  'span',
+                  { className: 'dshgt-run-what' },
+                  record.kind === 'dry-run' ? t('state.dry') : record.skipped ? t('state.skipped') : record.ok ? t('state.ok') : t('state.failed'),
+                  h('span', { className: 'dshgt-run-muted' }, recordSummary(t, record)),
+                  record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
+                ),
+                h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
+                h('span', { className: 'dshgt-run-duration' }, duration(record.durationMs)),
+                h('span', { className: 'dshgt-run-chev' }, '›'),
+              ),
+              open
+                ? h(
+                    'div',
+                    { className: 'dshgt-run-detail' },
+                    !record.ok
+                      ? h(
+                          Alert,
+                          { kind: 'err', title: `${t('error.prefix')} ${record.errorCode ?? 'INTERNAL'}` },
+                          h('div', null, record.errorMessage ?? t('state.failed')),
+                          record.errorReason === undefined
+                            ? null
+                            : h('div', { className: 'dshgt-hint' }, reasonHint(t, record.errorReason) ?? ''),
+                        )
+                      : null,
+                    h(
+                      'div',
+                      { className: 'dshgt-detail-grid' },
+                      detailItem(t, 'run.usage.commit', record.commit === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.commit)),
+                      detailItem(t, 'run.usage.hash', h('span', { className: 'dshgt-mono' }, shortHash(record.contentHash))),
+                      detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
+                      detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
+                      detailItem(t, 'runs.detail.date', record.date ?? '—'),
+                      detailItem(
+                        t,
+                        'run.usage.pr',
+                        record.prUrl === undefined
+                          ? '—'
+                          : h(
+                              'span',
+                              { className: 'dshgt-inline' },
+                              h('a', { href: record.prUrl, target: '_blank', rel: 'noreferrer', title: record.prUrl }, t('digest.openPr')),
+                              pr === null ? null : h('span', { className: 'dshgt-tag' }, pr.label),
+                            ),
+                      ),
+                      detailItem(t, 'runs.detail.warnings', record.warnings.length === 0 ? t('runs.detail.none') : record.warnings.join('；')),
+                      detailItem(t, 'runs.detail.files', `${record.files} · ${duration(record.durationMs)}`),
+                    ),
+                    record.legacy === true ? h('div', { className: 'dshgt-hint' }, t('runs.legacyHint')) : null,
+                    h(
+                      'div',
+                      { className: 'dshgt-run-actions' },
+                      record.preview === undefined
+                        ? h('span', { className: 'dshgt-hint' }, t('runs.detail.noPreview'))
+                        : h(Btn, { small: true, onClick: () => props.onOpenDigest(record.date) }, t('runs.detail.readDigest')),
+                      h(Btn, { small: true, onClick: () => setLogId(record.id) }, t('runs.detail.log')),
+                      record.preview === undefined ? null : h('span', { className: 'dshgt-hint dshgt-mono' }, record.preview.file),
+                    ),
+                  )
+                : null,
+            );
+          }),
+        ),
+    logId === null ? null : h(LogDrawer, { t, runId: logId, onClose: () => setLogId(null) }),
+  );
+}
+
+function detailItem(t: Translate, label: string, value: any): any {
+  return h(
+    'div',
+    { className: 'dshgt-detail-item' },
+    h('div', { className: 'dshgt-detail-k' }, t(label)),
+    h('div', { className: 'dshgt-detail-v' }, value),
   );
 }

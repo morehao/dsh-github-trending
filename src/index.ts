@@ -5,10 +5,9 @@
  * 业务代码全在 host/ 与 core/，这里只做「接线」，并且所有非硬依赖服务都惰性取
  * （`ctx.get`），缺一个不阻塞加载——只有 `webServer` 是硬依赖（`inject`）。
  */
-import { createRequire } from 'node:module';
-
 import { Store } from './state.js';
 import { Runner } from './host/runner.js';
+import { readPluginInfo } from './host/plugin-info.js';
 import { Scheduler } from './host/schedule.js';
 import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
 import { createTrendingHistoryTool, createTrendingRunTool } from './tools.js';
@@ -39,13 +38,7 @@ export interface PluginContext {
 }
 
 function readVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg = require('../package.json') as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
+  return readPluginInfo().version;
 }
 
 export const VERSION = readVersion();
@@ -80,6 +73,7 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
     store,
     get,
     env,
+    logger: log,
     onFinished: (summary) =>
       log('run.finished', { id: summary.id, ok: summary.ok, skipped: summary.skipped, files: summary.files }),
   });
@@ -96,7 +90,18 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
       ctx.logger?.warn?.(`[dsh-github-trending] 定时运行失败：${error instanceof Error ? error.message : String(error)}`),
   });
 
-  const handler = createRoutes({ store, runner, scheduler, get, env, version: VERSION, logger: log });
+  const pluginInfo = readPluginInfo();
+  const handler = createRoutes({
+    store,
+    runner,
+    scheduler,
+    get,
+    env,
+    version: VERSION,
+    pluginName: pluginInfo.name,
+    ...(pluginInfo.repository === undefined ? {} : { repository: pluginInfo.repository }),
+    logger: log,
+  });
   const register = (): unknown => {
     const webServer = ctx.webServer ?? (get('webServer') as PluginContext['webServer']);
     if (webServer === undefined || typeof webServer.register !== 'function') {
