@@ -18,6 +18,10 @@ export interface ScheduleConfig {
 
 const MINUTE = 60_000;
 const CATCH_UP_MINUTES = 6 * 60;
+/** 同一天失败后最多再试几次（含首次）。 */
+const MAX_ATTEMPTS_PER_DAY = 2;
+/** 两次尝试之间的最小间隔，避免失败风暴烧模型。 */
+const RETRY_GAP_MS = 5 * MINUTE;
 
 interface ZonedParts {
   year: number;
@@ -132,7 +136,8 @@ export class Scheduler {
   private readonly deps: SchedulerDeps;
   private timerHandle: unknown;
   private stopped = false;
-  private lastFiredFor: string | undefined;
+  /** 当天已尝试次数与时间；只在内存里，进程重启后重新计数。 */
+  private readonly attempts = new Map<string, { count: number; lastAt: number }>();
 
   constructor(deps: SchedulerDeps) {
     this.deps = deps;
@@ -171,11 +176,20 @@ export class Scheduler {
     if (!isDue(now, schedule)) return 'skipped';
     const today = zonedDateString(now, schedule.timezone);
     const state = this.deps.store.readState();
-    const lastDate = state.lastRunAt === undefined ? undefined : zonedDateString(new Date(state.lastRunAt), schedule.timezone);
-    if (lastDate === today) return 'skipped';
-    if (this.lastFiredFor === today) return 'skipped';
+    // 只有「成功」（含无变更跳过）才锁当天：一次网络抖动不该丢掉整天，
+    // 但失败也不能无限重试。
+    const lastSuccess = state.lastSuccessAt === undefined ? undefined : zonedDateString(new Date(state.lastSuccessAt), schedule.timezone);
+    if (lastSuccess === today) return 'skipped';
+    const attempt = this.attempts.get(today);
+    if (attempt !== undefined) {
+      if (attempt.count >= MAX_ATTEMPTS_PER_DAY) return 'skipped';
+      if (now.getTime() - attempt.lastAt < RETRY_GAP_MS) return 'skipped';
+    }
     if (this.deps.isRunning()) return 'busy';
-    this.lastFiredFor = today;
+    for (const key of this.attempts.keys()) {
+      if (key !== today) this.attempts.delete(key);
+    }
+    this.attempts.set(today, { count: (attempt?.count ?? 0) + 1, lastAt: now.getTime() });
     try {
       await this.deps.run('schedule');
       return 'ran';

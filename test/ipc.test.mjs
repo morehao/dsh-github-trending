@@ -75,3 +75,12 @@ test('parseVersionInfo 拒绝缺字段的输出', () => {
   assert.equal(info.version, '0.3.0');
   assert.equal(info.contractVersion, '0.2.0');
 });
+
+test('parseRunResult 透传 skipReason（契约允许额外字段）', () => {
+  const outcome = ipc.parseRunResult(JSON.stringify(runResult({ skipped: true, skipReason: 'merged' })), timing);
+  assert.equal(outcome.skipped, true);
+  assert.equal(outcome.skipReason, 'merged');
+  // 非字符串/缺失时保持 undefined，不把脏值带进界面
+  const dirty = ipc.parseRunResult(JSON.stringify(runResult({ skipReason: 42 })), timing);
+  assert.equal(dirty.skipReason, undefined);
+});

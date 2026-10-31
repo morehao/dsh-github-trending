@@ -53,6 +53,8 @@ export interface RunOutcome {
   branch?: string;
   commit?: string;
   prUrl?: string;
+  /** 核心给出的跳过原因：merged | pr-closed | unchanged（可选，旧核心没有）。 */
+  skipReason?: string;
   error?: RunError;
   warnings: string[];
   startedAt: string;
@@ -143,6 +145,7 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
   }
   const result = value as unknown as RunResult;
   const error = normalizeError(result.error);
+  const skipReason = (value as { skipReason?: unknown }).skipReason;
   return {
     ok: result.ok,
     skipped: result.skipped === true,
@@ -152,6 +155,7 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
     branch: typeof result.branch === 'string' ? result.branch : undefined,
     commit: typeof result.commit === 'string' ? result.commit : undefined,
     prUrl: typeof result.prUrl === 'string' ? result.prUrl : undefined,
+    skipReason: typeof skipReason === 'string' && skipReason !== '' ? skipReason : undefined,
     error,
     warnings: Array.isArray(result.warnings) ? result.warnings.filter((item): item is string => typeof item === 'string') : [],
     ...timing(options),

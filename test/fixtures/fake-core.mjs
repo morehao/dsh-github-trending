@@ -14,6 +14,8 @@
  *   FAKE_SLEEP           运行前睡多少毫秒（用于取消测试）
  *   FAKE_SKIPPED         输出 skipped: true（幂等）
  *   FAKE_GARBAGE         输出非 JSON（IPC_INVALID）
+ *   FAKE_SKIP_REASON     skipped 时附带 skipReason（merged / pr-closed / unchanged）
+ *   FAKE_ECHO_TRIGGER    把 TRENDRADAR_TRIGGER 回显到 warnings，断言触发来源
  */
 import { readFileSync } from 'node:fs';
 
@@ -73,6 +75,7 @@ if (command === 'run') {
       startedAt: now,
       finishedAt: now,
       skipped,
+      ...(skipped && process.env.FAKE_SKIP_REASON ? { skipReason: process.env.FAKE_SKIP_REASON } : {}),
       files: skipped ? [] : [{ path: 'trending/2026-10-30/all.md', bytes: 12, sha256: `sha256:${'c'.repeat(64)}` }],
       ...(skipped
         ? {}
@@ -82,7 +85,7 @@ if (command === 'run') {
             prUrl: 'https://example.invalid/pr/1',
             contentHash: hasKey ? HASH_WITH_KEY : HASH_NO_KEY,
           }),
-      warnings: [],
+      warnings: process.env.FAKE_ECHO_TRIGGER === '1' ? [`trigger=${process.env.TRENDRADAR_TRIGGER ?? ''}`] : [],
     }) + '\n',
   );
   process.exit(0);
