@@ -322,6 +322,7 @@ export const DICT: Record<Lang, Record<string, string>> = {
     'about.update.copy': '复制命令',
     'about.update.copied': '已复制',
     'about.update.hint': '只检查 npm 上的 latest 稳定版；更新后需要重启 DSH。',
+    'update.badge': '有新版本可用',
   },
   en: {
     'section.title': 'GitHub Trending',
@@ -640,6 +641,7 @@ export const DICT: Record<Lang, Record<string, string>> = {
     'about.update.copy': 'Copy command',
     'about.update.copied': 'Copied',
     'about.update.hint': 'Checks the npm latest stable tag only; applying requires a DSH restart.',
+    'update.badge': 'Update available',
   },
 };
 

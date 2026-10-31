@@ -15,6 +15,7 @@ import { OverviewView } from './overview.js';
 import { RunsView } from './runs.js';
 import { DigestView } from './digest.js';
 import { AboutDialog } from './about.js';
+import { UpdateDot } from './update-panel.js';
 import { SidebarPanelIcon } from './panel-icon.js';
 import { useRunController } from './run-controller.js';
 import { credentialView } from './credential.js';
@@ -280,6 +281,7 @@ export function apply(ctx: any): void {
                 title: plugin === undefined ? '' : fullName,
               },
               plugin?.name ?? t('section.title'),
+              h(UpdateDot, { t }),
             ),
             h(
               'div',
