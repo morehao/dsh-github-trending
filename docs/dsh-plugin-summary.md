@@ -38,11 +38,11 @@
 | 运行记录 | 最近 30 条；筛选全部 / 失败 / 试跑；展开 commit / hash / branch / PR / warnings；只读日志抽屉；legacy 标记 |
 | 设置 | 沿用 #13 的六个 tab（内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度）；「内容来源」只有状态与核心操作（重新检查 / 下载），其余 tab 逐 tab 保存 |
 
-左轨常驻下次运行摘要、就绪 N/4、包名 / 版本 / GitHub 入口；点包名打开「关于」弹层（完整包名可复制、仓库外链、MIT、核心版本、运行环境）。主题跟随宿主 token；不实现原型的主题切换、URL hash 与示例徽标。
+顶部第一行是插件身份条：名称 / 版本 / 完整包名（点击复制）/ GitHub 外链 / 检查更新（就地状态，有新版时显示「有新版本 vX」+「更新到 vX」）；第二行是横向主导航（概览 / 日报 / 运行记录 / 设置）＋右侧下次运行摘要与就绪 N/4；点版本号打开「关于」弹层（完整包名可复制、仓库外链、MIT、核心版本、运行环境）。主题跟随宿主 token；不实现原型的主题切换、URL hash 与示例徽标。
 
 预览的数据边界：运行成功后 Host 只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内、≤512 KB、sha256 一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、上限 30）；`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
 
-插件自更新：关于弹层打开时静默检查 npm 最新版（Host 缓存 5 分钟），确认后经宿主 `pluginManager` 重装插件（`link:` / `file:` / `workspace:` 安装只给手动命令），引擎来自共享包 `@morehao/dsh-plugin-kit`。
+插件自更新：顶部身份条的「检查更新」与「关于」弹层共用同一份状态，首次挂载静默检查 npm 最新版（Host 缓存 5 分钟）；确认后经宿主 `pluginManager` 重装插件（`link:` / `file:` / `workspace:` 安装只给手动命令），引擎来自共享包 `@morehao/dsh-plugin-kit`。
 
 
 侧栏入口图标是趋势折线；不要把卡片塞进导航行（v0.1.4 曾因此占满侧栏）。
