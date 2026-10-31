@@ -96,29 +96,26 @@ test('周期枚举：since 支持 monthly，非法值回落 daily', () => {
   assert.equal(config.normalizeSettings({ trending: { since: 'hourly' } }).trending.since, 'daily');
 });
 
-test('schedule.periods：默认 daily、去重按规范序、空数组保留', () => {
-  assert.deepEqual(config.normalizeSettings({}).schedule.periods, ['daily']);
+test('schedule.periods：固定三周期全产出，任何输入都收敛为日/周/月', () => {
+  assert.deepEqual(config.normalizeSettings({}).schedule.periods, ['daily', 'weekly', 'monthly']);
+  // 旧版只存了 daily 也升级成三周期
+  assert.deepEqual(config.normalizeSettings({ schedule: { periods: ['daily'] } }).schedule.periods, ['daily', 'weekly', 'monthly']);
+  // 乱序/重复/非法值一律归一为规范三周期
   assert.deepEqual(
     config.normalizeSettings({ schedule: { periods: ['monthly', 'daily', 'daily', 'bogus'] } }).schedule.periods,
-    ['daily', 'monthly'],
+    ['daily', 'weekly', 'monthly'],
   );
-  assert.deepEqual(config.normalizeSettings({ schedule: { periods: [] } }).schedule.periods, []);
+  // 显式空数组也收敛为三周期（不再允许「一个都不选」）
+  assert.deepEqual(config.normalizeSettings({ schedule: { periods: [] } }).schedule.periods, ['daily', 'weekly', 'monthly']);
 });
 
-test('校验：调度开启却没选周期要拦，关闭则允许为空', () => {
-  const enabled = config.normalizeSettings({
+test('校验：周期固定三周期，不再因 period 为空而报错', () => {
+  const settings = config.normalizeSettings({
     model: { provider: 'deepseek', model: 'x' },
     repo: { path: '/tmp/x' },
-    schedule: { enabled: true, periods: [] },
+    schedule: { enabled: true },
   });
-  assert.ok(config.validateSettings(enabled, ['deepseek']).some((problem) => problem.field === 'schedule.periods'));
-
-  const disabled = config.normalizeSettings({
-    model: { provider: 'deepseek', model: 'x' },
-    repo: { path: '/tmp/x' },
-    schedule: { enabled: false, periods: [] },
-  });
-  assert.equal(config.validateSettings(disabled, ['deepseek']).some((problem) => problem.field === 'schedule.periods'), false);
+  assert.equal(config.validateSettings(settings, ['deepseek']).some((problem) => problem.field === 'schedule.periods'), false);
 });
 
 test('toCoreConfig 用本次运行的 period 覆盖 trending.since', () => {

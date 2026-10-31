@@ -82,12 +82,13 @@ export function createTrendingRunTool(runner: Runner) {
   return {
     name: 'trending_run',
     description:
-      '执行一次 GitHub 趋势榜单：定位并握手本地核心，spawn 一次 run，返回结构化摘要（文件数、commit、PR、错误码）。' +
+      '执行 GitHub 趋势榜单：定位并握手本地核心，spawn 核心 run，返回结构化摘要（文件数、commit、PR、错误码）。' +
+      '省略 period 时默认产出日/周/月三榜（依次运行三次，返回 summaries）。' +
       'dryRun=true 只抓取与渲染、不写文件也不提交。同日同内容重跑会返回 skipped=true（零新增 commit）。',
     parameters: {
       dryRun: { type: 'boolean', description: '只试跑：不写文件、不提交、不开 PR' },
       date: { type: 'string', description: '指定日期（YYYY-MM-DD）；省略则用调度时区的今天' },
-      period: { type: 'string', enum: ['daily', 'weekly', 'monthly'], description: '产出周期；省略则用设置里的默认周期' },
+      period: { type: 'string', enum: ['daily', 'weekly', 'monthly'], description: '只跑指定周期；省略则默认产出日/周/月三榜' },
     },
     output: {
       schema: RUN_OUTPUT_SCHEMA,
@@ -95,39 +96,56 @@ export function createTrendingRunTool(runner: Runner) {
     },
     async execute(args: { dryRun?: boolean; date?: string; period?: string } = {}, exec: { signal?: AbortSignal } = {}) {
       void exec;
-      const summary = await runner.run({
+      const base = {
         dryRun: args.dryRun === true,
         ...(typeof args.date === 'string' && args.date !== '' ? { date: args.date } : {}),
-        ...(isPeriod(args.period) ? { period: args.period } : {}),
-        trigger: 'tool',
-      });
+        trigger: 'tool' as const,
+      };
+      // 显式指定单周期 → 只跑该周期；省略 → 手动运行默认产出日/周/月三榜。
+      const summaries = isPeriod(args.period)
+        ? [await runner.run({ ...base, period: args.period })]
+        : await runner.runMany(base);
       const lines: string[] = [];
-      const head = summary.ok ? (summary.skipped ? '无变更（skipped）' : summary.dryRun ? '试跑完成' : '运行成功') : `运行失败：${summary.error?.code ?? 'INTERNAL'}`;
-      lines.push(`${summary.ok ? '✓' : '✗'} ${head}`);
-      lines.push(`· 核心 ${summary.coreVersion || '(未知)'} · ${formatDuration(summary.durationMs)} · ${summary.files} 个文件`);
-      if (summary.contentHash !== undefined) lines.push(`· contentHash ${summary.contentHash.slice(0, 12)}`);
-      if (summary.branch !== undefined) lines.push(`· 分支 ${summary.branch}`);
-      if (summary.prUrl !== undefined) lines.push(`· PR ${summary.prUrl}`);
-      if (summary.error !== undefined) {
-        lines.push(`· ${summary.error.message}`);
-        lines.push(`· 下一步：${summary.error.hint}`);
+      for (const summary of summaries) {
+        const periodLabel = summary.period ?? '—';
+        const head = summary.ok ? (summary.skipped ? '无变更（skipped）' : summary.dryRun ? '试跑完成' : '运行成功') : `运行失败：${summary.error?.code ?? 'INTERNAL'}`;
+        lines.push(`${summary.ok ? '✓' : '✗'} [${periodLabel}] ${head}`);
+        lines.push(`· 核心 ${summary.coreVersion || '(未知)'} · ${formatDuration(summary.durationMs)} · ${summary.files} 个文件`);
+        if (summary.contentHash !== undefined) lines.push(`· contentHash ${summary.contentHash.slice(0, 12)}`);
+        if (summary.branch !== undefined) lines.push(`· 分支 ${summary.branch}`);
+        if (summary.prUrl !== undefined) lines.push(`· PR ${summary.prUrl}`);
+        if (summary.error !== undefined) {
+          lines.push(`· ${summary.error.message}`);
+          lines.push(`· 下一步：${summary.error.hint}`);
+        }
       }
-      if (summary.dryRun) lines.push('· 这是试跑，没有写文件、没有提交');
+      if (summaries.length > 1) lines.push(`· 本次共跑 ${summaries.length} 个周期（日/周/月）`);
+      if (summaries.some((summary) => summary.dryRun)) lines.push('· 这是试跑，没有写文件、没有提交');
+      const ok = summaries.every((summary) => summary.ok);
+      const primary = summaries[summaries.length - 1];
       return {
-        id: summary.id,
-        ok: summary.ok,
-        skipped: summary.skipped,
-        dryRun: summary.dryRun,
-        durationMs: summary.durationMs,
-        coreVersion: summary.coreVersion,
-        files: summary.files,
-        ...(summary.contentHash === undefined ? {} : { contentHash: summary.contentHash }),
-        ...(summary.branch === undefined ? {} : { branch: summary.branch }),
-        ...(summary.prUrl === undefined ? {} : { prUrl: summary.prUrl }),
-        ...(summary.error === undefined
+        ok,
+        summaries: summaries.map((summary) => ({
+          id: summary.id,
+          period: summary.period,
+          ok: summary.ok,
+          skipped: summary.skipped,
+          dryRun: summary.dryRun,
+          durationMs: summary.durationMs,
+          files: summary.files,
+          ...(summary.branch === undefined ? {} : { branch: summary.branch }),
+          ...(summary.prUrl === undefined ? {} : { prUrl: summary.prUrl }),
+          ...(summary.error === undefined ? {} : { errorCode: summary.error.code, errorMessage: summary.error.message }),
+        })),
+        id: primary?.id,
+        skipped: summaries.every((summary) => summary.skipped),
+        dryRun: base.dryRun,
+        durationMs: summaries.reduce((sum, summary) => sum + summary.durationMs, 0),
+        files: summaries.reduce((sum, summary) => sum + summary.files, 0),
+        warnings: summaries.flatMap((summary) => summary.warnings),
+        ...(primary?.error === undefined
           ? {}
-          : { errorCode: summary.error.code, errorMessage: summary.error.message, errorHint: summary.error.hint }),
-        warnings: summary.warnings,
+          : { errorCode: primary.error.code, errorMessage: primary.error.message, errorHint: primary.error.hint }),
         markdown: lines.join('\n'),
       };
     },

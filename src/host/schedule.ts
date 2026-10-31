@@ -8,6 +8,7 @@
  *
  * 「下一次运行」也由同一份时区算术给出，界面与工具都用它。
  */
+import { PERIODS } from '../config.js';
 import type { Period } from '../config.js';
 import type { PluginState, Store } from '../state.js';
 
@@ -221,7 +222,7 @@ export class Scheduler {
     for (const key of this.attempts.keys()) {
       if (!key.endsWith(`:${today}`)) this.attempts.delete(key);
     }
-    const periods = schedule.periods.length > 0 ? schedule.periods : (['daily'] as Period[]);
+    const periods = schedule.periods.length > 0 ? schedule.periods : (PERIODS as readonly Period[] as Period[]);
     let ran = false;
     for (const period of periods) {
       if (!isPeriodTriggerDay(period, now, schedule.timezone)) continue;
@@ -272,7 +273,7 @@ export class Scheduler {
   next(): Date | undefined {
     const schedule = this.readSchedule();
     if (!schedule.enabled) return undefined;
-    const periods = schedule.periods.length > 0 ? schedule.periods : (['daily'] as Period[]);
+    const periods = schedule.periods.length > 0 ? schedule.periods : (PERIODS as readonly Period[] as Period[]);
     try {
       const now = new Date();
       let earliest: Date | undefined;

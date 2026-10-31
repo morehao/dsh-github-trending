@@ -9,7 +9,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Period, Settings } from '../config.js';
-import { validateSettings } from '../config.js';
+import { PERIODS, validateSettings } from '../config.js';
 import { areaOf, hintOf, reasonOf, redact } from '../errors.js';
 import { IpcError, type RunOutcome } from '../ipc.js';
 import { handshake, type HandshakeResult } from '../core/handshake.js';
@@ -153,6 +153,8 @@ export function periodFileBase(period: Period, date: string): string {
 
 export class Runner {
   private active: { id: string; controller: AbortController; startedAt: string } | undefined;
+  /** 批量运行（一次触发跑多个周期）期间为 true，挡住外部并发触发。 */
+  private batching = false;
   private readonly deps: RunnerDeps;
 
   constructor(deps: RunnerDeps) {
@@ -169,14 +171,14 @@ export class Runner {
     return true;
   }
 
-  async run(options: RunRequestOptions): Promise<RunSummary> {
+  async run(options: RunRequestOptions, _internal = false): Promise<RunSummary> {
     const env = this.deps.env ?? process.env;
     const store = this.deps.store;
     const settings = store.readSettings();
     const credentials = credentialServices(this.deps.get);
 
-    if (this.active !== undefined) {
-      throw new IpcError('CONFIG_INVALID', `已有一次运行在进行中（${this.active.id}），请先等待或取消`);
+    if (!_internal && (this.active !== undefined || this.batching)) {
+      throw new IpcError('CONFIG_INVALID', `已有一次运行在进行中（${this.active?.id ?? '批量运行'}），请先等待或取消`);
     }
 
     const problems = validateSettings(settings);
@@ -315,6 +317,29 @@ export class Runner {
       }
       this.active = undefined;
     }
+  }
+
+  /**
+   * 批量运行：按顺序对多个周期各跑一次（手动/工具触发时默认产出日/周/月三榜）。
+   * 每次内部独享 id / 日志 / 摘要；整个批次期间置 `batching`，挡住外部并发触发。
+   * 取消只中止当前周期，批次继续跑后续周期（用户取消单次即可）。
+   */
+  async runMany(options: RunRequestOptions & { periods?: Period[] }): Promise<RunSummary[]> {
+    if (this.active !== undefined || this.batching) {
+      throw new IpcError('CONFIG_INVALID', `已有一次运行在进行中（${this.active?.id ?? '批量运行'}），请先等待或取消`);
+    }
+    const periods = options.periods !== undefined && options.periods.length > 0 ? options.periods : [...PERIODS];
+    this.batching = true;
+    const summaries: RunSummary[] = [];
+    try {
+      for (const period of periods) {
+        summaries.push(await this.run({ ...options, period }, true));
+      }
+    } finally {
+      this.batching = false;
+      this.active = undefined;
+    }
+    return summaries;
   }
 
   private summarize(input: {

@@ -539,18 +539,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     h(
       Row,
       { label: t('schedule.periods') },
-      ...(['daily', 'weekly', 'monthly'] as Period[]).map((period) =>
-        h(Toggle, {
-          key: period,
-          checked: draft.schedule.periods.includes(period),
-          onChange: (on: boolean) => update((next) => {
-            const set = new Set(next.schedule.periods);
-            if (on) set.add(period); else set.delete(period);
-            next.schedule.periods = (['daily', 'weekly', 'monthly'] as Period[]).filter((p) => set.has(p));
-          }),
-          label: t(`scope.${period}`),
-        }),
-      ),
+      h('span', { className: 'dshgt-hint' }, t('schedule.periods.value')),
     ),
     h('p', { className: 'dshgt-hint' }, t('schedule.source')),
   );

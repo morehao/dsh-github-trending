@@ -97,7 +97,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | `since` 是单次运行周期（`daily`/`weekly`/`monthly`，抓取窗口=标的周期由核心保证）；实际支持范围由核心决定 |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
-| `schedule.periods` | `daily` | 定时自动产出的周期（`daily`/`weekly`/`monthly` 多选）：日=每天、周=周日、月=月末触发 |
+| `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末触发；旧配置自动升级为三周期 |
 | `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障，界面不提供入口，用环境变量或直接改 `settings.json`；设了就完全不下载） |
 | `coreAutoDownload` | `true` | 缓存缺失时是否自动下载核心；关掉后只报 `CORE_NOT_DOWNLOADED`，由你在设置页点「下载核心」 |
 
