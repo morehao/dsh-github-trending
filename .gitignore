@@ -12,3 +12,9 @@ client.js
 
 # agent 过程文档（不入库）
 .dsh/
+
+# 设计原型产物（本地临时，不提交）
+design-demos/
+
+# 会话/harness 产物（与项目无关）
+.dsh-im/

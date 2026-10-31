@@ -40,11 +40,11 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - `GET /preview?id=<runId>` 只接受历史里出现过的 id、不接路径参数；返回 `{ text, truncated }`。客户端渲染 Markdown 子集（标题 / 段落 / 列表 / 引用 / 代码块 / 表格（GFM 管道表，含列对齐）/ 粗体 / 行内代码 / 链接 / 分隔线），**只生成 React 文本节点**，链接仅放行 http(s)，不渲染图片或原始 HTML；也可以切「原文」。
 - 日报只列最近 30 天**有记录**的日期，每天一条；默认打开最近一期有预览的日报。失败 / 无变更 / 试跑 / 旧记录 / 副本被清理都有各自的空状态，不用示例内容兜底。
 - 预览是运行结束时的派生副本：你在仓库里事后编辑 canonical 文件，不会改变这次记录。
-- 关于入口在左轨底部：包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。
+- 工作台顶部第一行是插件身份条：名称 / 版本 / 完整包名（点击复制）/ GitHub 外链 / 检查更新（就地状态）；第二行是横向 tab（概览 / 日报 / 运行记录 / 设置），右侧常驻下次运行与就绪 N/4。点版本号可打开「关于」弹层。包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。
 
 ## 插件更新
 
-- 关于弹层里会显示当前版本与 npm 上的最新版：打开时静默检查一次（Host 侧缓存 5 分钟），也可以点「检查更新」强制重查。只跟随 npm 的 `latest` 稳定版。
+- 顶部身份条的「检查更新」与「关于」弹层都会显示当前版本与 npm 上的最新版：首次挂载静默检查一次（Host 侧缓存 5 分钟），也可以点「检查更新」强制重查；有新版时身份条就地显示「有新版本 vX」+「更新到 vX」。只跟随 npm 的 `latest` 稳定版。
 - 确认后由宿主 `pluginManager` 重装本插件（`installBundle`；已装同 spec 时走 `removeBundle → installBundle`，失败会尝试装回原版本），完成后需要重启 DSH 生效。
 - 本地安装（`link:` / `file:` / `workspace:`）**不提供一键更新**：那会把开发链接换成 npm 版。此时只显示 `dsh plugin --profile <name> add @morehao/dsh-github-trending@latest` 供复制。
 - 更新引擎来自共享包 [`@morehao/dsh-plugin-kit`](https://www.npmjs.com/package/@morehao/dsh-plugin-kit)（`./update` + `./update/client`），本仓只做上下文与 `execCapture` 接线；`GET /update` / `POST /update` 与其它路由一样要求自定义头、`no-store`，业务失败返回 409 + `UPDATE_FAILED` + `updateCode`。
