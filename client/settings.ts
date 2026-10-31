@@ -571,17 +571,17 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     { title: t('card.summarize.title'), hint: t('card.summarize.hint') },
     h(
       Row,
-      { label: t('summarize.batchSize') },
+      { label: t('summarize.batchSize'), help: t('summarize.batchSize.help') },
       h(Input, { mono: true, width: 90, value: String(draft.summarize.batchSize), onInput: (value: string) => update((next) => { next.summarize.batchSize = Math.round(Number(value) || 0); }) }),
     ),
     h(
       Row,
-      { label: t('summarize.maxRetries') },
+      { label: t('summarize.maxRetries'), help: t('summarize.maxRetries.help') },
       h(Input, { mono: true, width: 90, value: String(draft.summarize.maxRetries), onInput: (value: string) => update((next) => { next.summarize.maxRetries = Math.round(Number(value) || 0); }) }),
     ),
     h(
       Row,
-      { label: t('summarize.enrich') },
+      { label: t('summarize.enrich'), help: t('summarize.enrich.help') },
       h(Select, {
         value: draft.summarize.enrich,
         options: [
@@ -594,11 +594,10 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
     h(
       Row,
-      { label: t('summarize.readmeChars') },
+      { label: t('summarize.readmeChars'), help: t('summarize.readmeChars.help') },
       h(Input, { mono: true, width: 90, value: String(draft.summarize.readmeChars), onInput: (value: string) => update((next) => { next.summarize.readmeChars = Math.round(Number(value) || 0); }) }),
     ),
     draft.summarize.enrich === 'none' ? null : h(Alert, { kind: 'warn' }, h('div', null, t('summarize.enrichNote'))),
-    h('p', { className: 'dshgt-hint' }, t('summarize.usageNote')),
   );
 
   const releasesCard = h(
@@ -610,26 +609,19 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     },
     h(
       Row,
-      { label: t('releases.enabled') },
-      h(Toggle, { checked: draft.releases.enabled, onChange: (value: boolean) => update((next) => { next.releases.enabled = value; }) }),
-      h('span', { className: 'dshgt-hint' }, t('releases.enabled.hint')),
-    ),
-    h(
-      Row,
-      { label: t('releases.includePrerelease') },
+      { label: t('releases.includePrerelease'), help: t('releases.includePrerelease.help') },
       h(Toggle, { checked: draft.releases.includePrerelease, onChange: (value: boolean) => update((next) => { next.releases.includePrerelease = value; }) }),
     ),
     h(
       Row,
-      { label: t('releases.includeDrafts') },
+      { label: t('releases.includeDrafts'), help: t('releases.includeDrafts.help') },
       h(Toggle, { checked: draft.releases.includeDrafts, onChange: (value: boolean) => update((next) => { next.releases.includeDrafts = value; }) }),
     ),
     h(
       Row,
-      { label: t('releases.notesChars') },
+      { label: t('releases.notesChars'), help: t('releases.notesChars.help') },
       h(Input, { mono: true, width: 90, value: String(draft.releases.maxNotesChars), onInput: (value: string) => update((next) => { next.releases.maxNotesChars = Math.round(Number(value) || 0); }) }),
     ),
-    h('p', { className: 'dshgt-hint' }, t('releases.note')),
   );
 
   const currentCard =

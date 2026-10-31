@@ -206,7 +206,7 @@ export function apply(ctx: any): void {
           : view === 'runs'
             ? h(RunsView, { t, store: value, controller, onOpenDigest: openDigest })
             : view === 'subscriptions'
-              ? h(SubscriptionsView, { t, store: value, onOpenSettings: openSettings })
+              ? h(SubscriptionsView, { t, onOpenSettings: openSettings })
               : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
 
     return h(

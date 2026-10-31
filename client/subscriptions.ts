@@ -3,16 +3,14 @@
  *
  * 列表本身**不落 settings.json**，也不由插件直接写仓：全部经核心 `subscribe` IPC
  * 读改（add/remove 只写 `.git/pending`，随下次运行落盘并随产物提交）。
- * 本页只做「展示列表 + 增删 + 开关状态提示」；行为参数在设置页「发版订阅」分区。
+ * 本页只做「展示列表 + 增删」；行为参数在设置页「发版订阅」分区。
  */
 import { Alert, Btn, Input, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import { getSubscriptions, postSubscriptions } from './api.js';
-import type { StoreValue } from './store.js';
 
 export interface SubscriptionsProps {
   t: Translate;
-  store: StoreValue;
   /** 跳转到设置页「发版订阅」分区。 */
   onOpenSettings: () => void;
 }
@@ -20,15 +18,13 @@ export interface SubscriptionsProps {
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 export function SubscriptionsView(props: SubscriptionsProps): any {
-  const { t, store } = props;
+  const { t } = props;
   const [repos, setRepos] = React.useState<string[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [input, setInput] = React.useState('');
   const [note, setNote] = React.useState<string | null>(null);
-
-  const enabled = store.state?.settings.releases.enabled ?? false;
 
   const load = React.useCallback((): void => {
     setError(null);
@@ -97,14 +93,10 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         h(
           'div',
           { className: 'dshgt-subs-head-actions' },
-          h('span', { className: 'dshgt-hint' }, t('subs.enabled', { state: enabled ? t('subs.on') : t('subs.off') })),
           h(Btn, { small: true, variant: 'primary', onClick: () => setAdding(true), disabled: busy !== null || adding }, t('subs.add')),
         ),
       ),
       h('p', { className: 'dshgt-desc' }, t('subs.desc')),
-      enabled
-        ? null
-        : h(Alert, { kind: 'warn', title: t('subs.disabled.title') }, h('div', null, t('subs.disabled.hint'))),
 
       error === null ? null : h(Alert, { kind: 'err' }, error),
       note === null ? null : h(Alert, { kind: 'ok' }, note),
