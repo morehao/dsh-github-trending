@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.4.3] - 2026-10-31
+
+### 变更
+
+- **默认三周期全产出，无需勾选**：`schedule.periods` 固定收敛为 `daily,weekly,monthly`，定时运行默认产出日榜、周榜、月榜；设置页移除周期多选框，改为静态说明。旧配置（只有 `daily` 或空数组）在归一化时自动升级为三周期。相应地移除了「调度开启却未选周期」的校验（周期已恒为三项）。
+- **手动/工具运行也默认三榜**：新增 `Runner.runMany()`，`POST /run` 与 `trending_run` 在省略 `period` 时按顺序依次跑日/周/月三个周期（各自独立 id、日志、历史记录、`periodSuccess`），响应新增 `summaries` 数组；显式传 `period` 时仍只跑单周期。批次期间由 `batching` 标志挡住外部并发触发。
+
 ## [v0.4.2] - 2026-10-31
 
 ### Features

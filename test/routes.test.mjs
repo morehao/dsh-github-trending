@@ -87,17 +87,28 @@ test('/config 校验并保存；非法时 400 且不落盘', async () => {
   assert.equal(store.readSettings().trending.topN, 12);
 });
 
-test('POST /run 跑通并写历史；GET /log 能取到日志', async () => {
+test('POST /run 省略 period 默认跑日/周/月三榜；GET /log 能取到日志', async () => {
   const response = await fetch(`${base}/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({ dryRun: true }) });
   const payload = await response.json();
   assert.equal(payload.ok, true);
+  assert.equal(Array.isArray(payload.summaries), true);
+  assert.equal(payload.summaries.length, 3);
+  assert.deepEqual(payload.summaries.map((s) => s.period), ['daily', 'weekly', 'monthly']);
   assert.equal(payload.summary.ok, true);
   assert.equal(payload.summary.dryRun, true);
-  assert.equal(store.readHistory().length, 1);
+  assert.equal(store.readHistory().length, 3);
 
   const log = await fetch(`${base}/log?id=${payload.summary.id}`, { headers: HEADER });
   const logPayload = await log.json();
   assert.equal(logPayload.id, payload.summary.id);
+});
+
+test('POST /run 显式 period 只跑单个周期', async () => {
+  const before = store.readHistory().length;
+  const response = await fetch(`${base}/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({ dryRun: true, period: 'weekly' }) });
+  const payload = await response.json();
+  assert.equal(payload.summary.period, 'weekly');
+  assert.equal(store.readHistory().length, before + 1);
 });
 
 test('GET /log 拒绝非法 id（避免路径穿越）', async () => {

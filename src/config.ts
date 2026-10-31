@@ -82,6 +82,8 @@ export interface ScheduleSettings {
   /**
    * 定时自动产出的周期（插件侧调度概念，核心无此字段）。
    * 每个周期按自己的节奏触发：日=每天、周=周日、月=月末。
+   * 现在固定为三周期全产出（`['daily','weekly','monthly']`），不再由用户勾选；
+   * 保留该字段以兼容旧设置、并驱动调度与去重逻辑。
    */
   periods: Period[];
 }
@@ -129,7 +131,7 @@ export const DEFAULT_SETTINGS: Settings = {
   github: { authMode: 'gh', tokenRef: 'GITHUB_TOKEN' },
   trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
   output: { dir: 'trending' },
-  schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily'] },
+  schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily', 'weekly', 'monthly'] },
   corePath: '',
   coreAutoDownload: true,
 };
@@ -209,14 +211,12 @@ function strArray(value: unknown, fallback: string[]): string[] {
 }
 
 /**
- * 周期列表归一：只保留合法值、按 PERIODS 规范顺序去重。
- * `undefined`（旧版设置没有该字段）→ 回退默认；显式空数组保留为空，
- * 交给 validateSettings 在「调度开启却没有任何周期」时拦下。
+ * 周期列表归一：现在固定为「日/周/月」三周期全产出，不再由用户勾选。
+ * 无论输入是什么（含旧版只有 `daily`、显式空数组），都统一收敛为 `PERIODS`，
+ * 保证旧配置升级后也能自动产出三榜。保留该函数以便集中管理这一收敛。
  */
-function periodList(value: unknown, fallback: Period[]): Period[] {
-  if (value === undefined || !Array.isArray(value)) return [...fallback];
-  const set = new Set(value.filter(isPeriod));
-  return PERIODS.filter((period) => set.has(period));
+function periodList(_value: unknown, _fallback: Period[]): Period[] {
+  return [...PERIODS];
 }
 
 /**
@@ -362,9 +362,6 @@ export function validateSettings(settings: Settings, providers: readonly string[
   }
   if (!isValidTimezone(schedule.timezone)) {
     problems.push({ field: 'schedule.timezone', code: 'CONFIG_INVALID', message: '时区必须是 IANA 名称（如 Asia/Shanghai）' });
-  }
-  if (schedule.enabled && schedule.periods.length === 0) {
-    problems.push({ field: 'schedule.periods', code: 'CONFIG_INVALID', message: '定时运行开启时至少要选择一个产出周期（日/周/月）' });
   }
   return problems;
 }

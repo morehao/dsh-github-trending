@@ -204,13 +204,18 @@ async function dispatch(
 
   if (method === 'POST' && pathname === '/run') {
     const body = await readBody(request);
-    const summary = await deps.runner.run({
+    const base = {
       dryRun: body.dryRun === true,
       ...(typeof body.date === 'string' && body.date !== '' ? { date: body.date } : {}),
-      ...(isPeriod(body.period) ? { period: body.period } : {}),
-      trigger: 'manual',
-    });
-    return { summary };
+      trigger: 'manual' as const,
+    };
+    // 显式指定单周期 → 只跑该周期；省略 → 手动运行默认产出日/周/月三榜。
+    if (isPeriod(body.period)) {
+      const summary = await deps.runner.run({ ...base, period: body.period });
+      return { summary, summaries: [summary] };
+    }
+    const summaries = await deps.runner.runMany(base);
+    return { summary: summaries[summaries.length - 1], summaries };
   }
 
   if (method === 'POST' && pathname === '/run/cancel') {

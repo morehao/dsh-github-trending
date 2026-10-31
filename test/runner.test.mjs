@@ -439,3 +439,24 @@ test('period 落进摘要与历史（schedule 触发按周期）', async () => {
   assert.equal(store.readHistory()[0].period, 'weekly');
   assert.equal(store.readState().periodSuccess.weekly !== undefined, true);
 });
+
+test('runMany：省略 period 时默认依次跑日/周/月三榜，各自落历史与 periodSuccess', async () => {
+  const { runner, store } = makeRunner();
+  const summaries = await runner.runMany({ trigger: 'manual' });
+  assert.deepEqual(summaries.map((summary) => summary.period), ['daily', 'weekly', 'monthly']);
+  assert.equal(summaries.every((summary) => summary.ok), true);
+  const history = store.readHistory();
+  assert.deepEqual(history.map((record) => record.period), ['monthly', 'weekly', 'daily']); // 最新在前
+  const state = store.readState();
+  assert.notEqual(state.periodSuccess.daily, undefined);
+  assert.notEqual(state.periodSuccess.weekly, undefined);
+  assert.notEqual(state.periodSuccess.monthly, undefined);
+  assert.equal(runner.running, undefined);
+});
+
+test('runMany：显式 periods 只跑选定周期', async () => {
+  const { runner, store } = makeRunner();
+  const summaries = await runner.runMany({ trigger: 'manual', periods: ['weekly'] });
+  assert.deepEqual(summaries.map((summary) => summary.period), ['weekly']);
+  assert.equal(store.readHistory().length, 1);
+});
