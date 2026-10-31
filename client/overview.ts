@@ -11,6 +11,7 @@ import type { StoreValue } from './store.js';
 import { reasonHint } from './error-copy.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
+import { PluginUpdateSection } from './update-panel.js';
 import { credentialView } from './credential.js';
 import {
   buildDigestDates,
@@ -283,6 +284,12 @@ export function OverviewView(props: OverviewProps): any {
             ),
           );
         }),
+      ),
+      h(
+        'section',
+        { className: 'dshgt-card dshgt-update-card' },
+        h('div', { className: 'dshgt-card-h' }, h('h3', null, t('about.update.title'))),
+        h(PluginUpdateSection, { t, bare: true }),
       ),
     ),
   );

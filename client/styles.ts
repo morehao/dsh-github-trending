@@ -265,6 +265,9 @@ export const CSS = `
 .dshgt-update-manual{margin-top:9px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--gt-warn) 35%,var(--gt-border));border-radius:8px;background:color-mix(in srgb,var(--gt-warn) 6%,var(--gt-card));}
 .dshgt-update-manual .dshgt-update-warn{margin:0 0 6px;}
 .dshgt-update-cmd{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.5;color:var(--gt-fg);word-break:break-all;user-select:all;}
+.dshgt-update-dot{display:inline-block;width:6px;height:6px;margin-left:6px;border-radius:50%;background:var(--gt-err);vertical-align:middle;flex:none;}
+.dshgt-update-bare{margin-top:0;padding-top:0;border-top:0;}
+.dshgt-update-card .dshgt-card-h{margin-bottom:2px;}
 
 @media (max-width:1100px){
   .dshgt-app{grid-template-columns:190px minmax(0,1fr);}
