@@ -6,15 +6,19 @@
  */
 import { Alert, Btn, copyText, duration, h, shortHash, shortTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
-import { getLog, type RunRecord, type StatePayload } from './api.js';
+import { getLog, type DigestTarget, type RunRecord, type StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
 import { reasonHint, skipHint } from './error-copy.js';
+import { digestTarget } from './digest-core.js';
 
-type Filter = 'all' | 'failed' | 'dry';
+type Filter = 'all' | 'daily' | 'weekly' | 'monthly' | 'failed' | 'dry';
 const FILTERS: Array<{ id: Filter; key: string }> = [
   { id: 'all', key: 'runs.filter.all' },
+  { id: 'daily', key: 'runs.filter.daily' },
+  { id: 'weekly', key: 'runs.filter.weekly' },
+  { id: 'monthly', key: 'runs.filter.monthly' },
   { id: 'failed', key: 'runs.filter.failed' },
   { id: 'dry', key: 'runs.filter.dry' },
 ];
@@ -23,7 +27,7 @@ export interface RunsProps {
   t: Translate;
   store: StoreValue;
   controller: RunController;
-  onOpenDigest: (date?: string) => void;
+  onOpenDigest: (target?: DigestTarget) => void;
 }
 
 function recordSummary(t: Translate, record: RunRecord): string {
@@ -136,6 +140,7 @@ export function RunsView(props: RunsProps): any {
   const records = history.filter((record) => {
     if (filter === 'failed') return !record.ok;
     if (filter === 'dry') return record.kind === 'dry-run';
+    if (filter === 'daily' || filter === 'weekly' || filter === 'monthly') return (record.period ?? 'daily') === filter;
     return true;
   });
 
@@ -187,6 +192,7 @@ export function RunsView(props: RunsProps): any {
                 },
                 h('span', { className: `dshgt-lamp ${record.ok ? (record.skipped || record.kind === 'dry-run' ? 'warn' : 'ok') : 'err'}` }),
                 h('span', { className: 'dshgt-run-date' }, shortTime(record.at)),
+                h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`)),
                 h(
                   'span',
                   { className: 'dshgt-run-what' },
@@ -220,6 +226,7 @@ export function RunsView(props: RunsProps): any {
                       detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
                       detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
                       detailItem(t, 'runs.detail.date', record.date ?? '—'),
+                      detailItem(t, 'runs.detail.period', h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`))),
                       detailItem(
                         t,
                         'run.usage.pr',
@@ -241,7 +248,17 @@ export function RunsView(props: RunsProps): any {
                       { className: 'dshgt-run-actions' },
                       record.preview === undefined
                         ? h('span', { className: 'dshgt-hint' }, t('runs.detail.noPreview'))
-                        : h(Btn, { small: true, onClick: () => props.onOpenDigest(record.date) }, t('runs.detail.readDigest')),
+                        : h(
+                            Btn,
+                            {
+                              small: true,
+                              onClick: () => {
+                                const target = digestTarget(record, state.schedule.timezone);
+                                if (target !== undefined) props.onOpenDigest(target);
+                              },
+                            },
+                            t('runs.detail.readDigest'),
+                          ),
                       h(Btn, { small: true, onClick: () => setLogId(record.id) }, t('runs.detail.log')),
                       record.preview === undefined ? null : h('span', { className: 'dshgt-hint dshgt-mono' }, record.preview.file),
                     ),

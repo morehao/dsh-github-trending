@@ -307,7 +307,7 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
   const env = deps.env ?? process.env;
   const credentials = credentialServices(deps.get);
   const state = deps.store.readState();
-  // 30 条 = 最近 30 天窗口的数据源；日期切换不再额外请求历史接口。
+  // 90 条 = 三周期共用的回看窗口；日期/周期切换不再额外请求历史接口。
   const history = deps.store.readHistory();
   const core = await inspectCore(settings, { env });
   const coexistence = await detectCoexistence(core.path, { env });

@@ -495,16 +495,22 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     h(
       Row,
       { label: t('scope.period') },
-      h(Select, {
-        value: draft.trending.since,
-        options: [
-          { value: 'daily', label: t('scope.daily') },
-          { value: 'weekly', label: t('scope.weekly') },
-          { value: 'monthly', label: t('scope.monthly') },
-        ],
-        onChange: (value: string) => update((next) => { next.trending.since = value === 'weekly' ? 'weekly' : value === 'monthly' ? 'monthly' : 'daily'; }),
-      }),
-      h('span', { className: 'dshgt-hint' }, t('scope.topN')),
+      h(
+        'div',
+        { className: 'dshgt-period-list' },
+        ...(['daily', 'weekly', 'monthly'] as Period[]).map((period) =>
+          h(
+            'div',
+            { key: period, className: 'dshgt-period' },
+            h('span', { className: 'dshgt-period-check' }, '✓'),
+            h('span', null, t(`scope.${period}`)),
+          ),
+        ),
+      ),
+    ),
+    h(
+      Row,
+      { label: t('scope.topN') },
       h(Input, { mono: true, width: 70, value: String(draft.trending.topN), onInput: (value: string) => update((next) => { next.trending.topN = Math.round(Number(value) || 0); }) }),
     ),
     h(

@@ -31,13 +31,14 @@ test('设置写入后可读回，且文件权限为 0600', () => {
   assert.equal(settings.model.provider, 'deepseek');
 });
 
-test('历史最多 30 条，最新在前', () => {
+test('历史最多 HISTORY_LIMIT 条，最新在前', () => {
+  const limit = stateModule.HISTORY_LIMIT;
   const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-hist-')) });
-  for (let index = 0; index < 35; index += 1) store.recordRun(record(index));
+  for (let index = 0; index < limit + 5; index += 1) store.recordRun(record(index));
   const history = store.readHistory();
-  assert.equal(history.length, 30);
-  assert.equal(history[0].id, 'run-34');
-  assert.equal(history[29].id, 'run-5');
+  assert.equal(history.length, limit);
+  assert.equal(history[0].id, `run-${limit + 4}`);
+  assert.equal(history[limit - 1].id, 'run-5');
 });
 
 test('recordRun 同时更新 state.lastResult 与 lastDigest', () => {
@@ -137,21 +138,22 @@ test('预览副本：不存在返回 undefined；超过上限截断并标记', (
   assert.equal(cut.text.length, 100);
 });
 
-test('预览副本最多保留 30 份，按 mtime 淘汰最旧', () => {
+test('预览副本最多保留 PREVIEW_LIMIT 份，按 mtime 淘汰最旧', () => {
+  const limit = stateModule.PREVIEW_LIMIT;
   const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-preview3-')) });
-  const base = Math.floor(Date.now() / 1000) - 3600;
-  for (let index = 0; index < 35; index += 1) {
+  const base = Math.floor(Date.now() / 1000) - 7200;
+  for (let index = 0; index < limit + 5; index += 1) {
     store.writePreview(`run-${index}`, `content ${index}`);
     const file = path.join(store.previewsPath, `run-${index}.md`);
     utimesSync(file, base + index, base + index);
   }
-  // 再写一份触发裁剪（保持 30 份）
+  // 再写一份触发裁剪（保持 limit 份）
   store.writePreview('run-latest', 'latest');
   const names = readdirSync(store.previewsPath).filter((name) => name.endsWith('.md'));
-  assert.equal(names.length, 30);
+  assert.equal(names.length, limit);
   assert.equal(names.includes('run-0.md'), false);
   assert.equal(names.includes('run-latest.md'), true);
-  assert.equal(names.includes('run-34.md'), true);
+  assert.equal(names.includes(`run-${limit + 4}.md`), true);
   assert.equal(existsSync(path.join(store.previewsPath, 'run-0.md')), false);
 });
 
