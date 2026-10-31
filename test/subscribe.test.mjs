@@ -57,6 +57,23 @@ test('subscribe list 初始为空；add 后出现在列表；remove 后消失', 
   assert.deepEqual(afterRemove.repos, []);
 });
 
+test('代理模式（baseURL 为空）也能管理订阅：临时配置补回环占位端点', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-sub-proxy-'));
+  const repo = mkdtempSync(path.join(tmpdir(), 'dshgt-sub-proxy-repo-'));
+  mkdirSync(path.join(repo, '.git'));
+  const store = new stateModule.Store({ dir });
+  store.writeSettings({
+    model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'magpie', baseURL: '', model: 'm', apiKeyRef: 'K' },
+    repo: { path: repo },
+    output: { dir: 'trending' },
+  });
+  const deps = { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore() };
+
+  const listed = await subscribeModule.runSubscribe({ action: 'list' }, deps);
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.repos, []);
+});
+
 test('subscribe 非法 owner/repo 形态在插件侧就拦下（CONFIG_INVALID）', async () => {
   const { store } = makeStore();
   const deps = { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore() };

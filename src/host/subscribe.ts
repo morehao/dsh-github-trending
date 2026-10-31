@@ -16,7 +16,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { toCoreConfig, toYaml, validateSettings, type Settings } from '../config.js';
+import { effectiveBaseURL, toCoreConfig, toYaml, validateSettings, type Settings } from '../config.js';
 import { IpcError, parseSubscribeResult, type SubscribeAction, type SubscribeOutcome } from '../ipc.js';
 import { locateCore } from '../core/locate.js';
 import { execCapture, sanitizedEnv } from '../core/exec.js';
@@ -40,6 +40,14 @@ export interface SubscribeDeps {
 }
 
 /**
+ * 代理模式（mode=proxy）的端点由运行期回环代理注入，设置里的 baseURL 为空；
+ * 但核心 `config.Load` 不区分 run/subscribe，一律要求 baseURL 非空，否则返回
+ * `config invalid: baseURL为必填字段`。订阅命令不调用模型，补一个回环占位地址即可；
+ * 它永远不会被请求（list 只读本地订阅队列，add/remove 只写 pending）。
+ */
+const SUBSCRIBE_PLACEHOLDER_BASE_URL = 'http://127.0.0.1:9/v1';
+
+/**
  * 把 settings 写成一份临时 YAML 配置（0600），传给核心作为 `configPath`。
  * subscribe 不解析模型，但 `config.Load` 会校验整个配置（provider/name/baseURL/repo.path
  * 必填）。因此要求设置足够完整；apiKey 不参与校验，给空串即可（密钥不落盘）。
@@ -47,7 +55,8 @@ export interface SubscribeDeps {
 function writeTempConfig(settings: Settings): { file: string; dir: string } {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'dsh-subscribe-'));
   const file = path.join(dir, 'config.yml');
-  const yaml = `${toYaml(toCoreConfig(settings, ''))}\n`;
+  const placeholder = effectiveBaseURL(settings.model) === '' ? SUBSCRIBE_PLACEHOLDER_BASE_URL : undefined;
+  const yaml = `${toYaml(toCoreConfig(settings, '', placeholder))}\n`;
   writeFileSync(file, yaml, { mode: 0o600 });
   return { file, dir };
 }

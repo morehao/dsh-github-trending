@@ -257,6 +257,13 @@ if (command === 'subscribe') {
     process.stdout.write(JSON.stringify(out) + '\n');
     process.exit(ok ? 0 : 1);
   };
+  // 与真核心 config.Load 一致：subscribe 不调用模型，但仍要求 baseURL 非空。
+  // 用来守住「代理模式（baseURL 为空）管理订阅」的回归。
+  const baseURLMatch = /^\s*baseURL:\s*"((?:[^"\\]|\\.)*)"\s*$/m.exec(config);
+  if (baseURLMatch === null || baseURLMatch[1] === '') {
+    process.stderr.write('error: config invalid: baseURL为必填字段\n');
+    envelope(false, 'INTERNAL', 'config invalid: baseURL为必填字段');
+  }
   if (process.env.FAKE_SUBSCRIBE_FAIL === '1') {
     envelope(false, 'CONFIG_INVALID', 'fake subscribe failure');
   }

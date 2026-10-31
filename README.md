@@ -48,13 +48,13 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - 「本次任务总量」= 榜单摘要阶段（`usage.totalTokens`）+ 发版订阅阶段（`releases.usage.totalTokens`），**订阅消耗计入总量**。
 - 累计 = 历史里全部运行 `tokens` 之和，**读时求和、不落盘**（`history.json` 只存每次的 `tokens`）。
 - 插件**不做费用估算、不内置定价表**（价格随 provider / 区域变动，易过期）：只展示核心回报的 token 真值。
-- 展示位置：概览速览块（本次 / 累计 / 新发版 / 订阅仓库数）、运行记录（每行本次 tokens、展开明细、页脚累计）、历史。数据来自契约 `Usage`。旧核心无 `usage` / `releases` 时整块显示「—」并隐藏，绝不伪造 0。
+- 展示位置：概览速览块（本次 / 累计 / 新发版 / 订阅仓库数）、运行记录（每行本次 tokens、展开明细、页脚累计）、历史。数据来自契约 `Usage`。旧核心无 `usage` / `releases` 时对应速览块整体隐藏（不铺「—」、不伪造 0）。
 
 ## 发版订阅
 
 - 订阅一组仓库，之后每次运行把每个仓库「**新增的 Release**（无 Release 时回退 Tag）」写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
-- **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, configPath}`，`list` 的仓库由核心 stdout 逐行返回后插件解析。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件。
+- **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, configPath}`，`list` 的仓库由核心 stdout 逐行返回后插件解析。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
 - 界面：「订阅」页管理列表（增删）；「设置 → 发版订阅」分区放行为参数（含预发布 / 含草稿 / notes 截断，字段旁 `?` 悬浮说明），以及「管理订阅列表 →」入口。
 - 周期独立：`releases.period` 默认 `daily`，不与 `trending.since` 联动。
 - 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
