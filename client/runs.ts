@@ -122,6 +122,7 @@ export function RunsView(props: { t: Translate; store: StoreValue; page?: boolea
                     ['model', `${state.settings.model.provider} / ${state.settings.model.model || '—'}`],
                   ],
                 }),
+                last.skipped && typeof last.skipReason === 'string' ? h('p', { className: 'dshgt-hint' }, t(`skip.${last.skipReason}`)) : null,
                 last.warnings.length === 0 ? null : h('p', { className: 'dshgt-hint' }, last.warnings.join('；')),
               ),
           shown !== null && shown.error !== undefined
@@ -130,7 +131,7 @@ export function RunsView(props: { t: Translate; store: StoreValue; page?: boolea
                 { title: t('run.error.title') },
                 h(Alert, { kind: 'err', title: `${t('error.prefix')} ${shown.error.code}` },
                   h('div', null, shown.error.message),
-                  h('div', { className: 'dshgt-hint' }, shown.error.hint),
+                  h('div', { className: 'dshgt-hint' }, reasonHint(t, shown.error.reason) ?? shown.error.hint),
                   shown.error.inferred ? h('div', { className: 'dshgt-hint' }, '（错误码由插件按核心 stderr 推断）') : null,
                 ),
                 shown.logFile === undefined ? null : h('p', { className: 'dshgt-hint' }, `日志：${shown.logFile}`),
@@ -139,6 +140,14 @@ export function RunsView(props: { t: Translate; store: StoreValue; page?: boolea
         )
       : h(HistoryTable, { t, records: state.status.history }),
   );
+}
+
+/** reason → 本地化提示；未知 reason 返回 null，让调用方回落到核心的 hint。 */
+function reasonHint(t: Translate, reason: string | undefined): string | null {
+  if (reason === undefined || reason === '') return null;
+  const key = `err.reason.${reason}`;
+  const text = t(key);
+  return text === key ? null : text;
 }
 
 function stepFromError(area: string | undefined): string {
@@ -178,7 +187,7 @@ function HistoryTable(props: { t: Translate; records: Array<Record<string, any>>
                 h('td', { className: 'dshgt-mono' }, String(record.files ?? 0)),
                 h('td', { className: 'dshgt-mono' }, duration(Number(record.durationMs ?? 0))),
                 h('td', { className: 'dshgt-mono' }, [record.branch, record.prUrl].filter(Boolean).join(' · ') || '—'),
-                h('td', { className: 'dshgt-mono' }, record.errorCode ?? '—'),
+                h('td', { className: 'dshgt-mono', title: record.errorMessage ?? undefined }, record.errorCode === undefined ? '—' : record.errorReason === undefined ? record.errorCode : `${record.errorCode} · ${record.errorReason}`),
               ),
             ),
           ),

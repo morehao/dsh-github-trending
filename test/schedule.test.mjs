@@ -52,7 +52,7 @@ test('Scheduler.tick 同日只触发一次，禁用时不触发', async () => {
     run: async () => {
       runs += 1;
       const state = store.readState();
-      store.writeState({ ...state, lastRunAt: new Date('2026-10-30T00:31:00Z').toISOString() });
+      store.writeState({ ...state, lastRunAt: new Date('2026-10-30T00:31:00Z').toISOString(), lastSuccessAt: new Date('2026-10-30T00:31:00Z').toISOString() });
     },
   });
   const now = new Date('2026-10-30T00:35:00Z');
@@ -66,4 +66,44 @@ test('Scheduler.tick 同日只触发一次，禁用时不触发', async () => {
   assert.equal(await off.tick(now), 'disabled');
   scheduler.stop();
   off.stop();
+});
+
+test('失败不锁当天：间隔后可重试，但最多 2 次', async () => {
+  const { state: stateModule } = await import('../lib/internal.js');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-sched-retry-'));
+  const store = new stateModule.Store({ dir });
+  store.writeSettings({ schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai' } });
+
+  let runs = 0;
+  let failures = 0;
+  const scheduler = new schedule.Scheduler({
+    store,
+    isRunning: () => false,
+    getTimer: () => undefined,
+    run: async () => {
+      runs += 1;
+      failures += 1;
+      throw new Error('boom');
+    },
+  });
+  const first = new Date('2026-10-30T00:35:00Z');
+  assert.equal(await scheduler.tick(first), 'skipped'); // 首次尝试失败，tick 返回 skipped
+  assert.equal(runs, 1);
+
+  // 间隔不足：不再尝试
+  assert.equal(await scheduler.tick(new Date(first.getTime() + 60_000)), 'skipped');
+  assert.equal(runs, 1);
+
+  // 间隔够了：第二次尝试
+  assert.equal(await scheduler.tick(new Date(first.getTime() + 6 * 60_000)), 'skipped');
+  assert.equal(runs, 2);
+
+  // 超过当日上限：不再尝试
+  assert.equal(await scheduler.tick(new Date(first.getTime() + 12 * 60_000)), 'skipped');
+  assert.equal(runs, 2);
+  assert.equal(failures, 2);
+  scheduler.stop();
 });

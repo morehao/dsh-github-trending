@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### 变更
+
+- **推送失败可自愈**：核心改为日期分支追加提交 + 普通推送，`stale info` / `non-fast-forward` 不再需要人工进仓库处理；插件把 push 失败细分为 `stale-lease` / `non-fast-forward` / `auth` / `protected` / `hook` / `pathspec`，并按原因给出下一步（zh/en）。
+- **跳过原因可见**：结果与历史记录新增 `skipReason`（`merged` / `pr-closed` / `unchanged`），运行页直接说明为什么没跑或没提交。
+- **定时运行尊重已关闭的 PR**：插件经 `TRENDRADAR_TRIGGER` 把触发来源传给核心；定时运行遇到 closed-unmerged 的 PR 会跳过，手动运行才会重建并重开。
+- **调度改为「成功才锁当天」**：失败不再吃掉一整天；同一 catch-up 窗口内最多重试 2 次、间隔至少 5 分钟。
+- 历史记录保存 `errorReason` / `skipReason`，重开界面仍能看到原因。
+
 ## 0.3.0 - 2026-10-31
 
 ### 变更（含破坏性）

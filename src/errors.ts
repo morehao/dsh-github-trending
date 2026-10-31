@@ -89,11 +89,53 @@ export function areaOf(code: string): ErrorArea {
   return 'run';
 }
 
+/**
+ * push 失败的细分原因。核心新版本会在 `details.reason` 里给出；旧核心只有
+ * stderr 时按文本兜底。`stale-lease` 必须排在 `non-fast-forward` 之前：
+ * 前者是 lease 基线过期，后者是历史分叉，下一步完全不同。
+ */
+export type GitReason =
+  | 'stale-lease'
+  | 'non-fast-forward'
+  | 'auth'
+  | 'protected'
+  | 'hook'
+  | 'pathspec'
+  | 'unknown';
+
+export function reasonOf(code: string, message?: string, details?: Record<string, unknown>): string | undefined {
+  const structured = typeof details?.reason === 'string' && details.reason !== '' ? details.reason : undefined;
+  if (structured !== undefined) return structured;
+  if (code !== 'GIT_OPERATION_FAILED' || typeof message !== 'string') return undefined;
+  if (/stale info/i.test(message)) return 'stale-lease';
+  if (/non-fast-forward|fetch first/i.test(message)) return 'non-fast-forward';
+  if (/permission denied|authentication failed|could not read Username|invalid username or password/i.test(message)) return 'auth';
+  if (/protected branch|GH006/i.test(message)) return 'protected';
+  if (/hook declined|pre-receive hook/i.test(message)) return 'hook';
+  if (/pathspec/i.test(message)) return 'pathspec';
+  return 'unknown';
+}
+
 /** 每种码一句「下一步怎么做」，避免界面只给码不给路。 */
-export function hintOf(code: string, message?: string): string {
-  // GIT_OPERATION_FAILED 覆盖很多 git 子命令失败；带 non-fast-forward 时给最可执行的建议。
-  if (code === 'GIT_OPERATION_FAILED' && typeof message === 'string' && /non-fast-forward|\[rejected\]|failed to push|fetch first/i.test(message)) {
-    return '推送被拒（non-fast-forward）：远端已有同名分支且历史分叉。先合并/关闭并删除该远端分支，或让核心以 --force-with-lease 推送后重试。';
+export function hintOf(code: string, message?: string, reason?: string): string {
+  const gitReason = reason ?? reasonOf(code, message);
+  if (code === 'GIT_OPERATION_FAILED' && gitReason !== undefined) {
+    switch (gitReason) {
+      case 'stale-lease':
+        return '推送被拒（stale info）：本地对远端分支的记录过期（分支被删或被改），不是有人抢先推送。在仓库里执行 git fetch --prune origin 后重试；升级核心后不会再出现。';
+      case 'non-fast-forward':
+        return '推送被拒（non-fast-forward）：远端分支已前进。先 git fetch 并 rebase 到远端分支，或删除该远端分支后重试。';
+      case 'auth':
+        return '推送认证失败：更新 GitHub token / gh 登录后重试；本地 commit 已保留。';
+      case 'protected':
+        return '目标分支受保护：改为通过 PR 提交，或调整分支保护规则。';
+      case 'hook':
+        return '仓库 hook 拒绝了操作：按 hook 输出修正后重试；本地 commit 已保留。';
+      case 'pathspec':
+        return '暂存路径不存在：检查设置里的输出目录（output.dir）是否与仓库实际目录一致。';
+      default:
+        return '推送失败：本地 commit 已保留，查看运行日志里的 git 输出后重试。';
+    }
   }
   switch (code) {
     case 'CORE_UNAVAILABLE':

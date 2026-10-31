@@ -190,7 +190,7 @@ test('默认按调度时区计算运行日期，并写进摘要与 lastDigest', 
   assert.equal(store.readState().lastDigest.date, expected);
 });
 
-test('存在未合并 pendingPr 时也照常运行（核心 v0.2.0 用 force-with-lease 更新 PR，插件不再拦截）', async () => {
+test('存在未合并 pendingPr 时也照常运行（同日重跑由核心追加提交并更新 PR）', async () => {
   const { runner, store } = makeRunner();
   const today = scheduleModule.zonedDateString(new Date(), 'Asia/Shanghai');
   store.writeState({ pendingPr: { url: 'https://github.com/o/r/pull/9', createdAt: new Date().toISOString(), date: today } });
@@ -199,3 +199,35 @@ test('存在未合并 pendingPr 时也照常运行（核心 v0.2.0 用 force-wit
   assert.equal(store.readHistory().length, 1);
 });
 
+
+test('触发来源经环境变量传给核心：schedule → schedule，tool → manual', async () => {
+  const scheduled = makeRunner({ scenario: { FAKE_ECHO_TRIGGER: '1' } });
+  const s1 = await scheduled.runner.run({ trigger: 'schedule' });
+  assert.deepEqual(s1.warnings, ['trigger=schedule']);
+
+  const manual = makeRunner({ scenario: { FAKE_ECHO_TRIGGER: '1' } });
+  const s2 = await manual.runner.run({ trigger: 'tool' });
+  assert.deepEqual(s2.warnings, ['trigger=manual']);
+});
+
+test('核心的 skipReason 进入摘要与历史', async () => {
+  const { runner, store } = makeRunner({ scenario: { FAKE_SKIPPED: '1', FAKE_SKIP_REASON: 'pr-closed' } });
+  const summary = await runner.run({ trigger: 'schedule' });
+  assert.equal(summary.skipReason, 'pr-closed');
+  assert.equal(store.readHistory()[0].skipReason, 'pr-closed');
+});
+
+test('push 失败带 reason：stale info → stale-lease，提示可自愈', async () => {
+  const stderr = [
+    'error: GIT_OPERATION_FAILED: To github.com:owner/repo.git',
+    ' ! [rejected]        trending/2026-10-31 -> trending/2026-10-31 (stale info)',
+    "error: failed to push some refs to 'github.com:owner/repo.git'",
+  ].join('\n');
+  const { runner, store } = makeRunner({ scenario: { FAKE_EXIT: '1', FAKE_STDERR: stderr } });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.error.code, 'GIT_OPERATION_FAILED');
+  assert.equal(summary.error.reason, 'stale-lease');
+  assert.match(summary.error.hint, /fetch --prune/);
+  assert.doesNotMatch(summary.error.hint, /non-fast-forward/);
+  assert.equal(store.readHistory()[0].errorReason, 'stale-lease');
+});
