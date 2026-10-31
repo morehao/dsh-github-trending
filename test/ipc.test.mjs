@@ -131,6 +131,9 @@ test('parseSubscribeResult：list 从信封前逐行取仓库，信封只带 ok'
   const result = ipc.parseSubscribeResult(out);
   assert.equal(result.ok, true);
   assert.deepEqual(result.repos, ['vercel/next.js', 'oven-sh/bun']);
+  // 旧核心没有新 payload：items/doc 必须缺省，不能凭空造空对象。
+  assert.equal(result.items, undefined);
+  assert.equal(result.doc, undefined);
 });
 
 test('parseSubscribeResult：失败信封带 error，repos 为空', () => {
@@ -145,4 +148,67 @@ test('parseSubscribeResult：空输出 / 非信封结尾 → IPC_INVALID', () =>
   expectCode(() => ipc.parseSubscribeResult(''), 'IPC_INVALID');
   expectCode(() => ipc.parseSubscribeResult('not json'), 'IPC_INVALID');
   expectCode(() => ipc.parseSubscribeResult('{"hello":1}'), 'IPC_INVALID');
+});
+
+// ——— 契约 0.4.0：payload 进信封（subscriptions / subscriptionDoc） ———
+
+const SUB_ENVELOPE = { ipcSchema: 2, ok: true, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [] };
+
+test('parseSubscribeResult：信封里的 subscriptions（repos + items）优先于逐行兜底', () => {
+  const out = JSON.stringify({
+    ...SUB_ENVELOPE,
+    subscriptions: {
+      repos: ['vercel/next.js', 'oven-sh/bun'],
+      items: [
+        { fullName: 'vercel/next.js', status: 'ok', latestTag: 'v15.1.0', url: 'https://github.com/vercel/next.js' },
+        { fullName: 'oven-sh/bun', status: 'no_change' },
+        // 畸形行丢掉，不让一行坏数据毁掉整张表
+        { fullName: 'bad row', status: 'bogus' },
+        { status: 'ok' },
+      ],
+    },
+  });
+  const result = ipc.parseSubscribeResult(out);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.repos, ['vercel/next.js', 'oven-sh/bun']);
+  assert.deepEqual(
+    result.items.map((item) => [item.fullName, item.status]),
+    [
+      ['vercel/next.js', 'ok'],
+      ['oven-sh/bun', 'no_change'],
+    ],
+  );
+  assert.equal(result.items[0].latestTag, 'v15.1.0');
+  assert.equal(result.doc, undefined);
+});
+
+test('parseSubscribeResult：subscriptions.repos 不是字符串数组 → IPC_INVALID（不静默当空表）', () => {
+  expectCode(() => ipc.parseSubscribeResult(JSON.stringify({ ...SUB_ENVELOPE, subscriptions: { repos: 'a/b' } })), 'IPC_INVALID');
+  expectCode(() => ipc.parseSubscribeResult(JSON.stringify({ ...SUB_ENVELOPE, subscriptions: { repos: [1] } })), 'IPC_INVALID');
+  expectCode(() => ipc.parseSubscribeResult(JSON.stringify({ ...SUB_ENVELOPE, subscriptions: 42 })), 'IPC_INVALID');
+});
+
+test('parseSubscribeResult：subscriptionDoc 合法时透出，畸形时 IPC_INVALID', () => {
+  const doc = {
+    fullName: 'vercel/next.js',
+    volume: 2,
+    volumes: [{ index: 1, file: 'vercel/next.js.md', from: '2026-W40', to: '2026-W43', lines: 120 }],
+    updatedAt: '2026-11-01T00:00:00Z',
+    markdown: '# 发版记录\n',
+  };
+  const ok = ipc.parseSubscribeResult(JSON.stringify({ ...SUB_ENVELOPE, subscriptionDoc: doc }));
+  assert.deepEqual(ok.doc, doc);
+  assert.deepEqual(ok.repos, []);
+  for (const bad of [
+    { fullName: 'a/b', volume: 0, markdown: '' },
+    { fullName: 'a/b', volume: 1.5, markdown: '' },
+    { fullName: 'a/b', volume: 1 },
+    { volume: 1, markdown: 'x' },
+    'nope',
+  ]) {
+    expectCode(() => ipc.parseSubscribeResult(JSON.stringify({ ...SUB_ENVELOPE, subscriptionDoc: bad })), 'IPC_INVALID');
+  }
+  assert.equal(ipc.isSubscriptionDoc(doc), true);
+  assert.equal(ipc.isSubscriptionDoc({ ...doc, volume: 0 }), false);
+  assert.equal(ipc.isSubscriptionDoc({ ...doc, markdown: undefined }), false);
 });

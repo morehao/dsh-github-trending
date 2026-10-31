@@ -78,6 +78,70 @@ export interface RunOutcome {
   coreVersion: string;
 }
 
+/**
+ * 契约 0.4.0（核心 0.7.0）新增的 wire 类型。
+ *
+ * 契约包尚未发布：npm 上的 `@morehao/trendradar-contract` 还停在 0.3.0，
+ * 因此这三块按 `contract/schema/releases.v2.json` 原样在本地声明，等 0.4.0 发布后
+ * 改回 `@morehao/trendradar-contract` 的 `import type`。除这里列出的字段外，
+ * 不补任何契约里没有的东西——本地声明只是「包还没发」的临时载体，不是第二份契约。
+ */
+export type SubscriptionStatus = 'baseline' | 'ok' | 'no_change' | 'rate_limited' | 'failed';
+
+/** 订阅表的一行：只放列表展示需要的字段，正文在 `SubscriptionDoc` 里（首屏体积预算）。 */
+export interface SubscriptionItem {
+  fullName: string;
+  url?: string;
+  latestTag?: string;
+  latestSummaryAt?: string;
+  lastCheckedAt?: string;
+  status: SubscriptionStatus;
+}
+
+/** 发版文档的一卷：index 1 是 `<repo>.md`，>=2 是 `<repo>.0N.md`。 */
+export interface SubscriptionVolume {
+  index: number;
+  file: string;
+  from?: string;
+  to?: string;
+  lines?: number;
+}
+
+/** 一个仓库某卷的发版文档；`markdown` 是文件原文，面板逐字渲染、不再二次摘要。 */
+export interface SubscriptionDoc {
+  fullName: string;
+  volume: number;
+  volumes?: SubscriptionVolume[];
+  updatedAt?: string;
+  markdown: string;
+}
+
+const SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = ['baseline', 'ok', 'no_change', 'rate_limited', 'failed'];
+
+export function isSubscriptionStatus(value: unknown): value is SubscriptionStatus {
+  return typeof value === 'string' && (SUBSCRIPTION_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * `SubscriptionDoc` 的运行时守卫：缺 fullName/volume/markdown 的负载宁可抛
+ * `IPC_INVALID`，也不要让界面拿到半份文档（正文缺失时渲染会崩，比报错更难查）。
+ */
+export function isSubscriptionDoc(value: unknown): value is SubscriptionDoc {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.fullName === 'string' &&
+    value.fullName !== '' &&
+    typeof value.volume === 'number' &&
+    Number.isInteger(value.volume) &&
+    value.volume >= 1 &&
+    typeof value.markdown === 'string'
+  );
+}
+
+function isSubscriptionItem(value: unknown): value is SubscriptionItem {
+  return isRecord(value) && typeof value.fullName === 'string' && value.fullName !== '' && isSubscriptionStatus(value.status);
+}
+
 export class IpcError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -184,28 +248,47 @@ function timing(options: ParseRunOptions) {
   return { startedAt: options.startedAt, finishedAt: options.finishedAt, durationMs: options.durationMs };
 }
 
-/** 订阅命令的结果：list 带回 repos，add/remove 只看 ok/error。 */
+/** 订阅命令的结果：list 带回 repos/items，releases 带回 doc，add/remove 只看 ok/error。 */
 export interface SubscribeOutcome {
   ok: boolean;
   repos: string[];
+  /** list 的逐仓库明细（契约 0.4.0）；旧核心不返回时为 undefined。 */
+  items?: SubscriptionItem[];
+  /** `action=releases` 读到的发版文档；其它 action 没有。 */
+  doc?: SubscriptionDoc;
   error?: RunError;
 }
 
 /** 订阅命令的一个动作（契约 `RunRequest.action`）。 */
-export type SubscribeAction = 'list' | 'add' | 'remove';
+export type SubscribeAction = 'list' | 'add' | 'remove' | 'releases';
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /**
+ * 解析 `envelope.subscriptions`（契约 `SubscriptionList`）。
+ * 只对 `repos` 做严格校验：它是旧核心/旧客户端唯一读的字段，形状不对说明信封读错了。
+ * `items` 是新增的展示明细，单行畸形就丢掉那一行，不因为一行坏数据让整张表打不开。
+ */
+function parseSubscriptionList(value: unknown): { repos: string[]; items?: SubscriptionItem[] } {
+  if (!isRecord(value)) throw new IpcError('IPC_INVALID', '核心 subscribe 返回的 subscriptions 不是对象');
+  const rawRepos = value.repos;
+  if (!Array.isArray(rawRepos) || rawRepos.some((item) => typeof item !== 'string')) {
+    throw new IpcError('IPC_INVALID', '核心 subscribe 返回的 subscriptions.repos 不是字符串数组');
+  }
+  const repos = rawRepos.filter((item): item is string => typeof item === 'string');
+  const items = Array.isArray(value.items) ? value.items.filter(isSubscriptionItem) : undefined;
+  return { repos, ...(items === undefined ? {} : { items }) };
+}
+
+/**
  * 解析核心 `subscribe --json` 的 stdout。
  *
- * 核心先由 `runSubscribe` 把 `list` 的结果**逐行**打到 stdout（每行一个 owner/repo），
- * 再由 `emitSubscribeResult` 把契约 RunResult 信封打到 stdout（`command:"subscribe"`，
- * 只带 `ok/error`，**不含 repos**）。因此：
- *   - 信封是**最后一段 JSON**；它前面的非空行才是 list 的仓库列表；
- *   - 信封 `command` 是 `"subscribe"`（不在契约 RunResult 枚举里，故不能直接用
- *     `validators.runResult` 校验），这里只按 envelope 必需字段做轻量校验。
- * 任何形状不对都抛 `IPC_INVALID`：订阅结果读错会把失败当成功。
+ * 契约 0.4.0 起 payload 进了结果信封：`{command:"subscribe", subscriptions?, subscriptionDoc?}`。
+ * 这里**优先**读信封；旧核心（0.6.x 及以前）把 `list` 的结果逐行打到信封之前、信封里只有
+ * `ok/error`，因此保留逐行兜底——两种都能读，但绝不「猜字段」：
+ *   - 信封不是 `ipcSchema=2` 的对象 → `IPC_INVALID`；
+ *   - `subscriptions` 存在但形状不对 → `IPC_INVALID`（不是空列表）；
+ *   - `subscriptionDoc` 存在但不满足契约 → `IPC_INVALID`（界面不能拿到半份文档）。
  */
 export function parseSubscribeResult(text: string): SubscribeOutcome {
   const trimmed = text.trim();
@@ -223,16 +306,25 @@ export function parseSubscribeResult(text: string): SubscribeOutcome {
     throw new IpcError('IPC_INVALID', '核心 subscribe --json 不是契约信封（ipcSchema=2 / ok）');
   }
   const error = normalizeError(envelope.error);
-  // 信封之前的行为 list 结果；过滤空行与任何非 owner/repo 形态的噪声行。
-  const repos: string[] = [];
-  for (const line of lines.slice(0, -1)) {
-    const value = line.trim();
-    if (value === '') continue;
-    if (REPO_PATTERN.test(value)) repos.push(value);
+  const list = envelope.subscriptions === undefined ? undefined : parseSubscriptionList(envelope.subscriptions);
+  const doc = envelope.subscriptionDoc;
+  if (doc !== undefined && !isSubscriptionDoc(doc)) {
+    throw new IpcError('IPC_INVALID', '核心 subscribe 返回的 subscriptionDoc 不是契约 SubscriptionDoc（fullName/volume/markdown）');
+  }
+  const repos: string[] = list?.repos ?? [];
+  if (list === undefined) {
+    // 旧核心兜底：信封之前的行为 list 结果；过滤空行与任何非 owner/repo 形态的噪声行。
+    for (const line of lines.slice(0, -1)) {
+      const value = line.trim();
+      if (value === '') continue;
+      if (REPO_PATTERN.test(value)) repos.push(value);
+    }
   }
   return {
     ok: envelope.ok === true,
     repos,
+    ...(list?.items === undefined ? {} : { items: list.items }),
+    ...(doc === undefined ? {} : { doc }),
     ...(error === undefined ? {} : { error }),
   };
 }

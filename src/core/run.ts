@@ -42,6 +42,13 @@ export interface RunCoreOptions {
   trigger?: 'manual' | 'schedule';
   /** 回环代理地址：覆盖配置里的 model.baseURL（代理模式专用）。 */
   baseURLOverride?: string;
+  /**
+   * 只跑指定阶段（核心 `run --stages`）。缺省 = 跑所有已启用阶段；
+   * `['releases']` 就是「只跑发版订阅」——不抓榜单、不渲染 digest、也不合并订阅 pending。
+   */
+  stages?: string[];
+  /** 订阅仓库数：用于把配置里的 `auto` 并发/预算解析成数字（发版运行传入）。 */
+  repoCount?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
   onStderr?: (line: string) => void;
@@ -71,11 +78,16 @@ function errorFrom(stderr: string, exitCode: number | null): RunError {
   };
 }
 
-export function buildCoreArgs(channelPath: string, options: { dryRun: boolean; date?: string; period?: Period }): string[] {
+export function buildCoreArgs(
+  channelPath: string,
+  options: { dryRun: boolean; date?: string; period?: Period; stages?: string[] },
+): string[] {
   const args = ['run', '--config', channelPath, '--json'];
   if (options.dryRun) args.push('--dry-run');
   if (options.date !== undefined && options.date !== '') args.push('--date', options.date);
   if (options.period !== undefined) args.push('--period', options.period);
+  // 核心的 --stages 是逗号分隔；缺省时完全不传，旧核心不会因未知参数失败。
+  if (options.stages !== undefined && options.stages.length > 0) args.push('--stages', options.stages.join(','));
   return args;
 }
 
@@ -84,10 +96,17 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
   const startedAt = nowIso();
   const started = Date.now();
   const channel = await openConfigChannel();
-  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period))}\n`;
+  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period, options.repoCount))}\n`;
   const secrets = [options.apiKey, options.token, ...(options.secrets ?? [])];
 
-  const child = spawn(options.core.path, buildCoreArgs(channel.path, { dryRun: options.dryRun, date: options.date, period: options.period }), {
+  const args = buildCoreArgs(channel.path, {
+    dryRun: options.dryRun,
+    date: options.date,
+    period: options.period,
+    stages: options.stages,
+  });
+
+  const child = spawn(options.core.path, args, {
     env: sanitizedEnv(process.env, {
       GITHUB_TOKEN: options.token,
       GH_TOKEN: options.token,

@@ -87,6 +87,10 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
       const summary = await runner.run({ trigger: 'schedule', period });
       log('schedule.run', { period, ok: summary.ok, skipped: summary.skipped, error: summary.error?.code });
     },
+    runReleases: async () => {
+      const record = await runner.runReleases({ trigger: 'schedule' });
+      log('schedule.release', { id: record.id, status: record.status, checked: record.checked, changed: record.changed });
+    },
     onError: (error) =>
       ctx.logger?.warn?.(`[dsh-github-trending] 定时运行失败：${error instanceof Error ? error.message : String(error)}`),
   });

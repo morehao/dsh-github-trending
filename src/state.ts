@@ -1,8 +1,9 @@
 /**
  * 状态与运行记录：插件是这两份数据**唯一的写者**（ADR D-12）。
  *
- * - `state.json`：`{ lastRunAt, lastDigest, lastResult, pendingPr }`，界面与工具读它；
- * - `history.json`：最近 90 条记录（三周期共用），超出即裁掉最旧的；
+ * - `state.json`：`{ lastRunAt, lastDigest, lastResult, pendingPr, releaseRuns }`，界面与工具读它；
+ * - `history.json`：最近 90 条**榜单**记录（三周期共用），超出即裁掉最旧的；
+ *   发版运行只进 `state.releaseRuns`（最近 30 条），不写这份历史；
  * - `runs/<id>.log`：单次核心 stderr（已脱敏），排障用。
  *
  * 写入一律「临时文件 + rename」，权限 0600：宿主崩溃时宁可丢最后一条，也不留半个 JSON。
@@ -105,6 +106,40 @@ export interface PendingPr {
   date?: string;
 }
 
+/**
+ * 一次发版订阅运行的记录（与榜单的 `RunRecord` 分开）。
+ *
+ * 为什么不复用 `history.json`：发版文档按周累积、一跑就是十几次 GitHub 请求 + 每周一次
+ * 模型调用，它的失败/限流节奏与榜单完全无关；混在一起会污染「今天榜单有没有产出」的判断。
+ * 计数语义由契约 `ReleasesReport` 定义：checked=检查过的仓库数，changed=真正写了文档的仓库数。
+ */
+export interface ReleaseRunRecord {
+  id: string;
+  /** ISO 时间（UTC）。 */
+  startedAt: string;
+  /** ISO 时间（UTC）。 */
+  finishedAt: string;
+  status: 'ok' | 'failed' | 'skipped' | 'cancelled';
+  checked: number;
+  changed: number;
+  newTags: number;
+  summarized: number;
+  degraded: number;
+  failed: number;
+  rateLimited: number;
+  durationMs: number;
+  tokens?: number;
+  commit?: string;
+  prUrl?: string;
+  branch?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  coreVersion?: string;
+}
+
+/** 发版运行记录上限：一周一次的话正好留半年，够复盘又不会让 state.json 膨胀。 */
+export const RELEASE_RUN_LIMIT = 30;
+
 export interface PluginState {
   lastRunAt?: string;
   /** 最近一次成功（ok=true，含 skipped）的运行时间；工具与界面读它。 */
@@ -114,6 +149,12 @@ export interface PluginState {
   lastDigest?: DigestIdentity;
   lastResult?: RunRecord;
   pendingPr?: PendingPr;
+  /** 最近 30 次发版运行，最新在前；旧 state 里没有这个字段。 */
+  releaseRuns?: ReleaseRunRecord[];
+  /** 最近一次发版运行结束时间（失败也算）。 */
+  lastReleaseAt?: string;
+  /** 最近一次**成功**发版运行所属的 ISO 周（如 `2026-W44`），周去重键。 */
+  lastReleaseWeek?: string;
 }
 
 export interface HistoryFile {
@@ -153,9 +194,20 @@ function digestIsV2(digest: DigestIdentity | undefined): boolean {
   return digest !== undefined && digest.contentHashAlgo === CONTENT_HASH_ALGO_V2 && coreVersionIsV2(digest.coreVersion);
 }
 
+/** 发版记录的读时守卫：只要求稳定字段在，计数缺省不补——脏行直接丢弃。 */
+function isReleaseRunRecord(value: unknown): value is ReleaseRunRecord {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === 'string' &&
+    typeof record.startedAt === 'string' &&
+    typeof record.finishedAt === 'string' &&
+    (record.status === 'ok' || record.status === 'failed' || record.status === 'skipped' || record.status === 'cancelled')
+  );
+}
+
 /** 读时清洗：legacy 的 lastDigest/pendingPr 不对外呈现，旧历史记录打 legacy 标。 */
-function normalizeState(state: PluginState): PluginState {
-  const next: PluginState = { ...state };
+function normalizeState(state: PluginState): PluginState {  const next: PluginState = { ...state };
   if (next.lastDigest !== undefined && !digestIsV2(next.lastDigest)) {
     delete next.lastDigest;
     delete next.pendingPr;
@@ -279,6 +331,23 @@ export class Store {
     writeJsonAtomic(this.historyPath, { records });
     const state = this.readState();
     this.writeState({ ...state, ...next, lastResult: record });
+  }
+
+  /**
+   * 记录一次发版运行：只写 `state.json`（不发版记录进 `history.json`，两者节奏不同）。
+   * 记录裁剪到 RELEASE_RUN_LIMIT 条，`next` 用来顺带更新 lastReleaseAt/lastReleaseWeek。
+   */
+  appendReleaseRun(record: ReleaseRunRecord, next: Partial<PluginState> = {}): void {
+    const state = this.readState();
+    const runs = [record, ...(Array.isArray(state.releaseRuns) ? state.releaseRuns : [])].slice(0, RELEASE_RUN_LIMIT);
+    this.writeState({ ...state, ...next, releaseRuns: runs });
+  }
+
+  /** 读发版运行记录；缺失/损坏（不是数组或行不是对象）一律按空数组处理，不让界面崩。 */
+  readReleaseRuns(): ReleaseRunRecord[] {
+    const state = this.readState();
+    if (!Array.isArray(state.releaseRuns)) return [];
+    return state.releaseRuns.filter(isReleaseRunRecord);
   }
 
   newLogPath(id: string): string {

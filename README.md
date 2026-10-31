@@ -54,9 +54,10 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 - 订阅一组仓库，之后每次运行把每个仓库「**新增的 Release**（无 Release 时回退 Tag）」写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
-- **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, configPath}`，`list` 的仓库由核心 stdout 逐行返回后插件解析。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
-- 界面：「订阅」页管理列表（增删）；「设置 → 发版订阅」分区放行为参数（含预发布 / 含草稿 / notes 截断，字段旁 `?` 悬浮说明），以及「管理订阅列表 →」入口。
-- 周期独立：`releases.period` 默认 `daily`，不与 `trending.since` 联动。
+- **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, volume?, configPath}`；核心把 payload 放进结果信封（`subscriptions` / `subscriptionDoc`），旧核心把 `list` 结果逐行打到信封前，插件两种都认。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
+- 界面：「订阅」页管理列表（增删 + 逐仓库状态），可展开某仓库的发版文档（`GET /subscriptions/releases?repo=&volume=`）；「设置 → 发版订阅」分区放行为参数与每周触发节奏。
+- 周期：0.7.0 起只支持**每周**（`releases.period=weekly`）——每个 ISO 周、每仓库一条中文摘要，文档按周累积并按行数预算自动分卷；填 `daily`/`monthly` 会被校验拦下并说明原因。
+- 每周发版行程与榜单调度**互相独立**：`releases.schedule`（`enabled` / `weekday`（ISO 1=周一…7=周日）/ `time` / `timezone`）驱动 `run --stages releases`——只跑发版阶段，不抓榜单、不渲染 digest、不合并订阅 pending；成功后按 ISO 周（如 `2026-W44`）去重。
 - 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
 
 
@@ -117,8 +118,11 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `summarize.readmeChars` | `800` | README 摘录长度（enrich=readme 时） |
 | `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿（发版阶段常开，不提供 `enabled` 开关） |
 | `releases.fallbackToTags` / `baselineOnFirstRun` | `true` / `true` | 无 Release 时回退 Tag / 首次只记基线 |
-| `releases.perRepoLimit` / `maxNotesChars` | `5` / `4000` | 每仓单次上限（1–20）/ notes 截断（500–20000） |
-| `releases.period` | `daily` | 发版摘要周期（独立，不与 `trending.since` 联动） |
+| `releases.perRepoLimit` / `maxNotesChars` | `10` / `4000` | 文档列出的版本条数（1–20）/ notes 截断（500–20000） |
+| `releases.summaryMaxChars` / `docMaxLines` | `1200` / `600` | 每仓每周摘要字数（500–2000）/ 文档行数预算（100–2000，超了开新卷） |
+| `releases.concurrency` / `budgetSeconds` | `auto` / `auto` | 订阅并发（`auto` 或 1–8）/ 模型预算秒（`auto` 或 1–300）；`auto` 由插件按订阅数解析 |
+| `releases.period` | `weekly` | 只支持 `weekly`（每个 ISO 周一条摘要） |
+| `releases.schedule.enabled` / `weekday` / `time` / `timezone` | `true` / `1` / `08:00:00` / `Asia/Shanghai` | 每周发版行程（插件自己的 tick；`weekday` 为 ISO 1=周一…7=周日）；**不写进核心 YAML** |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末触发；旧配置自动升级为三周期 |

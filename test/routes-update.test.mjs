@@ -50,7 +50,7 @@ after(() => {
 async function start(update) {
   const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-update-')) });
   const runner = new runnerModule.Runner({ store, get: () => undefined, env: { PATH: process.env.PATH } });
-  const scheduler = new scheduleModule.Scheduler({ store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined });
+  const scheduler = new scheduleModule.Scheduler({ store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
   const server = http.createServer(
     routes.createRoutes({
       store,

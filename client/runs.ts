@@ -6,12 +6,20 @@
  */
 import { Alert, Btn, copyText, duration, formatTokens, h, shortHash, shortTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
-import { getLog, type DigestTarget, type RunRecord, type StatePayload } from './api.js';
+import { getLog, releaseRunsOf, type DigestTarget, type ReleaseRunRecord, type RunRecord, type StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
 import { reasonHint, skipHint } from './error-copy.js';
 import { digestTarget } from './digest-core.js';
+
+/** 记录类型：日报（榜单运行）与发版（每周订阅检查）是两个来源。 */
+type KindFilter = 'all' | 'digest' | 'release';
+const KINDS: Array<{ id: KindFilter; key: string }> = [
+  { id: 'all', key: 'runs.type.all' },
+  { id: 'digest', key: 'runs.type.digest' },
+  { id: 'release', key: 'runs.type.release' },
+];
 
 type Filter = 'all' | 'daily' | 'weekly' | 'monthly' | 'failed' | 'dry';
 const FILTERS: Array<{ id: Filter; key: string }> = [
@@ -128,6 +136,7 @@ function LogDrawer(props: { t: Translate; runId: string; onClose: () => void }):
 export function RunsView(props: RunsProps): any {
   const { t, store, controller } = props;
   const [filter, setFilter] = React.useState<Filter>('all');
+  const [kind, setKind] = React.useState<KindFilter>('all');
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [logId, setLogId] = React.useState<string | null>(null);
   const state = store.state;
@@ -137,12 +146,134 @@ export function RunsView(props: RunsProps): any {
   }
 
   const history = state.status.history;
-  const records = history.filter((record) => {
+  const releaseRuns = releaseRunsOf(state);
+
+  const digestMatches = (record: RunRecord): boolean => {
     if (filter === 'failed') return !record.ok;
     if (filter === 'dry') return record.kind === 'dry-run';
     if (filter === 'daily' || filter === 'weekly' || filter === 'monthly') return (record.period ?? 'daily') === filter;
     return true;
-  });
+  };
+  // 发版运行没有周期、也不是 dry-run：只认「失败」，其余筛选项一律不命中，
+  // 免得把「周期 / 试跑」这类日报属性硬套到它身上。
+  const releaseMatches = (run: ReleaseRunRecord): boolean => {
+    if (filter === 'failed') return run.status === 'failed';
+    return filter === 'all';
+  };
+
+  type Entry =
+    | { kind: 'digest'; key: string; at: string; record: RunRecord }
+    | { kind: 'release'; key: string; at: string; run: ReleaseRunRecord };
+
+  // 两个来源合并成一条时间线：日报按 `at`、发版按 `finishedAt`（缺失时退回 `startedAt`）。
+  const entries: Entry[] = [
+    ...(kind === 'release'
+      ? []
+      : history.filter(digestMatches).map((record): Entry => ({ kind: 'digest', key: record.id, at: record.at, record }))),
+    ...(kind === 'digest'
+      ? []
+      : releaseRuns
+          .filter(releaseMatches)
+          .map((run): Entry => ({ kind: 'release', key: `release:${run.id}`, at: run.finishedAt || run.startedAt, run }))),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+
+  const hintCount = kind === 'release' ? releaseRuns.length : history.length;
+
+  const digestNode = (record: RunRecord): any => {
+    const open = openId === record.id;
+    const pr = prStatus(t, state, record);
+    return h(
+      'div',
+      { className: `dshgt-run-item${open ? ' open' : ''}${record.tokens === undefined ? '' : ' has-tokens'}`, key: record.id },
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'dshgt-run-row',
+          'aria-expanded': open ? 'true' : 'false',
+          onClick: () => setOpenId(open ? null : record.id),
+        },
+        h('span', { className: `dshgt-lamp ${record.ok ? (record.skipped || record.kind === 'dry-run' ? 'warn' : 'ok') : 'err'}` }),
+        h('span', { className: 'dshgt-run-date' }, shortTime(record.at)),
+        h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`)),
+        h(
+          'span',
+          { className: 'dshgt-run-what' },
+          record.kind === 'dry-run' ? t('state.dry') : record.skipped ? t('state.skipped') : record.ok ? t('state.ok') : t('state.failed'),
+          h('span', { className: 'dshgt-run-muted' }, recordSummary(t, record)),
+          record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
+        ),
+        h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
+        record.tokens === undefined
+          ? null
+          : h('span', { className: 'dshgt-run-tokens dshgt-mono', title: t('run.usage.tokens') }, `${formatTokens(record.tokens)} tok`),
+        h('span', { className: 'dshgt-run-duration' }, duration(record.durationMs)),
+        h('span', { className: 'dshgt-run-chev' }, '›'),
+      ),
+      open
+        ? h(
+            'div',
+            { className: 'dshgt-run-detail' },
+            !record.ok
+              ? h(
+                  Alert,
+                  { kind: 'err', title: `${t('error.prefix')} ${record.errorCode ?? 'INTERNAL'}` },
+                  h('div', null, record.errorMessage ?? t('state.failed')),
+                  record.errorReason === undefined
+                    ? null
+                    : h('div', { className: 'dshgt-hint' }, reasonHint(t, record.errorReason) ?? ''),
+                )
+              : null,
+            h(
+              'div',
+              { className: 'dshgt-detail-grid' },
+              detailItem(t, 'run.usage.commit', record.commit === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.commit)),
+              detailItem(t, 'run.usage.hash', h('span', { className: 'dshgt-mono' }, shortHash(record.contentHash))),
+              detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
+              detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
+              detailItem(t, 'runs.detail.date', record.date ?? '—'),
+              detailItem(t, 'runs.detail.period', h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`))),
+              detailItem(
+                t,
+                'run.usage.pr',
+                record.prUrl === undefined
+                  ? '—'
+                  : h(
+                      'span',
+                      { className: 'dshgt-inline' },
+                      h('a', { href: record.prUrl, target: '_blank', rel: 'noreferrer', title: record.prUrl }, t('digest.openPr')),
+                      pr === null ? null : h('span', { className: 'dshgt-tag' }, pr.label),
+                    ),
+              ),
+              detailItem(t, 'runs.detail.warnings', record.warnings.length === 0 ? t('runs.detail.none') : record.warnings.join('；')),
+              detailItem(t, 'runs.detail.files', `${record.files} · ${duration(record.durationMs)}`),
+              detailItem(t, 'runs.detail.tokens', record.tokens === undefined ? t('runs.detail.tokensNone') : h('span', { className: 'dshgt-mono' }, `${formatTokens(record.tokens)} tokens`)),
+            ),
+            record.releases === undefined ? null : ReleasesDetail({ t, record }),
+            record.legacy === true ? h('div', { className: 'dshgt-hint' }, t('runs.legacyHint')) : null,
+            h(
+              'div',
+              { className: 'dshgt-run-actions' },
+              record.preview === undefined
+                ? h('span', { className: 'dshgt-hint' }, t('runs.detail.noPreview'))
+                : h(
+                    Btn,
+                    {
+                      small: true,
+                      onClick: () => {
+                        const target = digestTarget(record, state.schedule.timezone);
+                        if (target !== undefined) props.onOpenDigest(target);
+                      },
+                    },
+                    t('runs.detail.readDigest'),
+                  ),
+              h(Btn, { small: true, onClick: () => setLogId(record.id) }, t('runs.detail.log')),
+              record.preview === undefined ? null : h('span', { className: 'dshgt-hint dshgt-mono' }, record.preview.file),
+            ),
+          )
+        : null,
+    );
+  };
 
   return h(
     'div',
@@ -152,130 +283,156 @@ export function RunsView(props: RunsProps): any {
     h(
       'div',
       { className: 'dshgt-runs-head' },
-      h('span', { className: 'dshgt-hint' }, t('runs.count', { count: history.length })),
+      h('span', { className: 'dshgt-hint' }, t('runs.count', { count: hintCount })),
       h(
         'div',
         { className: 'dshgt-runs-filter' },
-        FILTERS.map((item) =>
+        KINDS.map((item) =>
           h(
             'button',
             {
               key: item.id,
               type: 'button',
               className: 'dshgt-chip',
-              'aria-pressed': filter === item.id ? 'true' : 'false',
-              onClick: () => setFilter(item.id),
+              'aria-pressed': kind === item.id ? 'true' : 'false',
+              onClick: () => {
+                setKind(item.id);
+                // 周期 / 试跑筛选只对日报有意义，切到发版时先归零，避免筛出空列表。
+                if (item.id === 'release') setFilter('all');
+              },
             },
             t(item.key),
           ),
         ),
-      ),
-    ),
-    records.length === 0
-      ? h('div', { className: 'dshgt-empty' }, t('runs.empty'))
-      : h(
-          'div',
-          { className: 'dshgt-run-list' },
-          records.map((record) => {
-            const open = openId === record.id;
-            const pr = prStatus(t, state, record);
-            return h(
-              'div',
-              { className: `dshgt-run-item${open ? ' open' : ''}${record.tokens === undefined ? '' : ' has-tokens'}`, key: record.id },
+        kind === 'release' ? null : h('span', { key: 'sep', className: 'dshgt-hint' }, '·'),
+        kind === 'release'
+          ? null
+          : FILTERS.filter((item) => item.id !== 'all').map((item) =>
+              // 再点一次当前项 = 取消该筛选，这样不必再摆一个和「全部」重名的胶囊。
               h(
                 'button',
                 {
+                  key: item.id,
                   type: 'button',
-                  className: 'dshgt-run-row',
-                  'aria-expanded': open ? 'true' : 'false',
-                  onClick: () => setOpenId(open ? null : record.id),
+                  className: 'dshgt-chip',
+                  'aria-pressed': filter === item.id ? 'true' : 'false',
+                  onClick: () => setFilter(filter === item.id ? 'all' : item.id),
                 },
-                h('span', { className: `dshgt-lamp ${record.ok ? (record.skipped || record.kind === 'dry-run' ? 'warn' : 'ok') : 'err'}` }),
-                h('span', { className: 'dshgt-run-date' }, shortTime(record.at)),
-                h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`)),
-                h(
-                  'span',
-                  { className: 'dshgt-run-what' },
-                  record.kind === 'dry-run' ? t('state.dry') : record.skipped ? t('state.skipped') : record.ok ? t('state.ok') : t('state.failed'),
-                  h('span', { className: 'dshgt-run-muted' }, recordSummary(t, record)),
-                  record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
-                ),
-                h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
-                record.tokens === undefined
-                  ? null
-                  : h('span', { className: 'dshgt-run-tokens dshgt-mono', title: t('run.usage.tokens') }, `${formatTokens(record.tokens)} tok`),
-                h('span', { className: 'dshgt-run-duration' }, duration(record.durationMs)),
-                h('span', { className: 'dshgt-run-chev' }, '›'),
+                t(item.key),
               ),
-              open
-                ? h(
-                    'div',
-                    { className: 'dshgt-run-detail' },
-                    !record.ok
-                      ? h(
-                          Alert,
-                          { kind: 'err', title: `${t('error.prefix')} ${record.errorCode ?? 'INTERNAL'}` },
-                          h('div', null, record.errorMessage ?? t('state.failed')),
-                          record.errorReason === undefined
-                            ? null
-                            : h('div', { className: 'dshgt-hint' }, reasonHint(t, record.errorReason) ?? ''),
-                        )
-                      : null,
-                    h(
-                      'div',
-                      { className: 'dshgt-detail-grid' },
-                      detailItem(t, 'run.usage.commit', record.commit === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.commit)),
-                      detailItem(t, 'run.usage.hash', h('span', { className: 'dshgt-mono' }, shortHash(record.contentHash))),
-                      detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
-                      detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
-                      detailItem(t, 'runs.detail.date', record.date ?? '—'),
-                      detailItem(t, 'runs.detail.period', h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`))),
-                      detailItem(
-                        t,
-                        'run.usage.pr',
-                        record.prUrl === undefined
-                          ? '—'
-                          : h(
-                              'span',
-                              { className: 'dshgt-inline' },
-                              h('a', { href: record.prUrl, target: '_blank', rel: 'noreferrer', title: record.prUrl }, t('digest.openPr')),
-                              pr === null ? null : h('span', { className: 'dshgt-tag' }, pr.label),
-                            ),
-                      ),
-                      detailItem(t, 'runs.detail.warnings', record.warnings.length === 0 ? t('runs.detail.none') : record.warnings.join('；')),
-                      detailItem(t, 'runs.detail.files', `${record.files} · ${duration(record.durationMs)}`),
-                      detailItem(t, 'runs.detail.tokens', record.tokens === undefined ? t('runs.detail.tokensNone') : h('span', { className: 'dshgt-mono' }, `${formatTokens(record.tokens)} tokens`)),
-                    ),
-                    record.releases === undefined ? null : ReleasesDetail({ t, record }),
-                    record.legacy === true ? h('div', { className: 'dshgt-hint' }, t('runs.legacyHint')) : null,
-                    h(
-                      'div',
-                      { className: 'dshgt-run-actions' },
-                      record.preview === undefined
-                        ? h('span', { className: 'dshgt-hint' }, t('runs.detail.noPreview'))
-                        : h(
-                            Btn,
-                            {
-                              small: true,
-                              onClick: () => {
-                                const target = digestTarget(record, state.schedule.timezone);
-                                if (target !== undefined) props.onOpenDigest(target);
-                              },
-                            },
-                            t('runs.detail.readDigest'),
-                          ),
-                      h(Btn, { small: true, onClick: () => setLogId(record.id) }, t('runs.detail.log')),
-                      record.preview === undefined ? null : h('span', { className: 'dshgt-hint dshgt-mono' }, record.preview.file),
-                    ),
-                  )
-                : null,
-            );
-          }),
+            ),
+      ),
+    ),
+    entries.length === 0
+      ? h('div', { className: 'dshgt-empty' }, kind === 'release' ? t('runs.release.empty') : t('runs.empty'))
+      : h(
+          'div',
+          { className: 'dshgt-run-list' },
+          entries.map((entry) =>
+            entry.kind === 'digest'
+              ? digestNode(entry.record)
+              : h(ReleaseRunItem, {
+                  key: entry.key,
+                  t,
+                  run: entry.run,
+                  open: openId === entry.key,
+                  onToggle: () => setOpenId(openId === entry.key ? null : entry.key),
+                }),
+          ),
         ),
     state.status.totalTokens === undefined
       ? null
       : h('div', { className: 'dshgt-runs-foot dshgt-hint' }, t('runs.footer.total', { total: formatTokens(state.status.totalTokens) })),
     logId === null ? null : h(LogDrawer, { t, runId: logId, onClose: () => setLogId(null) }),
+  );
+}
+
+const RELEASE_LAMP: Record<ReleaseRunRecord['status'], 'ok' | 'warn' | 'err'> = {
+  ok: 'ok',
+  failed: 'err',
+  skipped: 'warn',
+  cancelled: 'warn',
+};
+
+/**
+ * 发版运行的一行。
+ *
+ * 它没有日报的 date / period / files / preview：这些字段在这里一律不出现，
+ * 只用 ReleaseRunRecord 真正带的 checked / changed / newTags / failed / tokens / duration。
+ */
+function ReleaseRunItem(props: { t: Translate; run: ReleaseRunRecord; open: boolean; onToggle: () => void }): any {
+  const { t, run } = props;
+  const lamp = RELEASE_LAMP[run.status] ?? 'warn';
+  const headStats: Array<[string, number]> = [
+    [t('runs.release.checked'), run.checked],
+    [t('runs.release.changed'), run.changed],
+    [t('runs.release.newTags'), run.newTags],
+  ];
+  return h(
+    'div',
+    { className: `dshgt-run-item${props.open ? ' open' : ''}${run.tokens === undefined ? '' : ' has-tokens'}` },
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'dshgt-run-row',
+        'aria-expanded': props.open ? 'true' : 'false',
+        onClick: props.onToggle,
+      },
+      h('span', { className: `dshgt-lamp ${lamp}` }),
+      h('span', { className: 'dshgt-run-date' }, shortTime(run.startedAt)),
+      h('span', { className: 'dshgt-pchip' }, t('runs.type.release')),
+      h(
+        'span',
+        { className: 'dshgt-run-what' },
+        t(`runs.release.status.${run.status}`),
+        h('span', { className: 'dshgt-run-muted' }, headStats.map(([label, value]) => `${label} ${value}`).join(' · ')),
+      ),
+      h('span', { className: 'dshgt-run-files' }, run.failed > 0 ? `${t('runs.release.failed')} ${run.failed}` : ''),
+      run.tokens === undefined
+        ? null
+        : h('span', { className: 'dshgt-run-tokens dshgt-mono', title: t('run.usage.tokens') }, `${formatTokens(run.tokens)} tok`),
+      h('span', { className: 'dshgt-run-duration' }, duration(run.durationMs)),
+      h('span', { className: 'dshgt-run-chev' }, '›'),
+    ),
+    props.open
+      ? h(
+          'div',
+          { className: 'dshgt-run-detail' },
+          run.status === 'failed'
+            ? h(
+                Alert,
+                { kind: 'err', title: `${t('error.prefix')} ${run.errorCode ?? 'INTERNAL'}` },
+                h('div', null, run.errorMessage ?? t('state.failed')),
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dshgt-detail-grid' },
+            detailItem(t, 'runs.release.startedAt', shortTime(run.startedAt)),
+            detailItem(t, 'runs.release.finishedAt', shortTime(run.finishedAt)),
+            detailItem(t, 'runs.release.duration', duration(run.durationMs)),
+            detailItem(t, 'runs.release.checked', String(run.checked)),
+            detailItem(t, 'runs.release.changed', String(run.changed)),
+            detailItem(t, 'runs.release.newTags', String(run.newTags)),
+            detailItem(t, 'runs.release.summarized', String(run.summarized)),
+            detailItem(t, 'runs.release.degraded', String(run.degraded)),
+            detailItem(t, 'runs.release.failed', String(run.failed)),
+            detailItem(t, 'runs.release.rateLimited', String(run.rateLimited)),
+            detailItem(t, 'run.usage.tokens', run.tokens === undefined ? '—' : formatTokens(run.tokens)),
+            detailItem(t, 'run.usage.commit', run.commit === undefined ? '—' : h('span', { className: 'dshgt-mono' }, run.commit)),
+            detailItem(t, 'run.usage.branch', run.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, run.branch)),
+            detailItem(
+              t,
+              'run.usage.pr',
+              run.prUrl === undefined
+                ? '—'
+                : h('a', { href: run.prUrl, target: '_blank', rel: 'noreferrer', title: run.prUrl }, t('digest.openPr')),
+            ),
+          ),
+          h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('runs.release.note')),
+        )
+      : null,
   );
 }
 

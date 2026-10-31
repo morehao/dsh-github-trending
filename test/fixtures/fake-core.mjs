@@ -24,6 +24,16 @@
  *   FAKE_ARTIFACT_BYTES       覆盖 artifact.bytes
  *   FAKE_ARTIFACTS            JSON 数组，每项 {path, content?, size?, nul?, sha256?, bytes?}
  *
+ * 发版订阅（契约 0.4.0）：
+ *   FAKE_RELEASES              "repos,newReleases,tokens[,degraded,failed,skipped,checked,changed]"
+ *   FAKE_REQUIRE_STAGES        '1' 时没有 `--stages releases` 就直接失败（守住只跑发版阶段）
+ *   FAKE_SUBSCRIBE_ENVELOPE    '1' 时 list 把 subscriptions{repos,items} 放进信封（新核心形状）
+ *   FAKE_SUBSCRIBE_ITEM_STATUS list items 的 status（默认 ok）
+ *   FAKE_SUBSCRIBE_ITEM_URL    '1' 时 items 带 url
+ *   FAKE_SUBSCRIBE_DOC_MD      releases 返回的 markdown 正文
+ *   FAKE_SUBSCRIBE_DOC_MISSING '1' 时 releases 回「没有发版文档」
+ *   FAKE_SUBSCRIBE_DOC_BAD     '1' 时 releases 回缺 markdown 的畸形文档（测 IPC_INVALID）
+ *
  * 仓库路径从核心配置的 `repo.path` 解析（配置是插件生成的 YAML，字符串统一双引号）。
  *
  * 触发来源断言：
@@ -154,6 +164,15 @@ if (command === 'run') {
     process.exit(exit);
   }
   const skipped = process.env.FAKE_SKIPPED === '1';
+  // 发版运行必须带 `--stages releases`：打开这个开关就变成「参数不对直接失败」的核心。
+  if (process.env.FAKE_REQUIRE_STAGES === '1') {
+    const index = argv.indexOf('--stages');
+    const value = index >= 0 ? argv[index + 1] : '';
+    if (value !== 'releases') {
+      process.stderr.write(`error: CONFIG_INVALID: expected --stages releases, got ${value || '(none)'}\n`);
+      process.exit(1);
+    }
+  }
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
   const files = artifactsFor(config, skipped);
@@ -172,8 +191,10 @@ if (command === 'run') {
     if (releasesSpec === 'off') {
       releases = { enabled: false, repos: 0, newReleases: 0, durationMs: 0, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, usageKnown: false, calls: 0, retries: 0, batches: 0, cacheHits: 0 } };
     } else {
-      // 形如 "repos,newReleases,tokens[,degraded,failed,skipped]"
-      const [repos, newReleases, tokens, degraded, failed, skippedCount] = releasesSpec.split(',').map((part) => Number(part));
+      // 形如 "repos,newReleases,tokens[,degraded,failed,skipped,checked,changed]"（契约 0.4.0 末尾两个计数）
+      const [repos, newReleases, tokens, degraded, failed, skippedCount, checked, changed] = releasesSpec
+        .split(',')
+        .map((part) => Number(part));
       const rTotal = Number.isFinite(tokens) ? tokens : 0;
       releases = {
         enabled: true,
@@ -182,6 +203,8 @@ if (command === 'run') {
         ...(Number.isFinite(degraded) ? { degraded } : {}),
         ...(Number.isFinite(failed) ? { failed } : {}),
         ...(Number.isFinite(skippedCount) ? { skipped: skippedCount } : {}),
+        ...(Number.isFinite(checked) ? { checked } : {}),
+        ...(Number.isFinite(changed) ? { changed } : {}),
         summarized: newReleases,
         durationMs: 1000,
         usage: { promptTokens: Math.floor(rTotal * 0.8), completionTokens: Math.floor(rTotal * 0.2), totalTokens: rTotal, cachedTokens: 0, usageKnown: true, calls: 1, retries: 0, batches: 1, cacheHits: 0 },
@@ -251,8 +274,9 @@ if (command === 'subscribe') {
     writeFileSync(subsFile, JSON.stringify(list));
   };
   const now = new Date().toISOString();
-  const envelope = (ok, errorCode, errorMessage) => {
-    const out = { ipcSchema: 2, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [] };
+  // 契约 0.4.0：payload 进信封（subscriptions / subscriptionDoc）。
+  const envelope = (ok, errorCode, errorMessage, payload = {}) => {
+    const out = { ipcSchema: 2, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [], ...payload };
     if (!ok) out.error = { code: errorCode, message: errorMessage, retriable: false };
     process.stdout.write(JSON.stringify(out) + '\n');
     process.exit(ok ? 0 : 1);
@@ -268,7 +292,21 @@ if (command === 'subscribe') {
     envelope(false, 'CONFIG_INVALID', 'fake subscribe failure');
   }
   if (action === 'list') {
-    for (const repo of readList()) process.stdout.write(`${repo}\n`);
+    const list = readList();
+    // 新核心（0.7.0）把列表放进信封；旧核心仍逐行打到信封前，两者都要能读。
+    if (process.env.FAKE_SUBSCRIBE_ENVELOPE === '1') {
+      envelope(true, undefined, undefined, {
+        subscriptions: {
+          repos: list,
+          items: list.map((fullName) => ({
+            fullName,
+            status: process.env.FAKE_SUBSCRIBE_ITEM_STATUS ?? 'ok',
+            ...(process.env.FAKE_SUBSCRIBE_ITEM_URL === '1' ? { url: `https://github.com/${fullName}` } : {}),
+          })),
+        },
+      });
+    }
+    for (const repo of list) process.stdout.write(`${repo}\n`);
     envelope(true);
   }
   if (action === 'add') {
@@ -289,6 +327,29 @@ if (command === 'subscribe') {
     }
     writeList(list.filter((repo) => repo !== repoArg));
     envelope(true);
+  }
+  if (action === 'releases') {
+    if (!repoArg || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoArg)) {
+      envelope(false, 'CONFIG_INVALID', `subscribe releases requires repo`);
+    }
+    if (process.env.FAKE_SUBSCRIBE_DOC_MISSING === '1') {
+      envelope(false, 'CONFIG_INVALID', `repo ${repoArg} has no release document`);
+    }
+    const volume = Number.isInteger(request.volume) ? request.volume : 1;
+    if (process.env.FAKE_SUBSCRIBE_DOC_BAD === '1') {
+      // 契约要求的 markdown 缺失：插件必须 IPC_INVALID，而不是把半份文档给界面。
+      envelope(true, undefined, undefined, { subscriptionDoc: { fullName: repoArg, volume } });
+    }
+    const markdown = process.env.FAKE_SUBSCRIBE_DOC_MD ?? `# ${repoArg} 发版记录\n\n## 2026-W44\n\n- v1.2.0\n`;
+    envelope(true, undefined, undefined, {
+      subscriptionDoc: {
+        fullName: repoArg,
+        volume,
+        volumes: [{ index: 1, file: `${repoArg.replace('/', '_')}.fake.md`, lines: markdown.split('\n').length }],
+        updatedAt: now,
+        markdown,
+      },
+    });
   }
   envelope(false, 'CONFIG_INVALID', `unknown subscribe action ${action}`);
 }

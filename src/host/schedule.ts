@@ -6,10 +6,15 @@
  * 因此这里实现规格 §9 已经写明的兜底：宿主 `timer` 服务（或 `setInterval`）60 s tick、
  * 按 IANA 时区判当日、6 h 内补跑、同日不重复。
  *
+ * 两条**互相独立**的行程共用同一个 tick：
+ *   - 榜单（`schedule.*`）：按日/周/月周期产出，去重键是「周期 + 本地日期」；
+ *   - 发版订阅（`releases.schedule.*`）：每周一次只跑 `--stages releases`，
+ *     去重键是 ISO 周（`2026-W44`）。两者都可以单独关闭。
+ *
  * 「下一次运行」也由同一份时区算术给出，界面与工具都用它。
  */
 import { PERIODS } from '../config.js';
-import type { Period } from '../config.js';
+import type { Period, ReleaseScheduleSettings } from '../config.js';
 import type { PluginState, Store } from '../state.js';
 
 export interface ScheduleConfig {
@@ -20,8 +25,13 @@ export interface ScheduleConfig {
   periods: Period[];
 }
 
+/** 每周发版行程的开关/时间点（纯插件概念，核心没有对应字段）。 */
+export type ReleaseScheduleConfig = ReleaseScheduleSettings;
+
 const MINUTE = 60_000;
 const CATCH_UP_MINUTES = 6 * 60;
+/** 发版行程的补跑窗口：超过 6 h 就放弃本周（下一周那次会同时覆盖两周的内容）。 */
+export const RELEASE_CATCH_UP_MINUTES = 6 * 60;
 /** 同一天失败后最多再试几次（含首次）。 */
 const MAX_ATTEMPTS_PER_DAY = 2;
 /** 两次尝试之间的最小间隔，避免失败风暴烧模型。 */
@@ -128,6 +138,71 @@ export function isDue(now: Date, schedule: ScheduleConfig): boolean {
   return late >= 0 && late <= CATCH_UP_MINUTES;
 }
 
+/**
+ * 日历日 → ISO 周年/周键（周一为一周起点，形如 `2026-W44`）。
+ *
+ * 核心的发版文档按 ISO 周累积，插件的「本周是否已经跑过」必须用同一个键，
+ * 否则跨年那一周会出现「文档写进 2026-W01、插件却以为 2025-W53 已经跑过」。
+ */
+function isoWeekOf(year: number, month: number, day: number): string {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  // 以周四定年/周序：把日期挪到本周周四，再和「当年第一个周四」比周数。
+  const dayIdx = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayIdx + 3);
+  const isoYear = d.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstIdx = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstIdx + 3);
+  const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+/** 某时刻在 `timezone` 下的 ISO 周键；发版周去重就用它。 */
+export function isoWeekKey(date: Date, timezone: string): string {
+  const parts = partsOf(date, timezone);
+  return isoWeekOf(parts.year, parts.month, parts.day);
+}
+
+/** 该时刻在 `timezone` 下的 ISO 星期（1=周一 … 7=周日）。 */
+function isoWeekdayOf(date: Date, timezone: string): number {
+  const parts = partsOf(date, timezone);
+  const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+/** 下一次发版运行时刻：ISO 星期匹配 `cfg.weekday`、当天的墙钟 `cfg.time`，严格晚于 now。 */
+export function nextReleaseOccurrence(now: Date, cfg: ReleaseScheduleConfig): Date {
+  const { hour, minute, second } = parseClock(cfg.time);
+  const today = partsOf(now, cfg.timezone);
+  const start = Date.UTC(today.year, today.month - 1, today.day);
+  // 最多看 15 天：足够覆盖「今天已过点 → 下周同一星期」，也自动处理月末/闰年。
+  for (let index = 0; index <= 15; index += 1) {
+    const d = new Date(start + index * 86_400_000);
+    const year = d.getUTCFullYear();
+    const month = d.getUTCMonth() + 1;
+    const day = d.getUTCDate();
+    const dayOfWeek = d.getUTCDay();
+    const weekday = dayOfWeek === 0 ? 7 : dayOfWeek;
+    if (weekday !== cfg.weekday) continue;
+    const candidate = zonedTimeToUtc(year, month, day, hour, minute, second, cfg.timezone);
+    if (candidate.getTime() > now.getTime()) return candidate;
+  }
+  // 理论不可达（weekday 合法时 7 天内必有一命中）；宁可报错也不返回一个错的时间。
+  throw new Error(`无法计算下一次发版运行时刻（weekday=${String(cfg.weekday)}）`);
+}
+
+/**
+ * 发版行程此刻是否该跑：星期匹配、已过点、且迟到不超过 6 h。
+ * 超过窗口就**放弃本周**——下周那次会同时覆盖两周的内容（核心按周累积，不需要补跑）。
+ */
+export function isReleaseDue(now: Date, cfg: ReleaseScheduleConfig): boolean {
+  if (isoWeekdayOf(now, cfg.timezone) !== cfg.weekday) return false;
+  const { hour, minute } = parseClock(cfg.time);
+  const parts = partsOf(now, cfg.timezone);
+  const late = parts.hour * 60 + parts.minute - (hour * 60 + minute);
+  return late >= 0 && late <= RELEASE_CATCH_UP_MINUTES;
+}
+
 export function daysInMonth(year: number, month: number): number {
   // month 从 1 开始；下个月的第 0 天 = 本月最后一天。
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -170,6 +245,8 @@ export function nextOccurrenceFor(period: Period, now: Date, schedule: ScheduleC
 export interface SchedulerDeps {
   store: Store;
   run: (trigger: 'schedule', period: Period) => Promise<unknown>;
+  /** 每周发版行程：与榜单 `run` 共享 Runner 的单跑锁（Runner 自己会拒绝并发）。 */
+  runReleases: (trigger: 'schedule') => Promise<unknown>;
   isRunning: () => boolean;
   getTimer: () => { interval?: (fn: () => void, ms: number) => unknown; timeout?: (fn: () => void, ms: number) => unknown } | undefined;
   onError?: (error: unknown) => void;
@@ -181,6 +258,8 @@ export class Scheduler {
   private stopped = false;
   /** 当天已尝试次数与时间；只在内存里，进程重启后重新计数。 */
   private readonly attempts = new Map<string, { count: number; lastAt: number }>();
+  /** 发版行程的尝试计数（键 = ISO 周 + 本地日期）；理由同榜单：失败不能每分钟重试。 */
+  private readonly releaseAttempts = new Map<string, { count: number; lastAt: number }>();
 
   constructor(deps: SchedulerDeps) {
     this.deps = deps;
@@ -211,9 +290,25 @@ export class Scheduler {
     this.timerHandle = undefined;
   }
 
-  /** 公开给测试：判断此刻是否该跑，并按需触发一次。 */
+  /**
+   * 公开给测试：判断此刻是否该跑，并按需触发。
+   *
+   * 每个 tick 都**同时**评估榜单与发版两条行程（interval 已经是 60 s）。返回值合并规则
+   * 保证老调用方不受影响：真的跑了 → `ran`；否则有人占着锁 → `busy`；再否则只要有
+   * 一条行程是禁用状态就沿用旧的 `disabled`；都没有 → `skipped`。
+   */
   async tick(now: Date = new Date()): Promise<'skipped' | 'ran' | 'disabled' | 'busy'> {
     if (this.stopped) return 'skipped';
+    const digest = await this.tickDigest(now);
+    const releases = await this.tickReleases(now);
+    if (digest === 'ran' || releases === 'ran') return 'ran';
+    if (digest === 'busy' || releases === 'busy') return 'busy';
+    if (digest === 'disabled' || releases === 'disabled') return 'disabled';
+    return 'skipped';
+  }
+
+  /** 榜单行程（原 tick 的逻辑，不改）。 */
+  private async tickDigest(now: Date): Promise<'skipped' | 'ran' | 'disabled' | 'busy'> {
     const schedule = this.readSchedule();
     if (!schedule.enabled) return 'disabled';
     if (!isDue(now, schedule)) return 'skipped';
@@ -248,6 +343,50 @@ export class Scheduler {
     return ran ? 'ran' : 'skipped';
   }
 
+  /**
+   * 发版行程：每周一次、只跑 `--stages releases`。
+   *
+   * 跳过条件（全部满足才跑）：开启、星期/时间命中且迟到 ≤ 6 h、本周尚未成功过
+   * （`state.lastReleaseWeek`）、当前没有别的运行占锁。
+   * 失败**不锁本周**，但也只有 2 次机会（间隔 5 min）——否则一个坏 token 会在 6 h 的
+   * 补跑窗口里每分钟 spawn 一次核心、白白打 GitHub API。
+   */
+  private async tickReleases(now: Date): Promise<'skipped' | 'ran' | 'disabled' | 'busy'> {
+    const cfg = this.readReleaseSchedule();
+    if (!cfg.enabled) return 'disabled';
+    if (!isReleaseDue(now, cfg)) return 'skipped';
+    const week = ((): string | undefined => {
+      try {
+        return isoWeekKey(now, cfg.timezone);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (week === undefined) return 'skipped';
+    const state = this.deps.store.readState();
+    if (state.lastReleaseWeek === week) return 'skipped';
+
+    const key = `${week}:${zonedDateString(now, cfg.timezone)}`;
+    // 只保留本周的尝试计数；跨周的旧键清掉。
+    for (const existing of this.releaseAttempts.keys()) {
+      if (!existing.startsWith(`${week}:`)) this.releaseAttempts.delete(existing);
+    }
+    const attempt = this.releaseAttempts.get(key);
+    if (attempt !== undefined) {
+      if (attempt.count >= MAX_ATTEMPTS_PER_DAY) return 'skipped';
+      if (now.getTime() - attempt.lastAt < RETRY_GAP_MS) return 'skipped';
+    }
+    if (this.deps.isRunning()) return 'busy';
+    this.releaseAttempts.set(key, { count: (attempt?.count ?? 0) + 1, lastAt: now.getTime() });
+    try {
+      await this.deps.runReleases('schedule');
+      return 'ran';
+    } catch (error) {
+      this.deps.onError?.(error);
+      return 'skipped';
+    }
+  }
+
   /** 该周期今天是否已经成功过（含无变更跳过）。 */
   private succeededToday(state: PluginState, period: Period, today: string, timezone: string): boolean {
     const stamp = state.periodSuccess?.[period];
@@ -269,6 +408,17 @@ export class Scheduler {
     };
   }
 
+  /** 发版行程的节奏来自 `settings.releases.schedule`（与榜单 `schedule.*` 相互独立）。 */
+  private readReleaseSchedule(): ReleaseScheduleConfig {
+    const { schedule } = this.deps.store.readSettings().releases;
+    return {
+      enabled: schedule.enabled,
+      weekday: schedule.weekday,
+      time: schedule.time,
+      timezone: schedule.timezone,
+    };
+  }
+
   /** 下一次运行（取所有已启用周期里最近的一次；禁用时为 undefined）。 */
   next(): Date | undefined {
     const schedule = this.readSchedule();
@@ -287,6 +437,17 @@ export class Scheduler {
     }
   }
 
+  /** 下一次发版运行（禁用/非法时为 undefined）。 */
+  nextRelease(now: Date = new Date()): Date | undefined {
+    const cfg = this.readReleaseSchedule();
+    if (!cfg.enabled) return undefined;
+    try {
+      return nextReleaseOccurrence(now, cfg);
+    } catch {
+      return undefined;
+    }
+  }
+
   describe(state: PluginState, now: Date = new Date()): {
     enabled: boolean;
     time: string;
@@ -296,9 +457,19 @@ export class Scheduler {
     lastRunDate?: string;
     catchUpMinutes: number;
     source: 'timer';
+    releaseEnabled: boolean;
+    releaseWeekday: number;
+    releaseTime: string;
+    releaseTimezone: string;
+    nextReleaseAt?: string;
+    lastReleaseAt?: string;
+    lastReleaseWeek?: string;
+    releaseCatchUpMinutes: number;
   } {
     const schedule = this.readSchedule();
+    const release = this.readReleaseSchedule();
     const next = schedule.enabled ? this.next() : undefined;
+    const nextRelease = release.enabled ? this.nextRelease(now) : undefined;
     return {
       enabled: schedule.enabled,
       time: schedule.time,
@@ -308,6 +479,15 @@ export class Scheduler {
       ...(state.lastRunAt === undefined ? {} : { lastRunDate: zonedDateString(new Date(state.lastRunAt), schedule.timezone) }),
       catchUpMinutes: CATCH_UP_MINUTES,
       source: 'timer',
+      // 发版行程的信息并列给出，界面/工具不必再去读设置才知道下一次何时跑。
+      releaseEnabled: release.enabled,
+      releaseWeekday: release.weekday,
+      releaseTime: release.time,
+      releaseTimezone: release.timezone,
+      ...(nextRelease === undefined ? {} : { nextReleaseAt: nextRelease.toISOString() }),
+      ...(state.lastReleaseAt === undefined ? {} : { lastReleaseAt: state.lastReleaseAt }),
+      ...(state.lastReleaseWeek === undefined ? {} : { lastReleaseWeek: state.lastReleaseWeek }),
+      releaseCatchUpMinutes: RELEASE_CATCH_UP_MINUTES,
     };
   }
 }

@@ -1,8 +1,9 @@
 /**
  * 一次运行的编排：校验 → 定位 → 握手 → 取密钥/起代理 → spawn 核心 → 记状态。
  *
- * 这里是「谁在跑」的唯一入口：HTTP 路由、工具、定时器都走 `Runner.run()`，
- * 因此同一时刻最多一个运行（`Runner` 自己拒绝并发第二个）。
+ * 这里是「谁在跑」的唯一入口：HTTP 路由、工具、定时器都走 `Runner.run()` /
+ * `Runner.runReleases()`，因此**同一时刻最多一个运行**（两条路径共用 `active` 锁）。
+ * 榜单运行写 history.json；发版运行只写 `state.releaseRuns`，两者节奏完全不同。
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -20,6 +21,7 @@ import {
   newRunId,
   PREVIEW_MAX_BYTES,
   type PreviewMeta,
+  type ReleaseRunRecord,
   type ReleasesSummary,
   type RunRecord,
   type Store,
@@ -28,7 +30,8 @@ import { inspectCore, type CoreStatus } from './core.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
 import { startProxy, type ProxyHandle } from './proxy.js';
-import { zonedDateString } from './schedule.js';
+import { isoWeekKey, zonedDateString } from './schedule.js';
+import { runSubscribe } from './subscribe.js';
 
 export interface RunSummary {
   id: string;
@@ -130,6 +133,14 @@ function normalizeSha256(value: unknown): string | undefined {
 }
 
 /**
+ * 契约计数/时长取值：缺失或非数字一律按 0（旧核心没有 checked/changed）。
+ * 入参是 unknown 是因为本地契约包还是 0.3.0，`ReleasesReport` 的索引签名认不出新字段。
+ */
+function counterOf(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
  * 与 core `render.NameOf` 对齐的产物基名（不含扩展名）：
  *   daily → YYYY-MM-DD；weekly → YYYY-Wnn（ISO 周年/周）；monthly → YYYY-MM。
  * 用于在 outcome.files 里按周期精确挑出本期 digest 的 `.md`（而不是猜）。
@@ -139,15 +150,8 @@ export function isoWeekName(date: string): string {
   if (match === null) return date;
   const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
   if (Number.isNaN(d.getTime())) return date;
-  // ISO 周：以周四定年/周序，周一=0…周日=6。
-  const dayIdx = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dayIdx + 3);
-  const isoYear = d.getUTCFullYear();
-  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
-  const firstIdx = (firstThursday.getUTCDay() + 6) % 7;
-  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstIdx + 3);
-  const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
-  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+  // 日历日 → ISO 周年/周：按 UTC 解释这个纯日期，复用调度侧的唯一一份周键算法。
+  return isoWeekKey(d, 'UTC');
 }
 
 export function periodFileBase(period: Period, date: string): string {
@@ -250,41 +254,9 @@ export class Runner {
         );
       }
 
-      const modelKey = await resolveModelKey(settings, credentials, env);
-      if (modelKey.mode === 'direct' && (modelKey.apiKey === undefined || modelKey.apiKey === '')) {
-        throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
-      }
-      // The key actually handed to the core. In proxy mode this is replaced by
-      // the loopback proxy's one-time token (see below) so the core makes a real
-      // request instead of silently degrading to its offline fallback model.
-      let apiKey = modelKey.apiKey ?? '';
-
-      let baseURLOverride: string | undefined;
-      if (modelKey.mode === 'proxy') {
-        const llm = this.deps.get('llm') as { stream?: unknown } | undefined;
-        if (llm === undefined || typeof llm.stream !== 'function') {
-          throw new IpcError('MODEL_KEY_MISSING', '该模型需要回环代理，但宿主没有可用的 ctx.llm 服务');
-        }
-        proxy = await startProxy({
-          llm: llm as unknown as Parameters<typeof startProxy>[0]['llm'],
-          provider: settings.model.hostProvider !== '' ? settings.model.hostProvider : settings.model.provider,
-          model: settings.model.model,
-          temperature: settings.model.temperature,
-          maxTokens: settings.model.maxTokens,
-          timeoutMs: 120_000,
-        });
-        baseURLOverride = proxy.url;
-        // A non-empty key is REQUIRED: the core (gllm) treats an empty key as
-        // "no credentials" and falls back to a fake model when allowDegraded is
-        // on, never hitting the proxy. Use the proxy token — the proxy accepts
-        // `Authorization: Bearer <token>` and forwards with the host's real
-        // credentials. Without this, summaries silently degrade to English.
-        apiKey = proxy.token;
-        store.appendLog(
-          logFile,
-          `[proxy] 回环代理已启动：127.0.0.1:${proxy.port}（一次性 token，运行结束即关闭）`,
-        );
-      }
+      const model = await this.openModelChannel({ settings, credentials, env, logFile });
+      const apiKey = model.apiKey;
+      proxy = model.proxy;
 
       const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
       if (github.token === undefined) {
@@ -301,7 +273,7 @@ export class Runner {
         period,
         dryRun,
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
-        ...(baseURLOverride === undefined ? {} : { baseURLOverride }),
+        ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         secrets: [apiKey, github.token],
         onStderr: (line) => store.appendLog(logFile, line),
@@ -376,6 +348,276 @@ export class Runner {
       this.active = undefined;
     }
     return summaries;
+  }
+
+  /**
+   * 只跑发版订阅阶段（`run --stages releases`）。
+   *
+   * 与榜单运行共用同一把 `active` 锁：两条路径都会写同一份产物、读同一份订阅，
+   * 并发跑会互相踩分支。和 `run()` 的区别只有三点：不带 dryRun、写完只落
+   * `state.releaseRuns`（不碰 history.json）、自己**不**合并订阅 pending 队列
+   * （`--stages releases` 让核心跳过那一步，合并只在完整 run 里发生）。
+   */
+  async runReleases(options: { trigger: 'manual' | 'schedule' }): Promise<ReleaseRunRecord> {
+    const env = this.deps.env ?? process.env;
+    const store = this.deps.store;
+    const settings = store.readSettings();
+    const credentials = credentialServices(this.deps.get);
+
+    if (this.active !== undefined || this.batching) {
+      throw new IpcError('CONFIG_INVALID', '已有一次运行在进行中');
+    }
+    // 与 run() 同样的前置校验：配置/仓库不可用时直接抛，不落一条「假失败」记录。
+    const problems = validateSettings(settings);
+    if (problems.length > 0) {
+      const first = problems[0];
+      throw new IpcError(first?.code ?? 'CONFIG_INVALID', `配置不完整：${first?.message ?? '未知问题'}`);
+    }
+    const repoIssue = repoProblem(settings.repo.path);
+    if (repoIssue !== undefined) throw new IpcError(repoIssue.code, repoIssue.message);
+
+    const id = newRunId();
+    const controller = new AbortController();
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    this.active = { id, controller, startedAt };
+    const logFile = store.newLogPath(id);
+    let proxy: ProxyHandle | undefined;
+
+    try {
+      const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
+      if (core.downloaded === true) {
+        store.appendLog(logFile, `[core] 已下载核心 ${core.tag ?? ''} → ${core.path}`);
+      }
+      const handshakeResult: HandshakeResult = await handshake(core, { signal: controller.signal });
+      if (!handshakeResult.supportedProviders.includes(settings.model.provider)) {
+        throw new IpcError(
+          'MODEL_PROVIDER_UNSUPPORTED',
+          `核心不支持 provider「${settings.model.provider}」；可用：${handshakeResult.supportedProviders.join(' / ')}`,
+        );
+      }
+
+      const model = await this.openModelChannel({ settings, credentials, env, logFile });
+      proxy = model.proxy;
+
+      const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
+      if (github.token === undefined) {
+        store.appendLog(logFile, '[github] 未找到 token：拉取 Release 会失败并返回 GITHUB_AUTH');
+      }
+
+      // 订阅数只服务于把 `auto` 并发/预算解析成数字；读不到按 0（最保守的并发），
+      // 绝不因为「数不清订阅」而让整次发版运行失败。
+      const repoCount = await this.subscriptionCount(core.path, env);
+      const result = await runCore({
+        core,
+        version: handshakeResult.version,
+        settings,
+        apiKey: model.apiKey,
+        ...(github.token === undefined ? {} : { token: github.token }),
+        // 按发版调度时区算「今天」：与 lastReleaseWeek 的去重口径必须是同一天历。
+        date: this.releaseDate(settings),
+        period: settings.trending.since,
+        dryRun: false,
+        trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
+        stages: ['releases'],
+        repoCount,
+        ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
+        signal: controller.signal,
+        secrets: [model.apiKey, github.token],
+        onStderr: (line) => store.appendLog(logFile, line),
+      });
+      return this.recordReleaseRun({
+        id,
+        outcome: result.outcome,
+        settings,
+        startedAt,
+        logFile,
+        cancelled: controller.signal.aborted,
+      });
+    } catch (error) {
+      const aborted = controller.signal.aborted || (error instanceof IpcError && error.code === 'CORE_CANCELLED');
+      return this.recordReleaseFailure({ id, error, aborted, settings, startedAt, startedMs, logFile });
+    } finally {
+      if (proxy !== undefined) {
+        const port = proxy.port;
+        await proxy.close().catch(() => undefined);
+        this.deps.store.appendLog(logFile, `[proxy] 已关闭 127.0.0.1:${port}`);
+      }
+      this.active = undefined;
+    }
+  }
+
+  /** 发版运行用哪一天：发版调度时区下的「今天」（不是榜单调度时区，两者可独立配置）。 */
+  private releaseDate(settings: Settings, now: Date = new Date()): string {
+    try {
+      return zonedDateString(now, settings.releases.schedule.timezone);
+    } catch {
+      return now.toISOString().slice(0, 10);
+    }
+  }
+
+  /** 订阅仓库数（best-effort，只影响 auto 解析）：任何失败都当 0，不阻塞发版运行。 */
+  private async subscriptionCount(corePath: string, env: NodeJS.ProcessEnv): Promise<number> {
+    try {
+      const result = await runSubscribe({ action: 'list' }, { store: this.deps.store, env, corePath });
+      return result.ok ? result.repos.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * 解析模型钥匙并（代理模式下）起回环代理。
+   *
+   * 榜单运行与发版运行共用这一段：代理的一次性 token 语义（空 key 会让核心静默降级成
+   * 英文/离线假模型）只写一次，避免两份实现漂移。
+   */
+  private async openModelChannel(input: {
+    settings: Settings;
+    credentials: ReturnType<typeof credentialServices>;
+    env: NodeJS.ProcessEnv;
+    logFile: string;
+  }): Promise<{ apiKey: string; baseURLOverride?: string; proxy?: ProxyHandle }> {
+    const { settings, env, logFile } = input;
+    const modelKey = await resolveModelKey(settings, input.credentials, env);
+    if (modelKey.mode === 'direct' && (modelKey.apiKey === undefined || modelKey.apiKey === '')) {
+      throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
+    }
+    if (modelKey.mode !== 'proxy') return { apiKey: modelKey.apiKey ?? '' };
+
+    const llm = this.deps.get('llm') as { stream?: unknown } | undefined;
+    if (llm === undefined || typeof llm.stream !== 'function') {
+      throw new IpcError('MODEL_KEY_MISSING', '该模型需要回环代理，但宿主没有可用的 ctx.llm 服务');
+    }
+    const proxy = await startProxy({
+      llm: llm as unknown as Parameters<typeof startProxy>[0]['llm'],
+      provider: settings.model.hostProvider !== '' ? settings.model.hostProvider : settings.model.provider,
+      model: settings.model.model,
+      temperature: settings.model.temperature,
+      maxTokens: settings.model.maxTokens,
+      timeoutMs: 120_000,
+    });
+    this.deps.store.appendLog(logFile, `[proxy] 回环代理已启动：127.0.0.1:${proxy.port}（一次性 token，运行结束即关闭）`);
+    // 非空 key 是必须的：核心把空 key 当「没有凭据」，allowDegraded 时直接降级成假模型，
+    // 永远不会打到代理。用代理的 token——它接受 `Authorization: Bearer <token>` 并带宿主
+    // 真实凭据转发。没有这一步，摘要会静默变成英文。
+    return { apiKey: proxy.token, baseURLOverride: proxy.url, proxy };
+  }
+
+  /** 把 `run --json` 的发版阶段结果投影成一条发版运行记录并落盘。 */
+  private recordReleaseRun(input: {
+    id: string;
+    outcome: RunOutcome;
+    settings: Settings;
+    startedAt: string;
+    logFile: string;
+    cancelled: boolean;
+  }): ReleaseRunRecord {
+    const { outcome, settings } = input;
+    // 契约里 skipped 的信封 ok 也是 true，所以 skipped 必须先于 ok 判断，否则永远判不出「跳过」。
+    const status: ReleaseRunRecord['status'] = input.cancelled
+      ? 'cancelled'
+      : outcome.skipped
+        ? 'skipped'
+        : outcome.ok
+          ? 'ok'
+          : 'failed';
+    const releases = outcome.releases;
+    const record: ReleaseRunRecord = {
+      id: input.id,
+      startedAt: input.startedAt,
+      finishedAt: new Date().toISOString(),
+      status,
+      checked: counterOf(releases?.checked),
+      changed: counterOf(releases?.changed),
+      newTags: counterOf(releases?.newReleases),
+      summarized: counterOf(releases?.summarized),
+      degraded: counterOf(releases?.degraded),
+      failed: counterOf(releases?.failed),
+      rateLimited: counterOf(releases?.rateLimited),
+      durationMs: counterOf(releases?.durationMs),
+      ...(releases?.usage === undefined ? {} : { tokens: releases.usage.totalTokens }),
+      ...(outcome.commit === undefined ? {} : { commit: outcome.commit }),
+      ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
+      ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
+      ...(outcome.error === undefined
+        ? input.cancelled
+          // 取消发生在信封解析之后（例如 SIGTERM 与正常返回撞车）：记录仍要说清
+          // 为什么 cancelled，否则面板只能显示一个没有原因的「已取消」。
+          ? { errorCode: 'CORE_CANCELLED', errorMessage: '运行已取消：核心进程已终止，未提交任何状态' }
+          : {}
+        : { errorCode: outcome.error.code, errorMessage: redact(outcome.error.message) }),
+      ...(outcome.coreVersion === '' ? {} : { coreVersion: outcome.coreVersion }),
+    };
+    this.persistReleaseRun(record, settings, input.logFile);
+    return record;
+  }
+
+  /** 运行在拿到信封之前就失败（定位/握手/模型/代理/超时/取消）：也要留一条可复盘记录。 */
+  private recordReleaseFailure(input: {
+    id: string;
+    error: unknown;
+    aborted: boolean;
+    settings: Settings;
+    startedAt: string;
+    startedMs: number;
+    logFile: string;
+  }): ReleaseRunRecord {
+    const code = input.aborted ? 'CORE_CANCELLED' : input.error instanceof IpcError ? input.error.code : 'INTERNAL';
+    const message = redact(input.error instanceof Error ? input.error.message : String(input.error));
+    const record: ReleaseRunRecord = {
+      id: input.id,
+      startedAt: input.startedAt,
+      finishedAt: new Date().toISOString(),
+      status: input.aborted ? 'cancelled' : 'failed',
+      checked: 0,
+      changed: 0,
+      newTags: 0,
+      summarized: 0,
+      degraded: 0,
+      failed: 0,
+      rateLimited: 0,
+      durationMs: Date.now() - input.startedMs,
+      errorCode: code,
+      errorMessage: message,
+    };
+    this.persistReleaseRun(record, input.settings, input.logFile);
+    return record;
+  }
+
+  /**
+   * 落盘发版运行：只写 state（history.json 是榜单的），顺带推进 lastReleaseAt；
+   * 只有 ok/skipped 才锁 `lastReleaseWeek`——失败不锁，调度下一 tick 才有机会重试。
+   */
+  private persistReleaseRun(record: ReleaseRunRecord, settings: Settings, logFile: string): void {
+    const store = this.deps.store;
+    const succeeded = record.status === 'ok' || record.status === 'skipped';
+    let week: string | undefined;
+    if (succeeded) {
+      try {
+        week = isoWeekKey(new Date(record.finishedAt), settings.releases.schedule.timezone);
+      } catch {
+        // 时区非法时 validateSettings 已经拦过；这里只是不让写状态这一步反过来炸掉。
+        week = undefined;
+      }
+    }
+    store.appendReleaseRun(record, {
+      lastReleaseAt: record.finishedAt,
+      ...(week === undefined ? {} : { lastReleaseWeek: week }),
+    });
+    store.appendLog(
+      logFile,
+      `[release] ${record.status} checked=${record.checked} changed=${record.changed} newTags=${record.newTags} ` +
+        `summarized=${record.summarized} degraded=${record.degraded} failed=${record.failed} ` +
+        `rateLimited=${record.rateLimited} durationMs=${record.durationMs}`,
+    );
+    this.deps.logger?.('release.finished', {
+      id: record.id,
+      status: record.status,
+      checked: record.checked,
+      changed: record.changed,
+      coreVersion: record.coreVersion ?? null,
+    });
   }
 
   private summarize(input: {

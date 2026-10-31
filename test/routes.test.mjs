@@ -10,12 +10,54 @@ import { routes, runner as runnerModule, schedule as scheduleModule, state as st
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures', 'fake-core.mjs');
 
-function scenarioCore() {
+function scenarioCore(env = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-routes-core-'));
   const file = path.join(dir, 'core.mjs');
-  writeFileSync(file, `#!/usr/bin/env node\nawait import(${JSON.stringify(`file://${FAKE}`)});\n`);
+  const assignments = Object.entries(env)
+    .map(([key, value]) => `process.env[${JSON.stringify(key)}] = ${JSON.stringify(value)};`)
+    .join('\n');
+  writeFileSync(file, `#!/usr/bin/env node\n${assignments}\nawait import(${JSON.stringify(`file://${FAKE}`)});\n`);
   chmodSync(file, 0o755);
   return file;
+}
+
+/** 独立服务器（独立 store/env）：用来复现「核心报错」这类不能靠共享 env 切换的场景。 */
+async function isolatedServer(coreEnv = {}) {
+  const isolatedRepo = mkdtempSync(path.join(tmpdir(), 'dshgt-routes-iso-repo-'));
+  mkdirSync(path.join(isolatedRepo, '.git'));
+  const isolatedStore = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-routes-iso-')) });
+  isolatedStore.writeSettings({
+    model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' },
+    repo: { path: isolatedRepo },
+  });
+  const isolatedEnv = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CORE: scenarioCore(coreEnv) };
+  const isolatedRunner = new runnerModule.Runner({ store: isolatedStore, get: () => undefined, env: isolatedEnv });
+  const isolatedScheduler = new scheduleModule.Scheduler({
+    store: isolatedStore,
+    isRunning: () => false,
+    getTimer: () => undefined,
+    run: async () => undefined,
+    runReleases: async () => undefined,
+  });
+  const isolated = http.createServer(
+    routes.createRoutes({
+      store: isolatedStore,
+      runner: isolatedRunner,
+      scheduler: isolatedScheduler,
+      get: () => undefined,
+      env: isolatedEnv,
+      version: '0.1.0-test',
+    }),
+  );
+  await new Promise((resolve) => isolated.listen(0, '127.0.0.1', resolve));
+  return {
+    base: `http://127.0.0.1:${isolated.address().port}${routes.ROUTE_PREFIX}`,
+    // fetch 的 keep-alive 连接会拖住 close()：先掐连接，避免测试进程多挂几秒。
+    close: () => {
+      isolated.closeAllConnections?.();
+      isolated.close();
+    },
+  };
 }
 
 const repo = mkdtempSync(path.join(tmpdir(), 'dshgt-routes-repo-'));
@@ -29,7 +71,7 @@ store.writeSettings({
 });
 
 const runner = new runnerModule.Runner({ store, get: () => undefined, env });
-const scheduler = new scheduleModule.Scheduler({ store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined });
+const scheduler = new scheduleModule.Scheduler({ store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
 const server = http.createServer(
   routes.createRoutes({
     store,
@@ -61,7 +103,15 @@ test('/state 返回设置、核心状态、调度与历史', async () => {
   assert.equal(payload.core.state, 'ready');
   assert.equal(payload.core.version, '0.3.0-fake');
   assert.equal(payload.schedule.enabled, true);
+  // 发版行程与榜单行程并列：默认周一 08:00 上海，且带下一次触发时间。
+  assert.equal(payload.schedule.releaseEnabled, true);
+  assert.equal(payload.schedule.releaseWeekday, 1);
+  assert.equal(payload.schedule.releaseTime, '08:00:00');
+  assert.equal(payload.schedule.releaseTimezone, 'Asia/Shanghai');
+  assert.equal(typeof payload.schedule.nextReleaseAt, 'string');
+  assert.equal(payload.schedule.releaseCatchUpMinutes, 360);
   assert.equal(payload.status.history.length, 0);
+  assert.deepEqual(payload.status.releaseRuns, []);
   assert.equal(payload.github.configured, false);
   assert.equal(payload.plugin.repository, 'https://github.com/morehao/dsh-github-trending');
 });
@@ -271,6 +321,53 @@ test('/subscriptions GET 初始为空；POST add → 列表含该仓库 → POST
   const removed = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'remove', repos: ['vercel/next.js'] }) });
   assert.equal(removed.status, 200);
   assert.deepEqual((await removed.json()).repos, []);
+});
+
+test('/subscriptions 的 items 恒为数组（旧核心没有明细时是空数组）', async () => {
+  const response = await fetch(`${base}/subscriptions`, { headers: HEADER });
+  const payload = await response.json();
+  assert.deepEqual(payload.items, []);
+  const post = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'add', repos: ['a/b'] }) });
+  const postPayload = await post.json();
+  assert.deepEqual(postPayload.items, []);
+  await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'remove', repos: ['a/b'] }) });
+});
+
+test('/subscriptions/releases 返回文档本身；卷号透传', async () => {
+  const response = await fetch(`${base}/subscriptions/releases?repo=vercel/next.js`, { headers: HEADER });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.fullName, 'vercel/next.js');
+  assert.equal(payload.volume, 1);
+  assert.match(payload.markdown, /发版记录/);
+  assert.equal(payload.volumes[0].index, 1);
+
+  const withVolume = await fetch(`${base}/subscriptions/releases?repo=vercel/next.js&volume=2`, { headers: HEADER });
+  assert.equal(withVolume.status, 200);
+  assert.equal((await withVolume.json()).volume, 2);
+});
+
+test('/subscriptions/releases 非法 repo / 卷号 → 400 CONFIG_INVALID', async () => {
+  for (const query of ['repo=not-a-repo', 'repo=', 'repo=a/b&volume=0', 'repo=a/b&volume=abc', 'repo=a/b&volume=1.5']) {
+    const response = await fetch(`${base}/subscriptions/releases?${query}`, { headers: HEADER });
+    assert.equal(response.status, 400, query);
+    assert.equal((await response.json()).code, 'CONFIG_INVALID', query);
+  }
+});
+
+test('/subscriptions/releases 核心说没有文档时回错误，不返回空文档', async () => {
+  const isolated = await isolatedServer({ FAKE_SUBSCRIBE_DOC_MISSING: '1' });
+  try {
+    const response = await fetch(`${isolated.base}/subscriptions/releases?repo=a/b`, { headers: HEADER });
+    assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'SUBSCRIBE_FAILED');
+    assert.match(payload.message, /no release document/);
+  } finally {
+    isolated.close();
+  }
 });
 
 test('/subscriptions POST 缺 action 或 repo → 400', async () => {

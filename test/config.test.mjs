@@ -138,12 +138,30 @@ test('summarize / releases 归一化默认值与未知字段丢弃', () => {
   assert.equal(defaults.summarize.enrich, 'none');
   assert.equal(defaults.summarize.batchSize, 10);
   assert.equal('enabled' in defaults.releases, false);
-  assert.equal(defaults.releases.period, 'daily');
+  assert.equal(defaults.releases.period, 'weekly');
+  assert.equal(defaults.releases.perRepoLimit, 10);
+  assert.equal(defaults.releases.summaryMaxChars, 1200);
+  assert.equal(defaults.releases.docMaxLines, 600);
+  assert.equal(defaults.releases.concurrency, 'auto');
+  assert.equal(defaults.releases.budgetSeconds, 'auto');
+  assert.deepEqual(defaults.releases.schedule, { enabled: true, weekday: 1, time: '08:00:00', timezone: 'Asia/Shanghai' });
   assert.equal(defaults.releases.fallbackToTags, true);
   assert.equal(defaults.releases.baselineOnFirstRun, true);
-  // 非法 enrich / period 回落默认
+  // 非法 enrich / 非周期枚举的 period 回落默认；daily/monthly 是合法枚举，保留下来交给校验解释。
   assert.equal(config.normalizeSettings({ summarize: { enrich: 'bogus' } }).summarize.enrich, 'none');
-  assert.equal(config.normalizeSettings({ releases: { period: 'hourly' } }).releases.period, 'daily');
+  assert.equal(config.normalizeSettings({ releases: { period: 'hourly' } }).releases.period, 'weekly');
+  assert.equal(config.normalizeSettings({ releases: { period: 'daily' } }).releases.period, 'daily');
+  // auto / 显式数字 / 垃圾值
+  assert.equal(config.normalizeSettings({ releases: { concurrency: 'auto' } }).releases.concurrency, 'auto');
+  assert.equal(config.normalizeSettings({ releases: { concurrency: 3 } }).releases.concurrency, 3);
+  assert.equal(config.normalizeSettings({ releases: { concurrency: '3' } }).releases.concurrency, 'auto');
+  assert.equal(config.normalizeSettings({ releases: { budgetSeconds: 90.4 } }).releases.budgetSeconds, 90);
+  assert.deepEqual(config.normalizeSettings({ releases: { schedule: { weekday: 3, time: '07:30', timezone: 'UTC' } } }).releases.schedule, {
+    enabled: true,
+    weekday: 3,
+    time: '07:30',
+    timezone: 'UTC',
+  });
 });
 
 test('summarize / releases 校验边界', () => {
@@ -160,12 +178,60 @@ test('summarize / releases 校验边界', () => {
   assert.ok(bad.some((p) => p.field === 'releases.maxNotesChars'));
 });
 
+test('releases 校验：只支持 weekly，新字段越界都落 releases.* 路径', () => {
+  const base = { model: { provider: 'deepseek', model: 'x' }, repo: { path: '/tmp/x' } };
+  const validate = (releases) => config.validateSettings(config.normalizeSettings({ ...base, releases }), ['deepseek']);
+
+  // 只支持 weekly：daily/monthly 明确报错，且消息说明本版本限制。
+  for (const period of ['daily', 'monthly']) {
+    const problems = validate({ period });
+    const problem = problems.find((p) => p.field === 'releases.period');
+    assert.ok(problem, `${period} 必须被拦下`);
+    assert.match(problem.message, /weekly|每周/);
+  }
+
+  const bad = validate({
+    perRepoLimit: 21,
+    summaryMaxChars: 400,
+    docMaxLines: 20,
+    concurrency: 9,
+    budgetSeconds: 0,
+    schedule: { weekday: 8, time: '8:00', timezone: 'Mars/Base' },
+  });
+  const fields = bad.map((p) => p.field);
+  assert.ok(fields.includes('releases.perRepoLimit'));
+  assert.ok(fields.includes('releases.summaryMaxChars'));
+  assert.ok(fields.includes('releases.docMaxLines'));
+  assert.ok(fields.includes('releases.concurrency'));
+  assert.ok(fields.includes('releases.budgetSeconds'));
+  assert.ok(fields.includes('releases.schedule.weekday'));
+  assert.ok(fields.includes('releases.schedule.time'));
+  assert.ok(fields.includes('releases.schedule.timezone'));
+  // 字段归位：全部落在 releases 分区（界面只回这一栏）。
+  assert.equal(new Set(bad.map((p) => config.sectionOfField(p.field))).size, 1);
+  assert.equal(config.sectionOfField('releases.schedule.weekday'), 'releases');
+
+  // auto 合法；显式范围内的数字也合法。
+  const autoOk = validate({ concurrency: 'auto', budgetSeconds: 'auto' });
+  assert.equal(autoOk.some((p) => p.field === 'releases.concurrency' || p.field === 'releases.budgetSeconds'), false);
+  const explicitOk = validate({ concurrency: 8, budgetSeconds: 300 });
+  assert.equal(explicitOk.some((p) => p.field.startsWith('releases.concurrency') || p.field.startsWith('releases.budgetSeconds')), false);
+});
+
 test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
   const settings = config.normalizeSettings({
     model: { provider: 'deepseek', model: 'm' },
     repo: { path: '/tmp/x' },
     summarize: { batchSize: 7, enrich: 'repo', readmeChars: 500 },
-    releases: { includePrerelease: true, perRepoLimit: 3, maxNotesChars: 6000, period: 'monthly' },
+    releases: {
+      includePrerelease: true,
+      perRepoLimit: 3,
+      maxNotesChars: 6000,
+      summaryMaxChars: 900,
+      docMaxLines: 300,
+      period: 'weekly',
+      schedule: { weekday: 5, time: '09:15:00', timezone: 'America/New_York' },
+    },
   });
   const core = config.toCoreConfig(settings, 'k');
   assert.equal(core.summarize.batchSize, 7);
@@ -176,7 +242,38 @@ test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
   assert.equal(core.releases.includePrerelease, true);
   assert.equal(core.releases.perRepoLimit, 3);
   assert.equal(core.releases.maxNotesChars, 6000);
-  assert.equal(core.releases.period, 'monthly');
+  assert.equal(core.releases.summaryMaxChars, 900);
+  assert.equal(core.releases.docMaxLines, 300);
+  assert.equal(core.releases.weekStart, 'monday');
+  // 核心只实现每周一次：无论如何都写 weekly。
+  assert.equal(core.releases.period, 'weekly');
+  // 文档按发版调度的时区切周；调度对象本身绝不进 YAML。
+  assert.equal(core.releases.timezone, 'America/New_York');
+  assert.equal('schedule' in core.releases, false);
+  // YAML 里也不能出现插件侧的 schedule 键。
+  const yaml = config.toYaml(core);
+  assert.equal(/^\s*schedule:/m.test(yaml), false);
+});
+
+test('toCoreConfig：auto 并发/预算按订阅数解析，显式数字永远优先', () => {
+  const base = { model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x' } };
+  const auto = config.normalizeSettings(base);
+  // ceil(n/10) 夹在 4–8；预算 = min(300, 30+3n)。
+  assert.equal(config.toCoreConfig(auto, 'k').releases.concurrency, 4);
+  assert.equal(config.toCoreConfig(auto, 'k').releases.budgetSeconds, 30);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 0).releases.concurrency, 4);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 20).releases.concurrency, 4);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 50).releases.concurrency, 5);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 80).releases.concurrency, 8);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 500).releases.concurrency, 8);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 10).releases.budgetSeconds, 60);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 100).releases.budgetSeconds, 300);
+  assert.equal(config.toCoreConfig(auto, 'k', undefined, undefined, 2000).releases.budgetSeconds, 300);
+
+  const explicit = config.normalizeSettings({ ...base, releases: { concurrency: 2, budgetSeconds: 45 } });
+  const core = config.toCoreConfig(explicit, 'k', undefined, undefined, 100);
+  assert.equal(core.releases.concurrency, 2);
+  assert.equal(core.releases.budgetSeconds, 45);
 });
 
 test('summarize / releases 分区归位与分段合并互不牵连', () => {

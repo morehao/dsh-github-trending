@@ -84,8 +84,11 @@
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`（是否抓 topics / README 增强） |
 | `summarize.readmeChars` | `800` | README 摘录长度 |
 | `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 含预发布 / 草稿（发版阶段常开，无 `enabled` 开关） |
-| `releases.perRepoLimit` / `maxNotesChars` | `5` / `4000` | 每仓上限 / notes 截断 |
-| `releases.period` | `daily` | 发版摘要周期（独立，不与 `trending.since` 联动） |
+| `releases.perRepoLimit` / `maxNotesChars` | `10` / `4000` | 文档列出的版本条数 / notes 截断 |
+| `releases.summaryMaxChars` / `docMaxLines` | `1200` / `600` | 每仓每周摘要字数 / 文档行数预算（超了开新卷） |
+| `releases.concurrency` / `budgetSeconds` | `auto` / `auto` | `auto` 或数字（1–8 / 1–300）；`auto` 由插件按订阅数解析后写入核心 YAML |
+| `releases.period` | `weekly` | 只支持 `weekly`（每个 ISO 周一条摘要） |
+| `releases.schedule.enabled` / `weekday` / `time` / `timezone` | `true` / `1` / `08:00:00` / `Asia/Shanghai` | 每周发版行程（插件 tick，`weekday` ISO 1=周一…7=周日）；不写进核心 YAML |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 复用宿主 `schedule` 服务 |
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末 |

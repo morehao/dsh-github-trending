@@ -32,7 +32,7 @@ import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
 import { applyCandidate, applyDefaultSelection, listProviderCandidates, llmServices, readDefaultSelection } from './quickfill.js';
 import { readDefaultBranch } from './repo.js';
-import { runSubscribe } from './subscribe.js';
+import { runSubscribe, isValidRepo } from './subscribe.js';
 import type { Runner } from './runner.js';
 import type { Scheduler } from './schedule.js';
 
@@ -228,12 +228,43 @@ async function dispatch(
     return { repo: await readDefaultBranch(repoPath, { env }) };
   }
 
+  // HTTP 镜像：核心 `subscribe list` 信封的 `subscriptions`（IPC 侧见 ipc.parseSubscribeResult）。
   if (method === 'GET' && pathname === '/subscriptions') {
     const result = await runSubscribe({ action: 'list' }, { store: deps.store, env });
     if (!result.ok) {
       throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? '读取订阅列表失败');
     }
-    return { repos: result.repos };
+    // items 恒为数组：旧核心不返回明细时界面拿空表，而不是 undefined。
+    return { repos: result.repos, items: result.items ?? [] };
+  }
+
+  // HTTP 镜像：核心 `subscribe releases --repo owner/repo [--volume N]` 的 `subscriptionDoc`
+  // （IPC 侧见 ipc.SubscriptionDoc）。响应就是这个文档本身（markdown 逐字渲染）。
+  if (method === 'GET' && pathname === '/subscriptions/releases') {
+    const repo = (url.searchParams.get('repo') ?? '').trim();
+    if (!isValidRepo(repo)) {
+      throw new IpcError('CONFIG_INVALID', `仓库必须是 owner/repo 形态：${repo || '(空)'}`);
+    }
+    const volumeRaw = url.searchParams.get('volume');
+    let volume: number | undefined;
+    if (volumeRaw !== null && volumeRaw !== '') {
+      if (!/^\d+$/.test(volumeRaw.trim()) || Number(volumeRaw) < 1) {
+        throw new IpcError('CONFIG_INVALID', `卷号必须是正整数：${volumeRaw}`);
+      }
+      volume = Number(volumeRaw);
+    }
+    const result = await runSubscribe(
+      { action: 'releases', repo, ...(volume === undefined ? {} : { volume }) },
+      { store: deps.store, env },
+    );
+    if (!result.ok) {
+      // 「没有文档 / 卷号不存在」是核心的业务错误：原样回错，绝不回一份空文档冒充成功。
+      throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? `读取 ${repo} 的发版文档失败`);
+    }
+    if (result.doc === undefined) {
+      throw new IpcError('SUBSCRIBE_FAILED', `核心没有返回 ${repo} 的发版文档`);
+    }
+    return { ...result.doc };
   }
 
   if (method === 'POST' && pathname === '/subscriptions') {
@@ -253,9 +284,9 @@ async function dispatch(
         throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? `${action} ${repo} 失败`);
       }
     }
-    // 操作完成后回最新列表（再次 list）。
+    // 操作完成后回最新列表（再次 list）；items 与 GET 保持同一形状（恒为数组）。
     const latest = await runSubscribe({ action: 'list' }, { store: deps.store, env });
-    return { repos: latest.ok ? latest.repos : [] };
+    return { repos: latest.ok ? latest.repos : [], items: latest.ok ? (latest.items ?? []) : [] };
   }
 
   if (method === 'POST' && pathname === '/github/test') {
@@ -386,6 +417,10 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       pendingPr,
       ...(pendingPrState === undefined ? {} : { pendingPrState }),
       history,
+      /** 最近 30 次发版运行（HTTP 镜像：`Store.readReleaseRuns`，IPC 侧无对应命令，纯展示）。 */
+      releaseRuns: deps.store.readReleaseRuns(),
+      /** 最近一次发版运行结束时间（失败也算）；界面「上次发版」读它。 */
+      lastReleaseAt: state.lastReleaseAt ?? null,
       /** 历史里全部运行的 token 累计（读时求和，不落盘）；全无数据则省略。 */
       ...(() => {
         const totalTokens = sumTokens(history);

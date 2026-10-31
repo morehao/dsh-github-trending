@@ -1,5 +1,47 @@
 # Changelog
 
+## [Unreleased]
+
+> **发版顺序**：先发布核心 `0.7.0`（含契约 0.4.0 的字段），再发布本插件——本版
+> `dsh.core.version` 已指向 `0.7.0`，核心未发布前首次运行会下载失败。
+> 契约包 `@morehao/trendradar-contract` 仍锁 `0.3.0`：0.4.0 的新类型（`SubscriptionItem` /
+> `SubscriptionDoc` 等）先按本地声明落地（`src/ipc.ts`），契约包发布后切回包导入。
+
+### 新增
+
+- **订阅页重设计**：命令栏（输入即筛选，完整 `owner/repo` 出现添加建议、回车添加）+ 四列表格
+  （仓库 / 最近版本 / 最近总结 / 状态，表头可排序）+ 常驻「变更」+ 批量选择（已选 N / 全选匹配 /
+  取消 / 移除所选，确认框列出前 6 个）+ 空态与「无匹配」分开 + 键盘操作。
+  列表只拉判断所需的最小字段，40 仓首次请求约 5 KB。
+- **文档抽屉**：按仓拉取该仓库的发版记录 markdown（核心返回的是数据仓里的原文，面板只渲染、
+  不二次总结），支持多卷切换（第 N 册 / 共 M 册）、加载/失败/空文档三态，限流或失败时顶部提示
+  「本周未更新」。
+- **发版周定时**：与日报调度独立（周几 + HH:MM + IANA 时区，60 s tick），错过时刻 6 h 内补跑，
+  超窗跳过下周并入；同一 ISO 周不重复。设置页「发版订阅」新增定时与并发（自动/指定）。
+- **发版运行记录**：每次发版运行落一条 `releaseRuns`（status / checked / changed / newTags /
+  failed / tokens / duration / commit / prUrl / error），保留最近 30 条；运行记录页新增
+  「全部 / 日报 / 发版」筛选与发版明细。
+- 订阅页 meta 行显示周期、下次触发与上次发版检查时间、上周有变化的仓库数。
+
+### 变更
+
+- **发版检查改为每周一次**：核心每仓每周一次模型调用、一仓一份 `releases/<owner>/<repo>.md`
+  文档（按周 prepend，超 600 行下一次写入开 `.02.md`）。因此 `releases.period` 只接受
+  `weekly`（旧的 `daily`/`monthly` 会被校验拦下并提示改成 weekly），`perRepoLimit` 默认
+  5 → 10（只影响文档里列出的版本数）。
+- 新增设置项：`releases.summaryMaxChars`（1200）、`releases.docMaxLines`（600）、
+  `releases.concurrency`（`auto` → `clamp(4, ceil(N/10), 8)`）、`releases.budgetSeconds`
+  （`auto` → `min(300, 30+3N)`）、`releases.schedule.*`。**发版调度只写 settings.json，
+  不进核心 YAML**。
+- 插件经核心 `run --stages releases` 触发发版运行：不合并 pending 订阅、不改
+  `subscriptions.yaml`，与日报共用单运行锁与当日分支/PR。
+- `GET /subscriptions` 现在返回 `{ repos, items }`，新增
+  `GET /subscriptions/releases?repo=&volume=`（只读镜像核心 IPC）。
+
+### 修复
+
+- 取消后的发版运行记录现在带 `errorCode=CORE_CANCELLED`，不再出现「已取消但没有原因」的记录。
+
 ## [v0.5.2] - 2026-10-31
 
 ### 修复

@@ -600,6 +600,12 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     draft.summarize.enrich === 'none' ? null : h(Alert, { kind: 'warn' }, h('div', null, t('summarize.enrichNote'))),
   );
 
+  // 发版节奏与并发是这次新增的字段：旧设置文件里可能还没有，先给安全默认值再编辑，
+  // 避免出现「输入框显示 undefined」这种半坏状态。
+  const releaseSchedule = draft.releases.schedule ?? { enabled: false, weekday: 1, time: '08:00:00', timezone: 'Asia/Shanghai' };
+  const releaseConcurrency = draft.releases.concurrency ?? 'auto';
+  const releaseBudget = draft.releases.budgetSeconds ?? 'auto';
+
   const releasesCard = h(
     Card,
     {
@@ -621,6 +627,74 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       Row,
       { label: t('releases.notesChars'), help: t('releases.notesChars.help') },
       h(Input, { mono: true, width: 90, value: String(draft.releases.maxNotesChars), onInput: (value: string) => update((next) => { next.releases.maxNotesChars = Math.round(Number(value) || 0); }) }),
+    ),
+    h(
+      Row,
+      { label: t('releases.schedule.enabled'), help: t('releases.schedule.help') },
+      h(Toggle, {
+        checked: releaseSchedule.enabled,
+        onChange: (value: boolean) => update((next) => { next.releases.schedule = { ...releaseSchedule, enabled: value }; }),
+      }),
+    ),
+    h(
+      Row,
+      { label: t('releases.schedule.weekday') },
+      h(Select, {
+        value: String(releaseSchedule.weekday),
+        options: [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({ value: String(weekday), label: t(`weekday.${weekday}`) })),
+        onChange: (value: string) => update((next) => { next.releases.schedule = { ...releaseSchedule, weekday: Math.round(Number(value) || 1) }; }),
+      }),
+      h('span', { className: 'dshgt-hint' }, t('releases.schedule.time')),
+      h(Input, { mono: true, width: 90, value: releaseSchedule.time, onInput: (value: string) => update((next) => { next.releases.schedule = { ...releaseSchedule, time: value }; }) }),
+      h('span', { className: 'dshgt-hint' }, t('releases.schedule.timezone')),
+      h(Input, { mono: true, width: 170, value: releaseSchedule.timezone, onInput: (value: string) => update((next) => { next.releases.schedule = { ...releaseSchedule, timezone: value }; }) }),
+    ),
+    h('p', { className: 'dshgt-hint' }, t('releases.schedule.hint')),
+    h(
+      Row,
+      { label: t('releases.concurrency'), help: t('releases.concurrency.help') },
+      h(Select, {
+        value: releaseConcurrency === 'auto' ? 'auto' : 'fixed',
+        options: [
+          { value: 'auto', label: t('releases.concurrency.auto') },
+          { value: 'fixed', label: t('releases.concurrency.fixed') },
+        ],
+        onChange: (value: string) =>
+          update((next) => {
+            next.releases.concurrency = value === 'auto' ? 'auto' : typeof next.releases.concurrency === 'number' ? next.releases.concurrency : 4;
+          }),
+      }),
+      releaseConcurrency === 'auto'
+        ? null
+        : h(Input, {
+            mono: true,
+            width: 70,
+            value: String(releaseConcurrency),
+            onInput: (value: string) => update((next) => { next.releases.concurrency = Math.round(Number(value) || 1); }),
+          }),
+    ),
+    h(
+      Row,
+      { label: t('releases.budget'), help: t('releases.budget.help') },
+      h(Select, {
+        value: releaseBudget === 'auto' ? 'auto' : 'fixed',
+        options: [
+          { value: 'auto', label: t('releases.budget.auto') },
+          { value: 'fixed', label: t('releases.budget.fixed') },
+        ],
+        onChange: (value: string) =>
+          update((next) => {
+            next.releases.budgetSeconds = value === 'auto' ? 'auto' : typeof next.releases.budgetSeconds === 'number' ? next.releases.budgetSeconds : 150;
+          }),
+      }),
+      releaseBudget === 'auto'
+        ? null
+        : h(Input, {
+            mono: true,
+            width: 70,
+            value: String(releaseBudget),
+            onInput: (value: string) => update((next) => { next.releases.budgetSeconds = Math.round(Number(value) || 1); }),
+          }),
     ),
   );
 

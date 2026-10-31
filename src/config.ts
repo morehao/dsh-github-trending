@@ -97,6 +97,19 @@ export interface SummarizeSettings {
 }
 
 /**
+ * 每周发版运行的插件侧节奏（核心没有这个字段，**绝不**写进核心 YAML）。
+ * 与榜单调度（`schedule.*`）完全独立：两者各有自己的开关与时间点。
+ */
+export interface ReleaseScheduleSettings {
+  enabled: boolean;
+  /** ISO 星期：1=周一 … 7=周日（和 `Intl` 的 0=周日 不同，避免调用方来回换算）。 */
+  weekday: number;
+  /** `HH:MM[:SS]`（本地墙钟，按 timezone 解释）。 */
+  time: string;
+  timezone: string;
+}
+
+/**
  * 发版订阅阶段的行为参数（核心 `releases.*`）。
  * 阶段**常开**（`releases.enabled` 恒为 true，不出现在设置里）：有没有产出只由订阅列表决定，
  * 列表为空时核心不产出、不改动榜单产物。
@@ -108,10 +121,24 @@ export interface ReleasesSettings {
   includeDrafts: boolean;
   fallbackToTags: boolean;
   baselineOnFirstRun: boolean;
+  /** 文档**列出**多少个版本（核心 0.7.0 起不再限制抓取条数，摘要覆盖全周）。 */
   perRepoLimit: number;
   maxNotesChars: number;
-  /** 发版摘要周期，独立默认 daily，不与 trending.since 联动。 */
+  /** 每仓库每周一条中文摘要的字数上限（核心 `releases.summaryMaxChars`）。 */
+  summaryMaxChars: number;
+  /** 每仓库文档的行数预算，超了核心才开新卷（核心 `releases.docMaxLines`）。 */
+  docMaxLines: number;
+  /** 订阅检查并发；`auto` 由插件按订阅数解析成 1–8 的数字（核心只认数字）。 */
+  concurrency: 'auto' | number;
+  /** 订阅阶段的模型预算秒数；`auto` 由插件按订阅数解析（核心只认数字）。 */
+  budgetSeconds: 'auto' | number;
+  /**
+   * 发版摘要周期。核心 0.7.0 只实现 `weekly`（一个 ISO 周一次模型调用），
+   * 因此这里保留枚举类型只为让校验能明确告诉用户「daily/monthly 已不支持」。
+   */
   period: Period;
+  /** 插件侧每周触发节奏；核心配置里只用到它的 `timezone`（切周口径），不写整个对象。 */
+  schedule: ReleaseScheduleSettings;
 }
 
 export interface ScheduleSettings {
@@ -187,9 +214,14 @@ export const DEFAULT_SETTINGS: Settings = {
     includeDrafts: false,
     fallbackToTags: true,
     baselineOnFirstRun: true,
-    perRepoLimit: 5,
+    perRepoLimit: 10,
     maxNotesChars: 4000,
-    period: 'daily',
+    summaryMaxChars: 1200,
+    docMaxLines: 600,
+    concurrency: 'auto',
+    budgetSeconds: 'auto',
+    period: 'weekly',
+    schedule: { enabled: true, weekday: 1, time: '08:00:00', timezone: 'Asia/Shanghai' },
   },
   output: { dir: 'trending' },
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily', 'weekly', 'monthly'] },
@@ -280,6 +312,17 @@ function strArray(value: unknown, fallback: string[]): string[] {
 }
 
 /**
+ * 「auto 或整数」的归一化（核心 0.7.0 的 `releases.concurrency` / `budgetSeconds`）。
+ * 只做形态收敛，不做范围收敛：越界留给 `validateSettings` 报字段路径，
+ * 免得用户填 9 却被悄悄改成 8 还不知道。
+ */
+function autoNumber(value: unknown, fallback: 'auto' | number): 'auto' | number {
+  if (value === 'auto') return 'auto';
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value);
+  return fallback;
+}
+
+/**
  * 周期列表归一：现在固定为「日/周/月」三周期全产出，不再由用户勾选。
  * 无论输入是什么（含旧版只有 `daily`、显式空数组），都统一收敛为 `PERIODS`，
  * 保证旧配置升级后也能自动产出三榜。保留该函数以便集中管理这一收敛。
@@ -301,12 +344,15 @@ export function normalizeSettings(input: unknown): Settings {
   const trending = (raw.trending ?? {}) as Record<string, unknown>;
   const summarize = (raw.summarize ?? {}) as Record<string, unknown>;
   const releases = (raw.releases ?? {}) as Record<string, unknown>;
+  const releasesSchedule = (releases.schedule ?? {}) as Record<string, unknown>;
   const output = (raw.output ?? {}) as Record<string, unknown>;
   const schedule = (raw.schedule ?? {}) as Record<string, unknown>;
   const commitMode = str(repo.commitMode, DEFAULT_SETTINGS.repo.commitMode);
   const authMode = str(github.authMode, DEFAULT_SETTINGS.github.authMode);
   const since = str(trending.since, DEFAULT_SETTINGS.trending.since);
   const enrich = str(summarize.enrich, DEFAULT_SETTINGS.summarize.enrich);
+  // 只把「不是周期枚举」的垃圾值收敛成默认：daily/monthly 保留原值，
+  // 交给 validateSettings 明确告诉用户本版本只支持 weekly（静默改写会让人不知道为什么没生效）。
   const releasesPeriod = str(releases.period, DEFAULT_SETTINGS.releases.period);
   return {
     model: {
@@ -361,7 +407,17 @@ export function normalizeSettings(input: unknown): Settings {
       baselineOnFirstRun: bool(releases.baselineOnFirstRun, DEFAULT_SETTINGS.releases.baselineOnFirstRun),
       perRepoLimit: Math.round(num(releases.perRepoLimit, DEFAULT_SETTINGS.releases.perRepoLimit)),
       maxNotesChars: Math.round(num(releases.maxNotesChars, DEFAULT_SETTINGS.releases.maxNotesChars)),
+      summaryMaxChars: Math.round(num(releases.summaryMaxChars, DEFAULT_SETTINGS.releases.summaryMaxChars)),
+      docMaxLines: Math.round(num(releases.docMaxLines, DEFAULT_SETTINGS.releases.docMaxLines)),
+      concurrency: autoNumber(releases.concurrency, DEFAULT_SETTINGS.releases.concurrency),
+      budgetSeconds: autoNumber(releases.budgetSeconds, DEFAULT_SETTINGS.releases.budgetSeconds),
       period: isPeriod(releasesPeriod) ? releasesPeriod : DEFAULT_SETTINGS.releases.period,
+      schedule: {
+        enabled: bool(releasesSchedule.enabled, DEFAULT_SETTINGS.releases.schedule.enabled),
+        weekday: Math.round(num(releasesSchedule.weekday, DEFAULT_SETTINGS.releases.schedule.weekday)),
+        time: str(releasesSchedule.time, DEFAULT_SETTINGS.releases.schedule.time),
+        timezone: str(releasesSchedule.timezone, DEFAULT_SETTINGS.releases.schedule.timezone),
+      },
     },
     output: {
       dir: str(output.dir, DEFAULT_SETTINGS.output.dir).trim() || DEFAULT_SETTINGS.output.dir,
@@ -393,6 +449,12 @@ export function isValidTimezone(timezone: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** `auto` 或落在 [min, max] 的整数；这两种写法核心都接受。 */
+function autoInRange(value: 'auto' | number, min: number, max: number): boolean {
+  if (value === 'auto') return true;
+  return Number.isInteger(value) && value >= min && value <= max;
 }
 
 /**
@@ -460,14 +522,41 @@ export function validateSettings(settings: Settings, providers: readonly string[
     problems.push({ field: 'summarize.readmeChars', code: 'CONFIG_INVALID', message: 'readmeChars 必须是正整数' });
   }
   // releases.*
-  if (!isPeriod(releases.period)) {
-    problems.push({ field: 'releases.period', code: 'CONFIG_INVALID', message: 'releases.period 必须是 daily / weekly / monthly' });
+  // 0.7.0 只实现每周一次：daily/monthly 明确拒绝，而不是悄悄按 weekly 跑。
+  if (releases.period !== 'weekly') {
+    problems.push({
+      field: 'releases.period',
+      code: 'CONFIG_INVALID',
+      message: '本版本只支持每周（weekly）发版摘要，请把 releases.period 改为 weekly',
+    });
   }
   if (!Number.isInteger(releases.perRepoLimit) || releases.perRepoLimit < 1 || releases.perRepoLimit > 20) {
     problems.push({ field: 'releases.perRepoLimit', code: 'CONFIG_INVALID', message: 'perRepoLimit 必须是 1–20 的整数' });
   }
   if (!Number.isInteger(releases.maxNotesChars) || releases.maxNotesChars < 500 || releases.maxNotesChars > 20000) {
     problems.push({ field: 'releases.maxNotesChars', code: 'CONFIG_INVALID', message: 'maxNotesChars 必须是 500–20000 的整数' });
+  }
+  if (!Number.isInteger(releases.summaryMaxChars) || releases.summaryMaxChars < 500 || releases.summaryMaxChars > 2000) {
+    problems.push({ field: 'releases.summaryMaxChars', code: 'CONFIG_INVALID', message: 'summaryMaxChars 必须是 500–2000 的整数' });
+  }
+  if (!Number.isInteger(releases.docMaxLines) || releases.docMaxLines < 100 || releases.docMaxLines > 2000) {
+    problems.push({ field: 'releases.docMaxLines', code: 'CONFIG_INVALID', message: 'docMaxLines 必须是 100–2000 的整数' });
+  }
+  if (!autoInRange(releases.concurrency, 1, 8)) {
+    problems.push({ field: 'releases.concurrency', code: 'CONFIG_INVALID', message: 'concurrency 必须是 auto 或 1–8 的整数' });
+  }
+  if (!autoInRange(releases.budgetSeconds, 1, 300)) {
+    problems.push({ field: 'releases.budgetSeconds', code: 'CONFIG_INVALID', message: 'budgetSeconds 必须是 auto 或 1–300 的整数' });
+  }
+  // releases.schedule.* 是插件自己的每周节奏（不进核心 YAML），字段路径仍归 releases 分区。
+  if (!Number.isInteger(releases.schedule.weekday) || releases.schedule.weekday < 1 || releases.schedule.weekday > 7) {
+    problems.push({ field: 'releases.schedule.weekday', code: 'CONFIG_INVALID', message: '发版日必须是 ISO 星期 1–7（1=周一）' });
+  }
+  if (!TIME_RE.test(releases.schedule.time)) {
+    problems.push({ field: 'releases.schedule.time', code: 'CONFIG_INVALID', message: '时间格式必须是 HH:MM 或 HH:MM:SS' });
+  }
+  if (!isValidTimezone(releases.schedule.timezone)) {
+    problems.push({ field: 'releases.schedule.timezone', code: 'CONFIG_INVALID', message: '时区必须是 IANA 名称（如 Asia/Shanghai）' });
   }
   if (output.dir.trim() === '' || path.isAbsolute(output.dir) || output.dir.split(/[\\/]/).includes('..')) {
     problems.push({ field: 'output.dir', code: 'CONFIG_INVALID', message: '输出目录必须是仓库内的相对路径，且不含 ..' });
@@ -523,7 +612,13 @@ export interface CoreConfig {
     baselineOnFirstRun: boolean;
     perRepoLimit: number;
     maxNotesChars: number;
-    period: string;
+    summaryMaxChars: number;
+    docMaxLines: number;
+    timezone: string;
+    weekStart: 'monday';
+    concurrency: number;
+    budgetSeconds: number;
+    period: 'weekly';
   };
   output: { dir: string; branchPrefix: string; retentionDays: number };
 }
@@ -532,8 +627,23 @@ export interface CoreConfig {
  * 生成核心配置。`apiKey` 单独传入：它只能来自宿主凭据或用户当次输入，
  * 绝不来自 settings.json。`period` 是本次运行的标的周期；核心 `run --period`
  * 会用它覆盖 `trending.since`，这里同步写入以免旧核心/调试时口径不一致。
+ *
+ * `repoCount` 只用于把发版订阅的 `auto` 解析成数字（核心 0.7.0 的 YAML 只认整数）：
+ * 并发 = clamp(4, ceil(n/10), 8)，预算 = min(300, 30+3n)。显式数字永远优先。
+ * 不发版调度对象——`releases.schedule` 是纯插件概念，写进 YAML 核心会当成未知字段。
  */
-export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride?: string, period?: Period): CoreConfig {
+export function toCoreConfig(
+  settings: Settings,
+  apiKey: string,
+  baseURLOverride?: string,
+  period?: Period,
+  repoCount = 0,
+): CoreConfig {
+  const releases = settings.releases;
+  const repoTotal = Number.isFinite(repoCount) && repoCount > 0 ? Math.floor(repoCount) : 0;
+  const concurrency =
+    releases.concurrency === 'auto' ? Math.min(8, Math.max(4, Math.ceil(repoTotal / 10))) : releases.concurrency;
+  const budgetSeconds = releases.budgetSeconds === 'auto' ? Math.min(300, 30 + 3 * repoTotal) : releases.budgetSeconds;
   const config: CoreConfig = {
     model: {
       provider: settings.model.provider,
@@ -575,13 +685,21 @@ export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride
     releases: {
       // 发版订阅常开：插件侧不再提供开关，是否产出由订阅列表决定。
       enabled: true,
-      includePrerelease: settings.releases.includePrerelease,
-      includeDrafts: settings.releases.includeDrafts,
-      fallbackToTags: settings.releases.fallbackToTags,
-      baselineOnFirstRun: settings.releases.baselineOnFirstRun,
-      perRepoLimit: settings.releases.perRepoLimit,
-      maxNotesChars: settings.releases.maxNotesChars,
-      period: settings.releases.period,
+      includePrerelease: releases.includePrerelease,
+      includeDrafts: releases.includeDrafts,
+      fallbackToTags: releases.fallbackToTags,
+      baselineOnFirstRun: releases.baselineOnFirstRun,
+      perRepoLimit: releases.perRepoLimit,
+      maxNotesChars: releases.maxNotesChars,
+      summaryMaxChars: releases.summaryMaxChars,
+      docMaxLines: releases.docMaxLines,
+      // 核心按这个时区切 ISO 周；必须与插件侧 lastReleaseWeek 的去重口径一致。
+      timezone: releases.schedule.timezone,
+      weekStart: 'monday',
+      concurrency,
+      budgetSeconds,
+      // 核心只实现每周一次；非法值在校验阶段已拦下，这里不再透传枚举。
+      period: 'weekly',
     },
     output: {
       dir: settings.output.dir,

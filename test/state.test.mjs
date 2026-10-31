@@ -184,3 +184,68 @@ test('sumTokens 只累加有的记录；全无返回 undefined', () => {
   assert.equal(stateModule.sumTokens([mk(1), mk(2)]), undefined);
   assert.equal(stateModule.sumTokens([]), undefined);
 });
+
+// ——— 发版运行记录（state.releaseRuns） ———
+
+function releaseRecord(index) {
+  return {
+    id: `release-${index}`,
+    startedAt: new Date(2026, 9, 30, 8, 30, index).toISOString(),
+    finishedAt: new Date(2026, 9, 30, 8, 31, index).toISOString(),
+    status: 'ok',
+    checked: 6,
+    changed: 2,
+    newTags: 9,
+    summarized: 9,
+    degraded: 1,
+    failed: 0,
+    rateLimited: 0,
+    durationMs: 1200 + index,
+    tokens: 300,
+    commit: 'deadbeef',
+    prUrl: 'https://example.invalid/pr/1',
+    branch: 'trending/2026-10-30',
+    coreVersion: '0.7.0',
+  };
+}
+
+test('appendReleaseRun：最新在前、裁剪到 RELEASE_RUN_LIMIT 条、只写 state 不碰 history', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-releases-')) });
+  const limit = stateModule.RELEASE_RUN_LIMIT;
+  for (let index = 0; index < limit + 5; index += 1) {
+    store.appendReleaseRun(releaseRecord(index), { lastReleaseAt: releaseRecord(index).finishedAt });
+  }
+  const runs = store.readReleaseRuns();
+  assert.equal(runs.length, limit);
+  assert.equal(runs[0].id, `release-${limit + 4}`);
+  assert.equal(runs[limit - 1].id, 'release-5');
+  assert.equal(store.readState().lastReleaseAt, releaseRecord(limit + 4).finishedAt);
+  // 发版记录绝不进 history.json（那是榜单的 90 条窗口）。
+  assert.equal(store.readHistory().length, 0);
+  assert.equal(existsSync(store.historyPath), false);
+  // state.json 权限 0600（与其它状态文件一致）。
+  assert.equal(statSync(store.statePath).mode & 0o777, 0o600);
+});
+
+test('appendReleaseRun：next 里给的 lastReleaseWeek 一起落盘', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-releases-week-')) });
+  store.appendReleaseRun(releaseRecord(0), { lastReleaseAt: releaseRecord(0).finishedAt, lastReleaseWeek: '2026-W44' });
+  const state = store.readState();
+  assert.equal(state.lastReleaseWeek, '2026-W44');
+  assert.equal(state.releaseRuns.length, 1);
+  assert.equal(store.readReleaseRuns()[0].changed, 2);
+});
+
+test('readReleaseRuns：缺失 / 类型不对 / 脏行都按空数组或过滤处理，不抛', () => {
+  const store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-releases-bad-')) });
+  assert.deepEqual(store.readReleaseRuns(), []);
+  store.writeState({ releaseRuns: 'not-an-array' });
+  assert.deepEqual(store.readReleaseRuns(), []);
+  store.writeState({ releaseRuns: [{ id: 'ok', startedAt: 'x', finishedAt: 'y', status: 'failed' }, { nope: 1 }, null] });
+  const runs = store.readReleaseRuns();
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, 'ok');
+  // 坏 JSON 也不抛：整份状态按空处理。
+  writeFileSync(store.statePath, '{ not json');
+  assert.deepEqual(store.readReleaseRuns(), []);
+});

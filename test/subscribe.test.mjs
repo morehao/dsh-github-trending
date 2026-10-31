@@ -109,3 +109,64 @@ test('isValidRepo 只接受 owner/repo', () => {
   assert.equal(subscribeModule.isValidRepo('a/b/c'), false);
   assert.equal(subscribeModule.isValidRepo(''), false);
 });
+
+// ——— 契约 0.4.0：list 的信封 payload 与 releases 动作 ———
+
+test('subscribe list（新核心）：信封里的 subscriptions.items 透出', async () => {
+  const { store } = makeStore();
+  const deps = { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore({ FAKE_SUBSCRIBE_ENVELOPE: '1' }) };
+  await subscribeModule.runSubscribe({ action: 'add', repo: 'vercel/next.js' }, deps);
+  const listed = await subscribeModule.runSubscribe({ action: 'list' }, deps);
+  assert.deepEqual(listed.repos, ['vercel/next.js']);
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].fullName, 'vercel/next.js');
+  assert.equal(listed.items[0].status, 'ok');
+});
+
+test('subscribe releases：读回文档（fullName/volume/markdown），超时放宽到 30 s', async () => {
+  const { store } = makeStore();
+  const deps = { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore() };
+  assert.equal(subscribeModule.SUBSCRIBE_TIMEOUT_MS, 8_000);
+  assert.equal(subscribeModule.RELEASES_TIMEOUT_MS, 30_000);
+
+  const result = await subscribeModule.runSubscribe({ action: 'releases', repo: 'vercel/next.js' }, deps);
+  assert.equal(result.ok, true);
+  assert.equal(result.doc.fullName, 'vercel/next.js');
+  assert.equal(result.doc.volume, 1);
+  assert.match(result.doc.markdown, /发版记录/);
+  assert.equal(result.doc.volumes[0].index, 1);
+});
+
+test('subscribe releases：卷号透传；核心报「没有文档」时如实回 ok:false 且不伪造空文档', async () => {
+  const { store } = makeStore();
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME };
+  const withVolume = await subscribeModule.runSubscribe({ action: 'releases', repo: 'a/b', volume: 2 }, { store, env, corePath: fakeCore() });
+  assert.equal(withVolume.doc.volume, 2);
+
+  const missing = await subscribeModule.runSubscribe(
+    { action: 'releases', repo: 'a/b' },
+    { store, env, corePath: fakeCore({ FAKE_SUBSCRIBE_DOC_MISSING: '1' }) },
+  );
+  assert.equal(missing.ok, false);
+  assert.equal(missing.doc, undefined);
+  assert.equal(missing.error.code, 'CONFIG_INVALID');
+});
+
+test('subscribe releases：畸形文档（缺 markdown）→ IPC_INVALID', async () => {
+  const { store } = makeStore();
+  await assert.rejects(
+    () =>
+      subscribeModule.runSubscribe(
+        { action: 'releases', repo: 'a/b' },
+        { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore({ FAKE_SUBSCRIBE_DOC_BAD: '1' }) },
+      ),
+    (error) => error.code === 'IPC_INVALID',
+  );
+});
+
+test('subscribe releases：非法 repo / 非法卷号在插件侧就拦下（CONFIG_INVALID）', async () => {
+  const { store } = makeStore();
+  const deps = { store, env: { PATH: process.env.PATH, HOME: process.env.HOME }, corePath: fakeCore() };
+  await assert.rejects(() => subscribeModule.runSubscribe({ action: 'releases', repo: 'not a repo' }, deps), (error) => error.code === 'CONFIG_INVALID');
+  await assert.rejects(() => subscribeModule.runSubscribe({ action: 'releases', repo: 'a/b', volume: 0 }, deps), (error) => error.code === 'CONFIG_INVALID');
+});

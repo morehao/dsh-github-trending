@@ -169,6 +169,76 @@ export interface CoexistenceStatus {
   message?: string;
 }
 
+/** 订阅项的周状态（核心 `subscribe list` 的 `items[].status`）。 */
+export type SubscriptionStatus = 'baseline' | 'ok' | 'no_change' | 'rate_limited' | 'failed';
+
+/** 列表页的每仓摘要；旧核心只回 `repos`，此时 `items` 为空数组。 */
+export interface SubscriptionItem {
+  fullName: string;
+  url?: string;
+  latestTag?: string;
+  /** 最近一节发版记录的周末日期（`YYYY-MM-DD`）。 */
+  latestSummaryAt?: string;
+  lastCheckedAt?: string;
+  status: SubscriptionStatus;
+}
+
+export interface SubscriptionList {
+  repos: string[];
+  items: SubscriptionItem[];
+}
+
+/** 发版记录的卷索引（一册一份文件，超过行数阈值核心才开新册）。 */
+export interface SubscriptionVolume {
+  index: number;
+  file: string;
+  from?: string;
+  to?: string;
+  lines?: number;
+}
+
+/** 某个仓库的发版记录：`markdown` 是数据仓里那份文件的原文。 */
+export interface SubscriptionDoc {
+  fullName: string;
+  volume: number;
+  volumes?: SubscriptionVolume[];
+  updatedAt?: string;
+  markdown: string;
+}
+
+/** 发版运行记录（`state.releaseRuns`，最多 30 条）；旧状态文件没有该字段。 */
+export interface ReleaseRunRecord {
+  id: string;
+  startedAt: string;
+  finishedAt: string;
+  status: 'ok' | 'failed' | 'skipped' | 'cancelled';
+  checked: number;
+  changed: number;
+  newTags: number;
+  summarized: number;
+  degraded: number;
+  failed: number;
+  rateLimited: number;
+  durationMs: number;
+  tokens?: number;
+  commit?: string;
+  prUrl?: string;
+  branch?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  coreVersion?: string;
+}
+
+/** 插件侧每周发版节奏；与榜单调度（`schedule.*`）互相独立。 */
+export interface ReleaseScheduleSettings {
+  enabled: boolean;
+  /** ISO 星期：1=周一 … 7=周日。 */
+  weekday: number;
+  /** `HH:MM[:SS]`，按 `timezone` 解释的本地墙钟。 */
+  time: string;
+  timezone: string;
+}
+
 export interface SettingsShape {
   model: {
     provider: string;
@@ -203,6 +273,12 @@ export interface SettingsShape {
     perRepoLimit: number;
     maxNotesChars: number;
     period: Period;
+    /** 订阅检查并发；`auto` 由 Host 按订阅数解析成 1–8（核心只认数字）。缺省按 `auto` 处理。 */
+    concurrency?: 'auto' | number;
+    /** 订阅阶段的模型预算秒数；`auto` 同理。缺省按 `auto` 处理。 */
+    budgetSeconds?: 'auto' | number;
+    /** 插件侧每周发版节奏（不进核心 YAML）；旧设置没有该字段。 */
+    schedule?: ReleaseScheduleSettings;
   };
   output: { dir: string };
   schedule: { enabled: boolean; time: string; timezone: string; periods: Period[] };
@@ -214,7 +290,21 @@ export interface StatePayload {
   settings: SettingsShape;
   core: CoreStatus;
   coexistence: CoexistenceStatus;
-  schedule: { enabled: boolean; time: string; timezone: string; periods: Period[]; nextRunAt?: string; lastRunDate?: string; source: 'timer' };
+  schedule: {
+    enabled: boolean;
+    time: string;
+    timezone: string;
+    periods: Period[];
+    nextRunAt?: string;
+    lastRunDate?: string;
+    source: 'timer';
+    /** 发版周调度；Host 尚未提供时缺省（读 `settings.releases.schedule` 兜底）。 */
+    releaseEnabled?: boolean;
+    releaseWeekday?: number;
+    releaseTime?: string;
+    releaseTimezone?: string;
+    nextReleaseAt?: string;
+  };
   status: {
     running: { id: string; startedAt: string } | null;
     lastRunAt: string | null;
@@ -223,6 +313,10 @@ export interface StatePayload {
     pendingPr: { url: string; createdAt: string; date?: string } | null;
     pendingPrState?: 'open' | 'closed' | 'merged' | 'unknown';
     history: RunRecord[];
+    /** 发版运行记录（最多 30 条）；旧状态文件没有该字段。 */
+    releaseRuns?: ReleaseRunRecord[];
+    /** 最近一次发版运行结束时间（失败也算）；旧状态文件没有该字段。 */
+    lastReleaseAt?: string | null;
     /** 历史全部运行的 token 累计（读时求和）；全无数据则缺省。 */
     totalTokens?: number;
   };
@@ -232,6 +326,24 @@ export interface StatePayload {
     effectiveBaseURL: string;
   };
   github: { authMode: string; configured: boolean; source: string };
+  /** 发版运行记录的另一种挂载位置；与 `status.releaseRuns` 二者读其一即可。 */
+  releaseRuns?: ReleaseRunRecord[];
+  lastReleaseAt?: string | null;
+}
+
+/** 发版运行记录：根与 `status` 两处都可能带，取第一个存在的数组。 */
+export function releaseRunsOf(state: StatePayload | null | undefined): ReleaseRunRecord[] {
+  if (state === null || state === undefined) return [];
+  const root = Array.isArray(state.releaseRuns) ? state.releaseRuns : undefined;
+  const nested = Array.isArray(state.status?.releaseRuns) ? state.status.releaseRuns : undefined;
+  return root ?? nested ?? [];
+}
+
+/** 最近一次发版运行时间：根与 `status` 两处都认。 */
+export function lastReleaseAtOf(state: StatePayload | null | undefined): string | undefined {
+  if (state === null || state === undefined) return undefined;
+  const value = state.lastReleaseAt ?? state.status?.lastReleaseAt;
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 export interface ProviderCandidate {
@@ -345,14 +457,79 @@ export async function applyPluginUpdate(): Promise<PluginUpdateResult> {
   return payload.result;
 }
 
+const SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = ['baseline', 'ok', 'no_change', 'rate_limited', 'failed'];
+
+function normalizeItem(raw: any): SubscriptionItem | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  if (typeof raw.fullName !== 'string' || raw.fullName.trim() === '') return undefined;
+  const status: SubscriptionStatus = SUBSCRIPTION_STATUSES.includes(raw.status) ? raw.status : 'baseline';
+  const optional = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+  const item: SubscriptionItem = { fullName: raw.fullName.trim(), status };
+  const url = optional(raw.url);
+  const latestTag = optional(raw.latestTag);
+  const latestSummaryAt = optional(raw.latestSummaryAt);
+  const lastCheckedAt = optional(raw.lastCheckedAt);
+  if (url !== undefined) item.url = url;
+  if (latestTag !== undefined) item.latestTag = latestTag;
+  if (latestSummaryAt !== undefined) item.latestSummaryAt = latestSummaryAt;
+  if (lastCheckedAt !== undefined) item.lastCheckedAt = lastCheckedAt;
+  return item;
+}
+
+/** 核心/旧版本回包归一：`repos` 与 `items` 一律是数组，`items` 缺失时为空数组。 */
+export function normalizeSubscriptionList(payload: any): SubscriptionList {
+  const repos = Array.isArray(payload?.repos)
+    ? payload.repos.filter((item: unknown): item is string => typeof item === 'string' && item.trim() !== '').map((item: string) => item.trim())
+    : [];
+  const items = Array.isArray(payload?.items)
+    ? payload.items.map(normalizeItem).filter((item: SubscriptionItem | undefined): item is SubscriptionItem => item !== undefined)
+    : [];
+  return { repos, items };
+}
+
 /** 读订阅列表（数据仓版本化的 subscriptions.yaml，经核心 subscribe list）。 */
-export async function getSubscriptions(signal?: AbortSignal): Promise<string[]> {
-  const payload = await apiCall<{ repos: string[] }>('GET', '/subscriptions', undefined, signal === undefined ? {} : { signal });
-  return Array.isArray(payload.repos) ? payload.repos : [];
+export async function getSubscriptions(signal?: AbortSignal): Promise<SubscriptionList> {
+  const payload = await apiCall<{ repos?: unknown; items?: unknown }>('GET', '/subscriptions', undefined, signal === undefined ? {} : { signal });
+  return normalizeSubscriptionList(payload);
 }
 
 /** 增删订阅（经核心 subscribe add/remove，只写 .git/pending）。返回最新列表。 */
-export async function postSubscriptions(action: 'add' | 'remove', repos: string[]): Promise<string[]> {
-  const payload = await apiCall<{ repos: string[] }>('POST', '/subscriptions', { action, repos });
-  return Array.isArray(payload.repos) ? payload.repos : [];
+export async function postSubscriptions(action: 'add' | 'remove', repos: string[]): Promise<SubscriptionList> {
+  const payload = await apiCall<{ repos?: unknown; items?: unknown }>('POST', '/subscriptions', { action, repos });
+  return normalizeSubscriptionList(payload);
+}
+
+/**
+ * 读某个仓库的发版记录（数据仓 `releases/<owner>/<repo>.md` 的原文）。
+ *
+ * 不传 `volume` 时由核心给当前册；传了就按册取（抽屉切册时重新请求，不做跨周缓存，
+ * 保证面板看到的永远是文件当前内容）。
+ */
+export async function getSubscriptionDoc(repo: string, volume?: number, signal?: AbortSignal): Promise<SubscriptionDoc> {
+  const query = `?repo=${encodeURIComponent(repo)}${volume === undefined ? '' : `&volume=${encodeURIComponent(String(volume))}`}`;
+  const payload = await apiCall<{ fullName?: unknown; volume?: unknown; volumes?: unknown; updatedAt?: unknown; markdown?: unknown }>(
+    'GET',
+    `/subscriptions/releases${query}`,
+    undefined,
+    signal === undefined ? {} : { signal },
+  );
+  const volumes = Array.isArray(payload.volumes)
+    ? payload.volumes
+        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .map((item): SubscriptionVolume => ({
+          index: typeof item.index === 'number' ? item.index : 1,
+          file: typeof item.file === 'string' ? item.file : '',
+          ...(typeof item.from === 'string' ? { from: item.from } : {}),
+          ...(typeof item.to === 'string' ? { to: item.to } : {}),
+          ...(typeof item.lines === 'number' ? { lines: item.lines } : {}),
+        }))
+    : [];
+  const doc: SubscriptionDoc = {
+    fullName: typeof payload.fullName === 'string' && payload.fullName !== '' ? payload.fullName : repo,
+    volume: typeof payload.volume === 'number' ? payload.volume : volume ?? 1,
+    markdown: typeof payload.markdown === 'string' ? payload.markdown : '',
+  };
+  if (volumes.length > 0) doc.volumes = volumes;
+  if (typeof payload.updatedAt === 'string' && payload.updatedAt !== '') doc.updatedAt = payload.updatedAt;
+  return doc;
 }

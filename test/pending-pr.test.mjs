@@ -43,6 +43,7 @@ async function startServer(store, fetchImpl) {
     isRunning: () => false,
     getTimer: () => undefined,
     run: async () => undefined,
+    runReleases: async () => undefined,
   });
   const server = http.createServer(
     routes.createRoutes({ store, runner, scheduler, get: () => undefined, env, version: '0.1.0-test', fetchImpl }),

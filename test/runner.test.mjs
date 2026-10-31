@@ -123,11 +123,15 @@ test('取消：SIGTERM 终止核心，返回 CORE_CANCELLED 且不写 lastDigest
   const pending = runner.run({ trigger: 'manual' });
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(runner.running !== undefined, true);
+  // 只测「取消后多快结束」，不测整次运行的墙钟时长：并行跑测试文件时进程启动会被
+  // 拖慢，用总时长做阈值会把机器负载误判成取消失效。
+  const cancelAt = Date.now();
   assert.equal(runner.cancel(), true);
   const summary = await pending;
+  const cancelMs = Date.now() - cancelAt;
   assert.equal(summary.ok, false);
   assert.equal(summary.error.code, 'CORE_CANCELLED');
-  assert.ok(summary.durationMs < 3500, `应当在取消后很快结束，实际 ${summary.durationMs}ms`);
+  assert.ok(cancelMs < 3500, `应当在取消后很快结束，实际 ${cancelMs}ms`);
   assert.equal(store.readState().lastDigest, undefined);
 });
 
@@ -504,4 +508,93 @@ test('runMany：显式 periods 只跑选定周期', async () => {
   const summaries = await runner.runMany({ trigger: 'manual', periods: ['weekly'] });
   assert.deepEqual(summaries.map((summary) => summary.period), ['weekly']);
   assert.equal(store.readHistory().length, 1);
+});
+
+// ——— 发版运行（run --stages releases） ———
+
+test('runReleases：只跑发版阶段并落一条 releaseRuns 记录，不写 history', async () => {
+  const { runner, store } = makeRunner({
+    // FAKE_REQUIRE_STAGES 让假核心在缺少 `--stages releases` 时直接失败。
+    scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_RELEASES: '6,9,60,1,0,2,6,2' },
+  });
+  const record = await runner.runReleases({ trigger: 'manual' });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.checked, 6);
+  assert.equal(record.changed, 2);
+  assert.equal(record.newTags, 9);
+  assert.equal(record.summarized, 9);
+  assert.equal(record.degraded, 1);
+  assert.equal(record.failed, 0);
+  assert.equal(record.rateLimited, 0);
+  assert.equal(record.durationMs, 1000); // 取 releases 阶段自己的耗时
+  assert.equal(record.tokens, 60);
+  assert.equal(record.commit, 'deadbeef');
+  assert.equal(record.prUrl, 'https://example.invalid/pr/1');
+  assert.equal(record.branch, 'trending/2026-10-30');
+  assert.equal(record.coreVersion, '0.3.0-fake');
+
+  const state = store.readState();
+  assert.equal(state.lastReleaseAt, record.finishedAt);
+  assert.equal(state.lastReleaseWeek, scheduleModule.isoWeekKey(new Date(record.finishedAt), 'Asia/Shanghai'));
+  assert.equal(store.readReleaseRuns().length, 1);
+  assert.equal(store.readHistory().length, 0); // 发版运行绝不进榜单历史
+  assert.equal(runner.running, undefined);
+});
+
+test('runReleases：skipped 也算成功（锁本周），history 仍为空', async () => {
+  const { runner, store } = makeRunner({ scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_SKIPPED: '1' } });
+  const record = await runner.runReleases({ trigger: 'schedule' });
+  assert.equal(record.status, 'skipped');
+  assert.equal(record.checked, 0);
+  const state = store.readState();
+  assert.equal(state.lastReleaseWeek, scheduleModule.isoWeekKey(new Date(record.finishedAt), 'Asia/Shanghai'));
+  assert.equal(store.readHistory().length, 0);
+});
+
+test('runReleases：核心失败 → failed 记录，不锁本周（下一 tick 还能重试）', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_EXIT: '1', FAKE_STDERR: 'error: INTERNAL: boom' },
+  });
+  const record = await runner.runReleases({ trigger: 'schedule' });
+  assert.equal(record.status, 'failed');
+  assert.equal(record.errorCode, 'INTERNAL');
+  assert.match(record.errorMessage, /boom/);
+  const state = store.readState();
+  assert.equal(state.lastReleaseAt, record.finishedAt);
+  assert.equal(state.lastReleaseWeek, undefined);
+  assert.equal(store.readReleaseRuns()[0].status, 'failed');
+});
+
+test('runReleases：与榜单运行共享单跑锁（并发直接拒绝）', async () => {
+  const { runner } = makeRunner({ scenario: { FAKE_SLEEP: '1200' } });
+  const first = runner.run({ trigger: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await assert.rejects(async () => {
+    await runner.runReleases({ trigger: 'manual' });
+  }, /已有一次运行在进行中/);
+  runner.cancel();
+  await first;
+});
+
+test('runReleases：取消 → cancelled 记录，不写任何成功状态', async () => {
+  const { runner, store } = makeRunner({ scenario: { FAKE_SLEEP: '4000', FAKE_REQUIRE_STAGES: '1' } });
+  const pending = runner.runReleases({ trigger: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(runner.running !== undefined, true);
+  assert.equal(runner.cancel(), true);
+  const record = await pending;
+  assert.equal(record.status, 'cancelled');
+  assert.equal(record.errorCode, 'CORE_CANCELLED');
+  const state = store.readState();
+  assert.equal(state.lastReleaseWeek, undefined);
+  assert.equal(store.readHistory().length, 0);
+});
+
+test('runReleases：订阅列表读不到也照跑（repoCount 按 0），auto 并发回落 4', async () => {
+  // 模型/仓库配置合法，但核心在 subscribe list 上失败：不应让发版运行整体失败。
+  const { runner, store } = makeRunner({ scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_SUBSCRIBE_FAIL: '1', FAKE_RELEASES: '1,1,0' } });
+  const record = await runner.runReleases({ trigger: 'manual' });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.coreVersion, '0.3.0-fake');
+  assert.equal(store.readHistory().length, 0);
 });

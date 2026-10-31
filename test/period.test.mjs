@@ -36,3 +36,20 @@ test('periodFileBase / isoWeekName 与 core render.NameOf 对齐', () => {
   // 非法日期原样返回，不抛。
   assert.equal(runnerModule.isoWeekName('bad'), 'bad');
 });
+
+test('buildCoreArgs 追加 --stages（发版只跑 releases；缺省不传）', () => {
+  assert.deepEqual(runModule.buildCoreArgs('/c', { dryRun: false, stages: ['releases'] }), [
+    'run',
+    '--config',
+    '/c',
+    '--json',
+    '--stages',
+    'releases',
+  ]);
+  assert.deepEqual(
+    runModule.buildCoreArgs('/c', { dryRun: true, date: '2026-11-02', stages: ['releases'] }),
+    ['run', '--config', '/c', '--json', '--dry-run', '--date', '2026-11-02', '--stages', 'releases'],
+  );
+  // 空数组 = 不窄化，保持旧行为的参数序列。
+  assert.deepEqual(runModule.buildCoreArgs('/c', { dryRun: false, stages: [] }), ['run', '--config', '/c', '--json']);
+});
