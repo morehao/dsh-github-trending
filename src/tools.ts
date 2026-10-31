@@ -111,6 +111,13 @@ export function createTrendingRunTool(runner: Runner) {
         const head = summary.ok ? (summary.skipped ? '无变更（skipped）' : summary.dryRun ? '试跑完成' : '运行成功') : `运行失败：${summary.error?.code ?? 'INTERNAL'}`;
         lines.push(`${summary.ok ? '✓' : '✗'} [${periodLabel}] ${head}`);
         lines.push(`· 核心 ${summary.coreVersion || '(未知)'} · ${formatDuration(summary.durationMs)} · ${summary.files} 个文件`);
+        if (summary.tokens !== undefined) {
+          const parts = [`本次 tokens ${summary.tokens.toLocaleString('en-US')}`];
+          if (summary.releases !== undefined && summary.releases.enabled) {
+            parts.push(`发版 ${summary.releases.newReleases} 个新版本 / ${summary.releases.repos} 个仓库`);
+          }
+          lines.push(`· ${parts.join(' · ')}`);
+        }
         if (summary.contentHash !== undefined) lines.push(`· contentHash ${summary.contentHash.slice(0, 12)}`);
         if (summary.branch !== undefined) lines.push(`· 分支 ${summary.branch}`);
         if (summary.prUrl !== undefined) lines.push(`· PR ${summary.prUrl}`);
@@ -133,6 +140,8 @@ export function createTrendingRunTool(runner: Runner) {
           dryRun: summary.dryRun,
           durationMs: summary.durationMs,
           files: summary.files,
+          ...(summary.tokens === undefined ? {} : { tokens: summary.tokens }),
+          ...(summary.releases === undefined ? {} : { releases: summary.releases }),
           ...(summary.branch === undefined ? {} : { branch: summary.branch }),
           ...(summary.prUrl === undefined ? {} : { prUrl: summary.prUrl }),
           ...(summary.error === undefined ? {} : { errorCode: summary.error.code, errorMessage: summary.error.message }),
@@ -142,6 +151,10 @@ export function createTrendingRunTool(runner: Runner) {
         dryRun: base.dryRun,
         durationMs: summaries.reduce((sum, summary) => sum + summary.durationMs, 0),
         files: summaries.reduce((sum, summary) => sum + summary.files, 0),
+        ...(() => {
+          const total = summaries.reduce((sum, summary) => sum + (summary.tokens ?? 0), 0);
+          return summaries.some((summary) => summary.tokens !== undefined) ? { tokens: total } : {};
+        })(),
         warnings: summaries.flatMap((summary) => summary.warnings),
         ...(primary?.error === undefined
           ? {}

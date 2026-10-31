@@ -28,6 +28,10 @@ export function isPeriod(value: unknown): value is Period {
   return value === 'daily' || value === 'weekly' || value === 'monthly';
 }
 
+export function isEnrich(value: unknown): value is Enrich {
+  return value === 'none' || value === 'repo' || value === 'readme';
+}
+
 export interface ModelSettings {
   provider: Provider;
   /** `direct` = 密钥经配置通道直传核心；`proxy` = 宿主 provider 无可导出密钥，走回环代理。 */
@@ -74,6 +78,41 @@ export interface OutputSettings {
   dir: string;
 }
 
+/** 摘要生成的外部上下文增强选项（核心 `summarize.enrich`）。 */
+export type Enrich = 'none' | 'repo' | 'readme';
+
+/**
+ * 摘要与用量阶段参数（核心 `summarize.*`）。
+ * 只映射核心真实字段；插件不加核心没有的开关（不造「点了没反应」的配置）。
+ */
+export interface SummarizeSettings {
+  batchSize: number;
+  maxRetries: number;
+  enrich: Enrich;
+  readmeChars: number;
+  enrichCacheTTLHours: number;
+  enrichConcurrency: number;
+  enrichTimeoutSeconds: number;
+  enrichBudgetSeconds: number;
+}
+
+/**
+ * 发版订阅阶段的行为开关（核心 `releases.*`）。
+ * **订阅列表本身不落 settings.json**：它版本化在数据仓 `<output.dir>/subscriptions.yaml`，
+ * 经核心 `subscribe` IPC 读改。这里只放全局行为旋钮。
+ */
+export interface ReleasesSettings {
+  enabled: boolean;
+  includePrerelease: boolean;
+  includeDrafts: boolean;
+  fallbackToTags: boolean;
+  baselineOnFirstRun: boolean;
+  perRepoLimit: number;
+  maxNotesChars: number;
+  /** 发版摘要周期，独立默认 daily，不与 trending.since 联动。 */
+  period: Period;
+}
+
 export interface ScheduleSettings {
   enabled: boolean;
   /** `HH:MM:SS`（本地墙钟，按 timezone 解释）。 */
@@ -94,6 +133,8 @@ export interface Settings {
   pr: PRSettings;
   github: GithubSettings;
   trending: TrendingSettings;
+  summarize: SummarizeSettings;
+  releases: ReleasesSettings;
   output: OutputSettings;
   schedule: ScheduleSettings;
   /** 核心二进制覆盖；只在开发/排障时用，对应 TRENDING_DIGEST_CORE。 */
@@ -130,6 +171,26 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   github: { authMode: 'gh', tokenRef: 'GITHUB_TOKEN' },
   trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
+  summarize: {
+    batchSize: 10,
+    maxRetries: 1,
+    enrich: 'none',
+    readmeChars: 800,
+    enrichCacheTTLHours: 168,
+    enrichConcurrency: 4,
+    enrichTimeoutSeconds: 5,
+    enrichBudgetSeconds: 8,
+  },
+  releases: {
+    enabled: false,
+    includePrerelease: false,
+    includeDrafts: false,
+    fallbackToTags: true,
+    baselineOnFirstRun: true,
+    perRepoLimit: 5,
+    maxNotesChars: 4000,
+    period: 'daily',
+  },
   output: { dir: 'trending' },
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily', 'weekly', 'monthly'] },
   corePath: '',
@@ -146,7 +207,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 export const CORE_PROVIDERS = ['deepseek', 'openai-compatible'] as const;
 
 /** 设置页分区；分段保存时只提交并校验对应分区，互不牵连。 */
-export const SETTINGS_SECTIONS = ['source', 'model', 'repo', 'auth', 'scope', 'schedule'] as const;
+export const SETTINGS_SECTIONS = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases', 'schedule'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 /** 校验问题字段 → 所属分区（用于分段保存时只把本分区的问题回给界面）。 */
@@ -155,6 +216,8 @@ export function sectionOfField(field: string): SettingsSection | undefined {
   if (field.startsWith('repo.') || field.startsWith('output.') || field.startsWith('pr.')) return 'repo';
   if (field.startsWith('github.')) return 'auth';
   if (field.startsWith('trending.')) return 'scope';
+  if (field.startsWith('summarize.')) return 'summarize';
+  if (field.startsWith('releases.')) return 'releases';
   if (field.startsWith('schedule.')) return 'schedule';
   if (field === 'corePath' || field === 'coreAutoDownload') return 'source';
   return undefined;
@@ -184,6 +247,12 @@ export function mergeSettingsSection(stored: Settings, incoming: Settings, secti
       break;
     case 'scope':
       next.trending = incoming.trending;
+      break;
+    case 'summarize':
+      next.summarize = incoming.summarize;
+      break;
+    case 'releases':
+      next.releases = incoming.releases;
       break;
     case 'schedule':
       next.schedule = incoming.schedule;
@@ -230,11 +299,15 @@ export function normalizeSettings(input: unknown): Settings {
   const pr = (raw.pr ?? {}) as Record<string, unknown>;
   const github = (raw.github ?? {}) as Record<string, unknown>;
   const trending = (raw.trending ?? {}) as Record<string, unknown>;
+  const summarize = (raw.summarize ?? {}) as Record<string, unknown>;
+  const releases = (raw.releases ?? {}) as Record<string, unknown>;
   const output = (raw.output ?? {}) as Record<string, unknown>;
   const schedule = (raw.schedule ?? {}) as Record<string, unknown>;
   const commitMode = str(repo.commitMode, DEFAULT_SETTINGS.repo.commitMode);
   const authMode = str(github.authMode, DEFAULT_SETTINGS.github.authMode);
   const since = str(trending.since, DEFAULT_SETTINGS.trending.since);
+  const enrich = str(summarize.enrich, DEFAULT_SETTINGS.summarize.enrich);
+  const releasesPeriod = str(releases.period, DEFAULT_SETTINGS.releases.period);
   return {
     model: {
       provider: str(model.provider, DEFAULT_SETTINGS.model.provider),
@@ -270,6 +343,26 @@ export function normalizeSettings(input: unknown): Settings {
       since: isPeriod(since) ? since : 'daily',
       languages: strArray(trending.languages, DEFAULT_SETTINGS.trending.languages),
       topN: Math.round(num(trending.topN, DEFAULT_SETTINGS.trending.topN)),
+    },
+    summarize: {
+      batchSize: Math.round(num(summarize.batchSize, DEFAULT_SETTINGS.summarize.batchSize)),
+      maxRetries: Math.round(num(summarize.maxRetries, DEFAULT_SETTINGS.summarize.maxRetries)),
+      enrich: isEnrich(enrich) ? enrich : DEFAULT_SETTINGS.summarize.enrich,
+      readmeChars: Math.round(num(summarize.readmeChars, DEFAULT_SETTINGS.summarize.readmeChars)),
+      enrichCacheTTLHours: Math.round(num(summarize.enrichCacheTTLHours, DEFAULT_SETTINGS.summarize.enrichCacheTTLHours)),
+      enrichConcurrency: Math.round(num(summarize.enrichConcurrency, DEFAULT_SETTINGS.summarize.enrichConcurrency)),
+      enrichTimeoutSeconds: Math.round(num(summarize.enrichTimeoutSeconds, DEFAULT_SETTINGS.summarize.enrichTimeoutSeconds)),
+      enrichBudgetSeconds: Math.round(num(summarize.enrichBudgetSeconds, DEFAULT_SETTINGS.summarize.enrichBudgetSeconds)),
+    },
+    releases: {
+      enabled: bool(releases.enabled, DEFAULT_SETTINGS.releases.enabled),
+      includePrerelease: bool(releases.includePrerelease, DEFAULT_SETTINGS.releases.includePrerelease),
+      includeDrafts: bool(releases.includeDrafts, DEFAULT_SETTINGS.releases.includeDrafts),
+      fallbackToTags: bool(releases.fallbackToTags, DEFAULT_SETTINGS.releases.fallbackToTags),
+      baselineOnFirstRun: bool(releases.baselineOnFirstRun, DEFAULT_SETTINGS.releases.baselineOnFirstRun),
+      perRepoLimit: Math.round(num(releases.perRepoLimit, DEFAULT_SETTINGS.releases.perRepoLimit)),
+      maxNotesChars: Math.round(num(releases.maxNotesChars, DEFAULT_SETTINGS.releases.maxNotesChars)),
+      period: isPeriod(releasesPeriod) ? releasesPeriod : DEFAULT_SETTINGS.releases.period,
     },
     output: {
       dir: str(output.dir, DEFAULT_SETTINGS.output.dir).trim() || DEFAULT_SETTINGS.output.dir,
@@ -310,7 +403,7 @@ export function isValidTimezone(timezone: string): boolean {
  */
 export function validateSettings(settings: Settings, providers: readonly string[] = CORE_PROVIDERS): Problem[] {
   const problems: Problem[] = [];
-  const { model, repo, trending, output, schedule } = settings;
+  const { model, repo, trending, summarize, releases, output, schedule } = settings;
 
   if (model.provider.trim() === '') {
     problems.push({ field: 'model.provider', code: 'CONFIG_INVALID', message: '缺少 provider' });
@@ -354,6 +447,29 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (!Number.isInteger(trending.topN) || trending.topN <= 0) {
     problems.push({ field: 'trending.topN', code: 'CONFIG_INVALID', message: '每语言条数必须是正整数' });
   }
+  // summarize.*
+  if (!isEnrich(summarize.enrich)) {
+    problems.push({ field: 'summarize.enrich', code: 'CONFIG_INVALID', message: 'enrich 必须是 none / repo / readme' });
+  }
+  if (!Number.isInteger(summarize.batchSize) || summarize.batchSize <= 0) {
+    problems.push({ field: 'summarize.batchSize', code: 'CONFIG_INVALID', message: 'batchSize 必须是正整数' });
+  }
+  if (!Number.isInteger(summarize.maxRetries) || summarize.maxRetries < 0) {
+    problems.push({ field: 'summarize.maxRetries', code: 'CONFIG_INVALID', message: 'maxRetries 必须是非负整数' });
+  }
+  if (!Number.isInteger(summarize.readmeChars) || summarize.readmeChars <= 0) {
+    problems.push({ field: 'summarize.readmeChars', code: 'CONFIG_INVALID', message: 'readmeChars 必须是正整数' });
+  }
+  // releases.*
+  if (!isPeriod(releases.period)) {
+    problems.push({ field: 'releases.period', code: 'CONFIG_INVALID', message: 'releases.period 必须是 daily / weekly / monthly' });
+  }
+  if (!Number.isInteger(releases.perRepoLimit) || releases.perRepoLimit < 1 || releases.perRepoLimit > 20) {
+    problems.push({ field: 'releases.perRepoLimit', code: 'CONFIG_INVALID', message: 'perRepoLimit 必须是 1–20 的整数' });
+  }
+  if (!Number.isInteger(releases.maxNotesChars) || releases.maxNotesChars < 500 || releases.maxNotesChars > 20000) {
+    problems.push({ field: 'releases.maxNotesChars', code: 'CONFIG_INVALID', message: 'maxNotesChars 必须是 500–20000 的整数' });
+  }
   if (output.dir.trim() === '' || path.isAbsolute(output.dir) || output.dir.split(/[\\/]/).includes('..')) {
     problems.push({ field: 'output.dir', code: 'CONFIG_INVALID', message: '输出目录必须是仓库内的相对路径，且不含 ..' });
   }
@@ -390,6 +506,26 @@ export interface CoreConfig {
   };
   pr: { enabled: boolean; titleTemplate: string; labels: string[]; autoMerge: boolean };
   trending: { languages: string[]; since: string; perLanguage: number };
+  summarize: {
+    batchSize: number;
+    maxRetries: number;
+    enrich: string;
+    readmeChars: number;
+    enrichCacheTTLHours: number;
+    enrichConcurrency: number;
+    enrichTimeoutSeconds: number;
+    enrichBudgetSeconds: number;
+  };
+  releases: {
+    enabled: boolean;
+    includePrerelease: boolean;
+    includeDrafts: boolean;
+    fallbackToTags: boolean;
+    baselineOnFirstRun: boolean;
+    perRepoLimit: number;
+    maxNotesChars: number;
+    period: string;
+  };
   output: { dir: string; branchPrefix: string; retentionDays: number };
 }
 
@@ -426,6 +562,26 @@ export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride
       languages: settings.trending.languages,
       since: period ?? settings.trending.since,
       perLanguage: settings.trending.topN,
+    },
+    summarize: {
+      batchSize: settings.summarize.batchSize,
+      maxRetries: settings.summarize.maxRetries,
+      enrich: settings.summarize.enrich,
+      readmeChars: settings.summarize.readmeChars,
+      enrichCacheTTLHours: settings.summarize.enrichCacheTTLHours,
+      enrichConcurrency: settings.summarize.enrichConcurrency,
+      enrichTimeoutSeconds: settings.summarize.enrichTimeoutSeconds,
+      enrichBudgetSeconds: settings.summarize.enrichBudgetSeconds,
+    },
+    releases: {
+      enabled: settings.releases.enabled,
+      includePrerelease: settings.releases.includePrerelease,
+      includeDrafts: settings.releases.includeDrafts,
+      fallbackToTags: settings.releases.fallbackToTags,
+      baselineOnFirstRun: settings.releases.baselineOnFirstRun,
+      perRepoLimit: settings.releases.perRepoLimit,
+      maxNotesChars: settings.releases.maxNotesChars,
+      period: settings.releases.period,
     },
     output: {
       dir: settings.output.dir,

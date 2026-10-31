@@ -4,7 +4,7 @@
  * 所有状态都来自 `/state`；运行中只显示开始时间、已用时与「核心执行中」，
  * 不伪造九步百分比。PR 不写「已合并」——state 无法区分 merged/closed。
  */
-import { Btn, Pill, React, duration, h, localTime, shortHash } from './ui.js';
+import { Btn, Pill, React, duration, formatTokens, h, localTime, shortHash } from './ui.js';
 import type { Translate } from './i18n.js';
 import type { DigestTarget, RunRecord, StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
@@ -224,6 +224,38 @@ export function OverviewView(props: OverviewProps): any {
             h('div', { className: 'dshgt-fact' }, h('div', { className: 'dshgt-fact-k' }, t('overview.model')), h('div', { className: 'dshgt-fact-v' }, last.model?.model ?? '—')),
           ),
         ),
+
+    h(
+      'section',
+      { className: 'dshgt-block dshgt-usage-glance' },
+      h(
+        'div',
+        { className: 'dshgt-glance-grid' },
+        h(
+          'div',
+          { className: 'dshgt-glance' },
+          h('div', { className: 'dshgt-glance-k' }, t('overview.tokens.title')),
+          h(
+            'div',
+            { className: 'dshgt-glance-vs' },
+            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.tokens.thisRun')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.tokens === undefined ? '—' : formatTokens(last.tokens)), h('span', { className: 'dshgt-hint' }, 'tokens')),
+            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.tokens.total')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, state.status.totalTokens === undefined ? '—' : formatTokens(state.status.totalTokens)), h('span', { className: 'dshgt-hint' }, 'tokens')),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dshgt-glance' },
+          h('div', { className: 'dshgt-glance-k' }, t('overview.releases.title')),
+          h(
+            'div',
+            { className: 'dshgt-glance-vs' },
+            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.releases.new')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.releases === undefined ? '—' : String(last.releases.newReleases))),
+            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.releases.repos')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.releases === undefined ? '—' : String(last.releases.repos))),
+          ),
+        ),
+      ),
+      h('p', { className: 'dshgt-hint dshgt-glance-note' }, t('overview.tokens.note')),
+    ),
 
     h(
       'section',

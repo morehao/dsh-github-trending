@@ -72,6 +72,8 @@ export interface ExecOptions {
   signal?: AbortSignal;
   maxStdout?: number;
   maxStderr?: number;
+  /** 写入子进程 stdin 的内容（写完即关闭）；省略则 stdin 为 ignore。 */
+  input?: string;
 }
 
 function killTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
@@ -98,9 +100,14 @@ export async function execCapture(
   const child = spawn(file, args, {
     cwd: options.cwd,
     env: options.env ?? process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
+
+  if (options.input !== undefined) {
+    child.stdin?.on('error', () => undefined); // 子进程提前退出时的 EPIPE 忽略
+    child.stdin?.end(options.input);
+  }
 
   let stdout = '';
   let stderr = '';

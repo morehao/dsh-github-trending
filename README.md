@@ -40,9 +40,26 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 - `GET /preview?id=<runId>` 只接受历史里出现过的 id、不接路径参数；返回 `{ text, truncated }`。客户端渲染 Markdown 子集（标题 / 段落 / 列表 / 引用 / 代码块 / 表格（GFM 管道表，含列对齐）/ 粗体 / 行内代码 / 链接 / 分隔线），**只生成 React 文本节点**，链接仅放行 http(s)，不渲染图片或原始 HTML；也可以切「原文」。
 - 榜单视图按周期分三段（日榜 / 周榜 / 月榜），各周期一条独立时间线：日榜列最近 30 天有记录的日期、每天一条；周榜按 ISO 周、月榜按月。同一期多次运行只保留一条（优先成功且有预览的）。默认打开当前周期最近一期有预览的期数；失败 / 无变更 / 试跑 / 旧记录 / 副本被清理都有各自的空状态，不用示例内容兜底。
 - 预览是运行结束时的派生副本：你在仓库里事后编辑 canonical 文件，不会改变这次记录。
-- 工作台顶部第一行是插件身份条：名称 / 版本 / 完整包名（点击复制）/ GitHub 外链 / 检查更新（就地状态）；第二行是横向 tab（概览 / 榜单 / 运行记录 / 设置），右侧常驻下次运行与就绪 N/4。点版本号可打开「关于」弹层。包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。
+- 工作台顶部第一行是插件身份条：名称 / 版本 / 完整包名（点击复制）/ GitHub 外链 / 检查更新（就地状态）；第二行是横向 tab（概览 / 榜单 / 运行记录 / 订阅 / 设置），右侧常驻下次运行与就绪 N/4。点版本号可打开「关于」弹层。包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。
 
-## 插件更新
+## 用量（token）
+
+- **每次运行的 token 总量**与**历史累计总量**都会记录。**只展示总用量，不拆** prompt / completion / cached 等维度。
+- 「本次任务总量」= 榜单摘要阶段（`usage.totalTokens`）+ 发版订阅阶段（`releases.usage.totalTokens`），**订阅消耗计入总量**。
+- 累计 = 历史里全部运行 `tokens` 之和，**读时求和、不落盘**（`history.json` 只存每次的 `tokens`）。
+- 插件**不做费用估算、不内置定价表**（价格随 provider / 区域变动，易过期）：只展示核心回报的 token 真值。
+- 展示位置：概览速览块（本次 / 累计 / 新发版 / 订阅仓库数）、运行记录（每行本次 tokens、展开明细、页脚累计）、历史。数据来自契约 `Usage`。旧核心无 `usage` / `releases` 时整块显示「—」并隐藏，绝不伪造 0。
+
+## 发版订阅
+
+- 订阅一组仓库，之后每次运行把每个仓库「**新增的 Release**（无 Release 时回退 Tag）」写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单**同分支、同 PR** 一起提交。默认 `releases.enabled=false` 旁路，不改变既有榜单产物（逐字节不变）。
+- **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
+- **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, configPath}`，`list` 的仓库由核心 stdout 逐行返回后插件解析。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件。
+- 界面：「订阅」页管理列表（增删 / 开关状态提示）；「设置 → 发版订阅」分区放行为开关（`enabled` / 含预发布 / 含草稿 / notes 截断），以及「管理订阅列表 →」入口。
+- 周期独立：`releases.period` 默认 `daily`，不与 `trending.since` 联动。
+- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心或 `enabled=false` 时缺省。
+
+
 
 - 顶部身份条的「检查更新」与「关于」弹层都会显示当前版本与 npm 上的最新版：首次挂载静默检查一次（Host 侧缓存 5 分钟），也可以点「检查更新」强制重查；有新版时身份条就地显示「有新版本 vX」+「更新到 vX」。只跟随 npm 的 `latest` 稳定版。
 - 确认后由宿主 `pluginManager` 重装本插件（`installBundle`；已装同 spec 时走 `removeBundle → installBundle`，失败会尝试装回原版本），完成后需要重启 DSH 生效。
@@ -95,6 +112,14 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
 | `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名（`pat` 用） |
 | `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | `since` 是单次运行周期（`daily`/`weekly`/`monthly`，抓取窗口=标的周期由核心保证）；实际支持范围由核心决定 |
+| `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量与失败重试（映射核心 `summarize.*`） |
+| `summarize.enrich` | `none` | `none` / `repo` / `readme`：是否抓取 GitHub topics / README 作为增强上下文；`repo`/`readme` 建议配只读 `GITHUB_READ_TOKEN` |
+| `summarize.readmeChars` | `800` | README 摘录长度（enrich=readme 时） |
+| `releases.enabled` | `false` | 是否启用发版订阅阶段；`false` 时既有榜单产物逐字节不变 |
+| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿 |
+| `releases.fallbackToTags` / `baselineOnFirstRun` | `true` / `true` | 无 Release 时回退 Tag / 首次只记基线 |
+| `releases.perRepoLimit` / `maxNotesChars` | `5` / `4000` | 每仓单次上限（1–20）/ notes 截断（500–20000） |
+| `releases.period` | `daily` | 发版摘要周期（独立，不与 `trending.since` 联动） |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末触发；旧配置自动升级为三周期 |

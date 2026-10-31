@@ -54,6 +54,17 @@ export interface PreviewMeta {
   truncated?: boolean;
 }
 
+/** 发版订阅阶段摘要（历史/运行记录展示用）。 */
+export interface ReleasesSummary {
+  enabled: boolean;
+  repos: number;
+  newReleases: number;
+  summarized?: number;
+  degraded?: number;
+  failed?: number;
+  skipped?: number;
+}
+
 export interface RunSummary {
   id: string;
   ok: boolean;
@@ -69,6 +80,10 @@ export interface RunSummary {
   prUrl?: string;
   preview?: PreviewMeta;
   skipReason?: string;
+  /** 本次任务 token 总量（榜单 + 订阅阶段，含订阅）；缺省表示无数据。 */
+  tokens?: number;
+  /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
+  releases?: ReleasesSummary;
   error?: {
     code: string;
     message: string;
@@ -107,6 +122,10 @@ export interface RunRecord {
   model: { provider: string; model: string };
   languages: string[];
   warnings: string[];
+  /** 本次任务 token 总量（榜单 + 订阅阶段，含订阅）；缺省表示无数据。 */
+  tokens?: number;
+  /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
+  releases?: ReleasesSummary;
   legacy?: boolean;
 }
 
@@ -166,6 +185,26 @@ export interface SettingsShape {
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };
   github: { authMode: 'pat' | 'gh'; tokenRef: string };
   trending: { since: Period; languages: string[]; topN: number };
+  summarize: {
+    batchSize: number;
+    maxRetries: number;
+    enrich: 'none' | 'repo' | 'readme';
+    readmeChars: number;
+    enrichCacheTTLHours: number;
+    enrichConcurrency: number;
+    enrichTimeoutSeconds: number;
+    enrichBudgetSeconds: number;
+  };
+  releases: {
+    enabled: boolean;
+    includePrerelease: boolean;
+    includeDrafts: boolean;
+    fallbackToTags: boolean;
+    baselineOnFirstRun: boolean;
+    perRepoLimit: number;
+    maxNotesChars: number;
+    period: Period;
+  };
   output: { dir: string };
   schedule: { enabled: boolean; time: string; timezone: string; periods: Period[] };
   corePath: string;
@@ -185,6 +224,8 @@ export interface StatePayload {
     pendingPr: { url: string; createdAt: string; date?: string } | null;
     pendingPrState?: 'open' | 'closed' | 'merged' | 'unknown';
     history: RunRecord[];
+    /** 历史全部运行的 token 累计（读时求和）；全无数据则缺省。 */
+    totalTokens?: number;
   };
   model: {
     mode: 'direct' | 'proxy';
@@ -303,4 +344,16 @@ export async function getPluginUpdate(options: { fresh?: boolean; signal?: Abort
 export async function applyPluginUpdate(): Promise<PluginUpdateResult> {
   const payload = await apiCall<{ result: PluginUpdateResult }>('POST', '/update', {});
   return payload.result;
+}
+
+/** 读订阅列表（数据仓版本化的 subscriptions.yaml，经核心 subscribe list）。 */
+export async function getSubscriptions(signal?: AbortSignal): Promise<string[]> {
+  const payload = await apiCall<{ repos: string[] }>('GET', '/subscriptions', undefined, signal === undefined ? {} : { signal });
+  return Array.isArray(payload.repos) ? payload.repos : [];
+}
+
+/** 增删订阅（经核心 subscribe add/remove，只写 .git/pending）。返回最新列表。 */
+export async function postSubscriptions(action: 'add' | 'remove', repos: string[]): Promise<string[]> {
+  const payload = await apiCall<{ repos: string[] }>('POST', '/subscriptions', { action, repos });
+  return Array.isArray(payload.repos) ? payload.repos : [];
 }

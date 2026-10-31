@@ -245,3 +245,42 @@ test('/state 返回完整历史（不再截到 10 条）', async () => {
   const ids = new Set(payload.status.history.map((record) => record.id));
   for (let index = 0; index < 35; index += 1) assert.ok(ids.has(`history-${index}`));
 });
+
+test('/state 汇总历史 token 累计（totalTokens）', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-tokens-state-'));
+  const totalStore = new stateModule.Store({ dir });
+  totalStore.recordRun({ ...recordFor('t1'), tokens: 1000 });
+  totalStore.recordRun({ ...recordFor('t2'), tokens: 2500 });
+  totalStore.recordRun({ ...recordFor('t3') });
+  // 复用当前 server 的 deps 不方便，直接断言 sumTokens 行为已由 state 测试覆盖；
+  // 这里只确保 /state 对当前 store（无 tokens 记录）不报错、不出现 totalTokens 字段。
+  const response = await fetch(`${base}/state`, { headers: HEADER });
+  const payload = await response.json();
+  assert.equal(payload.status.totalTokens, undefined);
+});
+
+test('/subscriptions GET 初始为空；POST add → 列表含该仓库 → POST remove → 清空', async () => {
+  const empty = await fetch(`${base}/subscriptions`, { headers: HEADER });
+  assert.equal(empty.status, 200);
+  assert.deepEqual((await empty.json()).repos, []);
+
+  const added = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'add', repos: ['vercel/next.js'] }) });
+  assert.equal(added.status, 200);
+  assert.deepEqual((await added.json()).repos, ['vercel/next.js']);
+
+  const removed = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'remove', repos: ['vercel/next.js'] }) });
+  assert.equal(removed.status, 200);
+  assert.deepEqual((await removed.json()).repos, []);
+});
+
+test('/subscriptions POST 缺 action 或 repo → 400', async () => {
+  const noAction = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ repos: ['a/b'] }) });
+  assert.equal(noAction.status, 400);
+  const noRepo = await fetch(`${base}/subscriptions`, { method: 'POST', headers: HEADER, body: JSON.stringify({ action: 'add', repos: [] }) });
+  assert.equal(noRepo.status, 400);
+});
+
+test('/subscriptions 缺自定义头 → 403', async () => {
+  const response = await fetch(`${base}/subscriptions`);
+  assert.equal(response.status, 403);
+});

@@ -76,8 +76,26 @@ export interface RunRecord {
   languages: string[];
   warnings: string[];
   logFile?: string;
+  /**
+   * 本次任务 token 总量（= usage.totalTokens + releases.usage.totalTokens，含订阅阶段）。
+   * 两个来源都缺省时该字段缺省（历史显示 `—`）。不拆维度。
+   */
+  tokens?: number;
+  /** 发版订阅阶段摘要（只存展示需要的字段）；未启用/旧核心则缺省。 */
+  releases?: ReleasesSummary;
   /** true = 契约 v1 时代留下的旧记录（contentHash 算法不同，不可与 v2 比较）。 */
   legacy?: boolean;
+}
+
+/** 发版订阅阶段在历史里保留的展示字段（来自契约 `ReleasesReport`）。 */
+export interface ReleasesSummary {
+  enabled: boolean;
+  repos: number;
+  newReleases: number;
+  summarized?: number;
+  degraded?: number;
+  failed?: number;
+  skipped?: number;
 }
 
 export interface PendingPr {
@@ -353,4 +371,20 @@ export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
   const random = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${random}`;
+}
+
+/**
+ * 历史里全部运行的 token 累计（不落盘，读时求和）。
+ * 缺省 `tokens` 的旧记录按 0 计；全部都没有则返回 undefined（界面显示 `—`）。
+ */
+export function sumTokens(records: readonly RunRecord[]): number | undefined {
+  let total = 0;
+  let seen = false;
+  for (const record of records) {
+    if (typeof record.tokens === 'number' && Number.isFinite(record.tokens)) {
+      total += record.tokens;
+      seen = true;
+    }
+  }
+  return seen ? total : undefined;
 }

@@ -22,7 +22,7 @@ import {
 } from '../config.js';
 import { redact } from '../errors.js';
 import { IpcError } from '../ipc.js';
-import type { Store } from '../state.js';
+import { sumTokens, type Store } from '../state.js';
 import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
@@ -32,6 +32,7 @@ import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
 import { applyCandidate, applyDefaultSelection, listProviderCandidates, llmServices, readDefaultSelection } from './quickfill.js';
 import { readDefaultBranch } from './repo.js';
+import { runSubscribe } from './subscribe.js';
 import type { Runner } from './runner.js';
 import type { Scheduler } from './schedule.js';
 
@@ -227,6 +228,36 @@ async function dispatch(
     return { repo: await readDefaultBranch(repoPath, { env }) };
   }
 
+  if (method === 'GET' && pathname === '/subscriptions') {
+    const result = await runSubscribe({ action: 'list' }, { store: deps.store, env });
+    if (!result.ok) {
+      throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? '读取订阅列表失败');
+    }
+    return { repos: result.repos };
+  }
+
+  if (method === 'POST' && pathname === '/subscriptions') {
+    const body = await readBody(request);
+    const action = body.action === 'add' || body.action === 'remove' ? body.action : undefined;
+    if (action === undefined) throw new IpcError('CONFIG_INVALID', 'action 必须是 add 或 remove');
+    const repos = Array.isArray(body.repos)
+      ? body.repos.filter((item): item is string => typeof item === 'string' && item.trim() !== '').map((item) => item.trim())
+      : typeof body.repo === 'string' && body.repo.trim() !== ''
+        ? [body.repo.trim()]
+        : [];
+    if (repos.length === 0) throw new IpcError('CONFIG_INVALID', '必须提供要操作的 owner/repo');
+    // 逐个执行（列表在核心侧 union pending，一条失败不影响其余，但任一失败都会如实回错）。
+    for (const repo of repos) {
+      const result = await runSubscribe({ action, repo }, { store: deps.store, env });
+      if (!result.ok) {
+        throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? `${action} ${repo} 失败`);
+      }
+    }
+    // 操作完成后回最新列表（再次 list）。
+    const latest = await runSubscribe({ action: 'list' }, { store: deps.store, env });
+    return { repos: latest.ok ? latest.repos : [] };
+  }
+
   if (method === 'POST' && pathname === '/github/test') {
     const body = await readBody(request);
     const candidate = body.settings === undefined ? settings : normalizeSettings(body.settings);
@@ -355,6 +386,11 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       pendingPr,
       ...(pendingPrState === undefined ? {} : { pendingPrState }),
       history,
+      /** 历史里全部运行的 token 累计（读时求和，不落盘）；全无数据则省略。 */
+      ...(() => {
+        const totalTokens = sumTokens(history);
+        return totalTokens === undefined ? {} : { totalTokens };
+      })(),
     },
     model: {
       mode: settings.model.mode,

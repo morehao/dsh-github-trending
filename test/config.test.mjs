@@ -124,3 +124,65 @@ test('toCoreConfig 用本次运行的 period 覆盖 trending.since', () => {
   assert.equal(config.toCoreConfig(settings, 'k', undefined, 'weekly').trending.since, 'weekly');
   assert.equal(config.toCoreConfig(settings, 'k', undefined, 'monthly').trending.since, 'monthly');
 });
+
+test('summarize / releases 归一化默认值与未知字段丢弃', () => {
+  const settings = config.normalizeSettings({ summarize: { enrich: 'readme', bogus: 1 }, releases: { enabled: true, period: 'weekly', perRepoLimit: 8 } });
+  assert.equal(settings.summarize.enrich, 'readme');
+  assert.equal('bogus' in settings.summarize, false);
+  assert.equal(settings.releases.enabled, true);
+  assert.equal(settings.releases.period, 'weekly');
+  assert.equal(settings.releases.perRepoLimit, 8);
+  // 默认值
+  const defaults = config.normalizeSettings({});
+  assert.equal(defaults.summarize.enrich, 'none');
+  assert.equal(defaults.summarize.batchSize, 10);
+  assert.equal(defaults.releases.enabled, false);
+  assert.equal(defaults.releases.period, 'daily');
+  assert.equal(defaults.releases.fallbackToTags, true);
+  assert.equal(defaults.releases.baselineOnFirstRun, true);
+  // 非法 enrich / period 回落默认
+  assert.equal(config.normalizeSettings({ summarize: { enrich: 'bogus' } }).summarize.enrich, 'none');
+  assert.equal(config.normalizeSettings({ releases: { period: 'hourly' } }).releases.period, 'daily');
+});
+
+test('summarize / releases 校验边界', () => {
+  const base = { model: { provider: 'deepseek', model: 'x' }, repo: { path: '/tmp/x' } };
+  // 合法
+  const ok = config.validateSettings(config.normalizeSettings(base), ['deepseek']);
+  assert.equal(ok.some((p) => p.field.startsWith('summarize.') || p.field.startsWith('releases.')), false);
+  // 越界 perRepoLimit / maxNotesChars
+  const bad = config.validateSettings(
+    config.normalizeSettings({ ...base, releases: { perRepoLimit: 25, maxNotesChars: 100 } }),
+    ['deepseek'],
+  );
+  assert.ok(bad.some((p) => p.field === 'releases.perRepoLimit'));
+  assert.ok(bad.some((p) => p.field === 'releases.maxNotesChars'));
+});
+
+test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
+  const settings = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'm' },
+    repo: { path: '/tmp/x' },
+    summarize: { batchSize: 7, enrich: 'repo', readmeChars: 500 },
+    releases: { enabled: true, includePrerelease: true, perRepoLimit: 3, maxNotesChars: 6000, period: 'monthly' },
+  });
+  const core = config.toCoreConfig(settings, 'k');
+  assert.equal(core.summarize.batchSize, 7);
+  assert.equal(core.summarize.enrich, 'repo');
+  assert.equal(core.summarize.readmeChars, 500);
+  assert.equal(core.releases.enabled, true);
+  assert.equal(core.releases.includePrerelease, true);
+  assert.equal(core.releases.perRepoLimit, 3);
+  assert.equal(core.releases.maxNotesChars, 6000);
+  assert.equal(core.releases.period, 'monthly');
+});
+
+test('summarize / releases 分区归位与分段合并互不牵连', () => {
+  assert.equal(config.sectionOfField('summarize.enrich'), 'summarize');
+  assert.equal(config.sectionOfField('releases.enabled'), 'releases');
+  const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 3 } });
+  const incoming = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 9 }, releases: { enabled: true } });
+  const merged = config.mergeSettingsSection(stored, incoming, 'summarize');
+  assert.equal(merged.summarize.batchSize, 9);
+  assert.equal(merged.releases.enabled, false); // 其它分区保持已保存值
+});

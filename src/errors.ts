@@ -26,6 +26,7 @@ export const PLUGIN_CODES = [
   'GITHUB_AUTH',
   'PUSH_FAILED',
   'REPO_DIRTY',
+  'SUBSCRIBE_FAILED',
 ] as const;
 
 export type PluginCode = (typeof PLUGIN_CODES)[number];
@@ -72,6 +73,7 @@ const RETRIABLE: Record<string, boolean> = {
   MODEL_PROVIDER_UNSUPPORTED: false,
   GITHUB_AUTH: false,
   PUSH_FAILED: true,
+  SUBSCRIBE_FAILED: true,
 };
 
 export function isRetriable(code: string): boolean {
@@ -176,6 +178,8 @@ export function hintOf(code: string, message?: string, reason?: string): string 
       return 'PR 无法自动合并（常见于分支保护）：PR 已保留，需人工处理。';
     case 'PUSH_FAILED':
       return '推送失败：本地 commit 已保留，修复权限/网络后重试即可复用。';
+    case 'SUBSCRIBE_FAILED':
+      return '订阅命令失败：核对 owner/repo 形态（如 vercel/next.js），确认仓库有写权限后重试；订阅列表随下次运行落盘提交。';
     case 'PR_FAILED':
       return '创建 PR 失败：本地 commit 与分支已保留。';
     case 'FETCH_FAILED':
