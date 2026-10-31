@@ -177,7 +177,15 @@ export function localTime(iso: string | null | undefined): string {
   if (iso === null || iso === undefined) return '—';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
 }
 
 /** 复制失败不抛错：按钮只是便利动作，不阻塞任何流程。 */
@@ -196,5 +204,11 @@ export function shortTime(iso: string | null | undefined): string {
   if (iso === null || iso === undefined) return '—';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
 }
