@@ -196,7 +196,6 @@ export interface SettingsShape {
     enrichBudgetSeconds: number;
   };
   releases: {
-    enabled: boolean;
     includePrerelease: boolean;
     includeDrafts: boolean;
     fallbackToTags: boolean;

@@ -36,12 +36,12 @@
 | 概览 | 下次运行 / 就绪检查（核心、模型、仓库、GitHub）/ 上次交付（状态、commit、PR、预览、阅读本期）/ 最近 7 天；**Token 用量速览**（本次 / 累计 / 新发版 / 订阅仓库数，只给总量不拆维度）；运行中只显示开始时间、已用时、取消 |
 | 榜单 | 按周期（日 / 周 / 月）分段，各周期独立时间线；渲染 / 原文；文件路径、大小、复制路径、PR；失败 / 无变更 / 试跑 / 旧记录 / 副本缺失各有空状态 |
 | 运行记录 | 最近 30 条；筛选全部 / 失败 / 试跑；展开 commit / hash / branch / PR / warnings / **本次 tokens / 发版摘要**；页脚**累计 tokens**；只读日志抽屉；legacy 标记 |
-| 订阅 | 仓库发版订阅列表（`<output.dir>/subscriptions.yaml`，数据仓版本化）；增删经核心 `subscribe` IPC；开关状态提示 + 行为参数入口 |
+| 订阅 | 仓库发版订阅列表（`<output.dir>/subscriptions.yaml`，数据仓版本化）；增删经核心 `subscribe` IPC；行为参数入口 |
 | 设置 | 八个 tab（内容来源 / 模型 / 仓库 / 认证 / 榜单 / **摘要与用量** / **发版订阅** / 调度）；「内容来源」只有状态与核心操作（重新检查 / 下载），其余 tab 逐 tab 保存 |
 
 顶部第一行是插件身份条：名称 / 版本 / 完整包名（点击复制）/ GitHub 外链 / 检查更新（就地状态，有新版时显示「有新版本 vX」+「更新到 vX」）；第二行是横向主导航（概览 / 榜单 / 运行记录 / 订阅 / 设置）＋右侧下次运行摘要与就绪 N/4；点版本号打开「关于」弹层（完整包名可复制、仓库外链、MIT、核心版本、运行环境）。主题跟随宿主 token；不实现原型的主题切换、URL hash 与示例徽标。
 
-产量（usage）与发版订阅（releases）：本次任务 token 总量 = `usage.totalTokens` + `releases.usage.totalTokens`（含订阅）；累计读时求和不落盘；插件不内置定价表。发版订阅默认 `enabled=false` 旁路，`true` 时把订阅仓库的新 Release 写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单同分支同 PR；订阅列表在数据仓版本化，插件经 `subscribe` IPC 读改、不直接写仓。
+产量（usage）与发版订阅（releases）：本次任务 token 总量 = `usage.totalTokens` + `releases.usage.totalTokens`（含订阅）；累计读时求和不落盘；插件不内置定价表。发版订阅阶段**常开**（插件不提供 `enabled` 开关），把订阅仓库的新 Release 写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单同分支同 PR；没有订阅时不产出、榜单产物不变。订阅列表在数据仓版本化，插件经 `subscribe` IPC 读改、不直接写仓。
 
 预览的数据边界：运行成功后 Host 只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内、≤512 KB、sha256 一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、上限 30）；`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
 
@@ -83,8 +83,7 @@
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量 / 失败重试 |
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`（是否抓 topics / README 增强） |
 | `summarize.readmeChars` | `800` | README 摘录长度 |
-| `releases.enabled` | `false` | 是否启用发版订阅阶段（`false` 旁路，榜单产物逐字节不变） |
-| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 含预发布 / 草稿 |
+| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 含预发布 / 草稿（发版阶段常开，无 `enabled` 开关） |
 | `releases.perRepoLimit` / `maxNotesChars` | `5` / `4000` | 每仓上限 / notes 截断 |
 | `releases.period` | `daily` | 发版摘要周期（独立，不与 `trending.since` 联动） |
 | `output.dir` | `trending` | 仓库内相对目录 |
@@ -92,7 +91,7 @@
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末 |
 
 > 订阅列表**不在 settings.json**：版本化在数据仓 `<output.dir>/subscriptions.yaml`，经核心 `subscribe` IPC 读改。
-> 已删除的配置项：`source.type`、`source.instanceUrl`（内容来源只剩本地二进制）、`core.path`（只保留 `TRENDING_DIGEST_CORE` 环境变量作为开发/排障逃逸口）。发版订阅与摘要相关字段以 `src/config.ts` 为准（核心没有的字段插件不造）。
+> 已删除的配置项：`source.type`、`source.instanceUrl`（内容来源只剩本地二进制）、`core.path`（只保留 `TRENDING_DIGEST_CORE` 环境变量作为开发/排障逃逸口）、`releases.enabled`（发版订阅常开，是否有产出由订阅列表决定）。发版订阅与摘要相关字段以 `src/config.ts` 为准（核心没有的字段插件不造）。
 
 ## 6. 与核心的交互
 

@@ -52,12 +52,12 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 ## 发版订阅
 
-- 订阅一组仓库，之后每次运行把每个仓库「**新增的 Release**（无 Release 时回退 Tag）」写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单**同分支、同 PR** 一起提交。默认 `releases.enabled=false` 旁路，不改变既有榜单产物（逐字节不变）。
+- 订阅一组仓库，之后每次运行把每个仓库「**新增的 Release**（无 Release 时回退 Tag）」写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
 - **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, configPath}`，`list` 的仓库由核心 stdout 逐行返回后插件解析。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件。
-- 界面：「订阅」页管理列表（增删 / 开关状态提示）；「设置 → 发版订阅」分区放行为开关（`enabled` / 含预发布 / 含草稿 / notes 截断），以及「管理订阅列表 →」入口。
+- 界面：「订阅」页管理列表（增删）；「设置 → 发版订阅」分区放行为参数（含预发布 / 含草稿 / notes 截断，字段旁 `?` 悬浮说明），以及「管理订阅列表 →」入口。
 - 周期独立：`releases.period` 默认 `daily`，不与 `trending.since` 联动。
-- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心或 `enabled=false` 时缺省。
+- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
 
 
 
@@ -115,8 +115,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量与失败重试（映射核心 `summarize.*`） |
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`：是否抓取 GitHub topics / README 作为增强上下文；`repo`/`readme` 建议配只读 `GITHUB_READ_TOKEN` |
 | `summarize.readmeChars` | `800` | README 摘录长度（enrich=readme 时） |
-| `releases.enabled` | `false` | 是否启用发版订阅阶段；`false` 时既有榜单产物逐字节不变 |
-| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿 |
+| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿（发版阶段常开，不提供 `enabled` 开关） |
 | `releases.fallbackToTags` / `baselineOnFirstRun` | `true` / `true` | 无 Release 时回退 Tag / 首次只记基线 |
 | `releases.perRepoLimit` / `maxNotesChars` | `5` / `4000` | 每仓单次上限（1–20）/ notes 截断（500–20000） |
 | `releases.period` | `daily` | 发版摘要周期（独立，不与 `trending.since` 联动） |

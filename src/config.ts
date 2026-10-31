@@ -97,12 +97,13 @@ export interface SummarizeSettings {
 }
 
 /**
- * 发版订阅阶段的行为开关（核心 `releases.*`）。
+ * 发版订阅阶段的行为参数（核心 `releases.*`）。
+ * 阶段**常开**（`releases.enabled` 恒为 true，不出现在设置里）：有没有产出只由订阅列表决定，
+ * 列表为空时核心不产出、不改动榜单产物。
  * **订阅列表本身不落 settings.json**：它版本化在数据仓 `<output.dir>/subscriptions.yaml`，
  * 经核心 `subscribe` IPC 读改。这里只放全局行为旋钮。
  */
 export interface ReleasesSettings {
-  enabled: boolean;
   includePrerelease: boolean;
   includeDrafts: boolean;
   fallbackToTags: boolean;
@@ -182,7 +183,6 @@ export const DEFAULT_SETTINGS: Settings = {
     enrichBudgetSeconds: 8,
   },
   releases: {
-    enabled: false,
     includePrerelease: false,
     includeDrafts: false,
     fallbackToTags: true,
@@ -355,7 +355,6 @@ export function normalizeSettings(input: unknown): Settings {
       enrichBudgetSeconds: Math.round(num(summarize.enrichBudgetSeconds, DEFAULT_SETTINGS.summarize.enrichBudgetSeconds)),
     },
     releases: {
-      enabled: bool(releases.enabled, DEFAULT_SETTINGS.releases.enabled),
       includePrerelease: bool(releases.includePrerelease, DEFAULT_SETTINGS.releases.includePrerelease),
       includeDrafts: bool(releases.includeDrafts, DEFAULT_SETTINGS.releases.includeDrafts),
       fallbackToTags: bool(releases.fallbackToTags, DEFAULT_SETTINGS.releases.fallbackToTags),
@@ -574,7 +573,8 @@ export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride
       enrichBudgetSeconds: settings.summarize.enrichBudgetSeconds,
     },
     releases: {
-      enabled: settings.releases.enabled,
+      // 发版订阅常开：插件侧不再提供开关，是否产出由订阅列表决定。
+      enabled: true,
       includePrerelease: settings.releases.includePrerelease,
       includeDrafts: settings.releases.includeDrafts,
       fallbackToTags: settings.releases.fallbackToTags,

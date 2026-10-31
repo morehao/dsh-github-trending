@@ -34,11 +34,36 @@ export function Card(props: ChildrenProps & { title: string; hint?: string; extr
   );
 }
 
-export function Row(props: ChildrenProps & { label?: string }): any {
+/**
+ * 字段说明：圆问号 + 悬浮气泡。纯 CSS（`::after` 取 `data-tip`），不占 React 状态；
+ * 键盘 Tab 可聚焦，`:focus-visible` 同样展开，避免只剩鼠标可达。
+ */
+export function Help(props: { text: string }): any {
+  return h(
+    'span',
+    {
+      className: 'dshgt-help',
+      tabIndex: 0,
+      role: 'note',
+      'aria-label': props.text,
+      'data-tip': props.text,
+    },
+    '?',
+  );
+}
+
+export function Row(props: ChildrenProps & { label?: string; help?: string }): any {
   return h(
     'div',
     { className: 'dshgt-row' },
-    props.label === undefined ? null : h('label', { className: 'dshgt-label' }, props.label),
+    props.label === undefined
+      ? null
+      : h(
+          'label',
+          { className: 'dshgt-label' },
+          h('span', { className: 'dshgt-label-text' }, props.label),
+          props.help === undefined ? null : h(Help, { text: props.help }),
+        ),
     props.children,
   );
 }

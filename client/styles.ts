@@ -31,7 +31,13 @@ export const CSS = `
 .dshgt-hint{color:var(--gt-muted);font-size:12px;}
 .dshgt-desc{margin:0;color:var(--gt-muted);font-size:12px;}
 .dshgt-row{display:flex;gap:10px;align-items:center;min-height:28px;flex-wrap:wrap;}
-.dshgt-row>label.dshgt-label{width:96px;color:var(--gt-muted);flex:none;font-size:12px;}
+.dshgt-row>label.dshgt-label{width:96px;color:var(--gt-muted);flex:none;font-size:12px;display:flex;align-items:flex-start;gap:5px;}
+.dshgt-label-text{flex:1;min-width:0;}
+/* 字段说明：圆问号 + 纯 CSS 悬浮气泡（::after 读 data-tip），键盘聚焦同样展开。 */
+.dshgt-help{position:relative;flex:none;margin-top:2px;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--gt-border);border-radius:50%;background:var(--gt-bg);color:var(--gt-muted);font-size:10px;line-height:1;font-weight:600;cursor:help;user-select:none;outline:none;}
+.dshgt-help:hover,.dshgt-help:focus-visible{color:var(--gt-fg);border-color:color-mix(in srgb,var(--gt-accent) 55%,var(--gt-border));}
+.dshgt-help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 7px);z-index:30;width:max-content;max-width:280px;padding:7px 9px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,var(--gt-card));color:var(--gt-fg);border:1px solid var(--gt-border);font-size:12px;font-weight:400;line-height:1.55;letter-spacing:0;text-align:left;white-space:normal;overflow-wrap:break-word;box-shadow:0 10px 26px rgba(0,0,0,.28);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease,visibility .12s;}
+.dshgt-help:hover::after,.dshgt-help:focus-visible::after{opacity:1;visibility:visible;}
 .dshgt-inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .dshgt-input,.dshgt-select,.dshgt-textarea{font:inherit;color:inherit;background:var(--gt-bg);border:1px solid var(--gt-border);border-radius:7px;padding:5px 8px;min-width:0;}
 .dshgt-input:focus,.dshgt-select:focus,.dshgt-textarea:focus{outline:2px solid color-mix(in srgb,var(--gt-accent) 35%,transparent);outline-offset:1px;}

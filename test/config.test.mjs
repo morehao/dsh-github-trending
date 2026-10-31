@@ -129,14 +129,15 @@ test('summarize / releases 归一化默认值与未知字段丢弃', () => {
   const settings = config.normalizeSettings({ summarize: { enrich: 'readme', bogus: 1 }, releases: { enabled: true, period: 'weekly', perRepoLimit: 8 } });
   assert.equal(settings.summarize.enrich, 'readme');
   assert.equal('bogus' in settings.summarize, false);
-  assert.equal(settings.releases.enabled, true);
+  // 发版订阅常开：旧的 enabled 字段在归一化时丢弃，不再进 settings.json。
+  assert.equal('enabled' in settings.releases, false);
   assert.equal(settings.releases.period, 'weekly');
   assert.equal(settings.releases.perRepoLimit, 8);
   // 默认值
   const defaults = config.normalizeSettings({});
   assert.equal(defaults.summarize.enrich, 'none');
   assert.equal(defaults.summarize.batchSize, 10);
-  assert.equal(defaults.releases.enabled, false);
+  assert.equal('enabled' in defaults.releases, false);
   assert.equal(defaults.releases.period, 'daily');
   assert.equal(defaults.releases.fallbackToTags, true);
   assert.equal(defaults.releases.baselineOnFirstRun, true);
@@ -164,12 +165,13 @@ test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
     model: { provider: 'deepseek', model: 'm' },
     repo: { path: '/tmp/x' },
     summarize: { batchSize: 7, enrich: 'repo', readmeChars: 500 },
-    releases: { enabled: true, includePrerelease: true, perRepoLimit: 3, maxNotesChars: 6000, period: 'monthly' },
+    releases: { includePrerelease: true, perRepoLimit: 3, maxNotesChars: 6000, period: 'monthly' },
   });
   const core = config.toCoreConfig(settings, 'k');
   assert.equal(core.summarize.batchSize, 7);
   assert.equal(core.summarize.enrich, 'repo');
   assert.equal(core.summarize.readmeChars, 500);
+  // 插件侧没有开关，核心配置里恒为 true。
   assert.equal(core.releases.enabled, true);
   assert.equal(core.releases.includePrerelease, true);
   assert.equal(core.releases.perRepoLimit, 3);
@@ -179,10 +181,11 @@ test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
 
 test('summarize / releases 分区归位与分段合并互不牵连', () => {
   assert.equal(config.sectionOfField('summarize.enrich'), 'summarize');
-  assert.equal(config.sectionOfField('releases.enabled'), 'releases');
-  const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 3 } });
-  const incoming = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 9 }, releases: { enabled: true } });
+  assert.equal(config.sectionOfField('releases.perRepoLimit'), 'releases');
+  const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 3 }, releases: { perRepoLimit: 4 } });
+  const incoming = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 9 }, releases: { perRepoLimit: 9, includePrerelease: true } });
   const merged = config.mergeSettingsSection(stored, incoming, 'summarize');
   assert.equal(merged.summarize.batchSize, 9);
-  assert.equal(merged.releases.enabled, false); // 其它分区保持已保存值
+  assert.equal(merged.releases.perRepoLimit, 4); // 其它分区保持已保存值
+  assert.equal(merged.releases.includePrerelease, false);
 });
