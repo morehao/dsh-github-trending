@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.4.1] - 2026-10-31
+
+### Features
+
+- **ui**: move navigation to top with identity bar (#25)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.4.0...v0.4.1
+
 ## 0.4.0 - 2026-10-31
 
 ### 变更
