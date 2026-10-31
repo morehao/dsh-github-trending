@@ -258,7 +258,7 @@ export const CSS = `
 
 /* ——— 周期标签 / 分段 ——— */
 .dshgt-pchip{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap;border:1px solid var(--gt-border);color:var(--gt-muted);background:var(--gt-bg);}
-.dshgt-pchip.daily{color:var(--gt-accent);border-color:color-mix(in srgb,var(--gt-accent) 35%,var(--gt-border));background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));}
+.dshgt-pchip.daily{color:#2563eb;border-color:#dbeafe;background:#eff6ff;}
 .dshgt-pchip.weekly{color:#7c3aed;border-color:#ddd6fe;background:#f5f3ff;}
 .dshgt-pchip.monthly{color:#0f766e;border-color:#99f6e4;background:#f0fdfa;}
 .dshgt-period-seg{display:inline-flex;border:1px solid var(--gt-border);border-radius:9px;padding:3px;background:var(--gt-card);gap:3px;}
