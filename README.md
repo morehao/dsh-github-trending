@@ -114,11 +114,13 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `IPC_INVALID` | 核心 stdout 不是约定的结果信封 | 升级插件与核心 |
 | `MODEL_KEY_MISSING` / `MODEL_UNAUTHORIZED` / `MODEL_NOT_FOUND` / `MODEL_RATE_LIMITED` | 模型侧 | 设置页「模型」区红字 + 重新选择 |
 | `GIT_NOT_INSTALLED` / `REPO_NOT_GIT` / `REPO_DIRTY` | 本机 git / 仓库状态 | 装 git ≥ 2.30、换仓库、先提交改动 |
-| `GIT_OPERATION_FAILED` | 核心执行 git 失败（含 push 被拒） | 核心对 `trending/` 自有分支用 `--force-with-lease`；若仍报 `non-fast-forward`，多半是他人抢先推送，先 fetch/rebase 或合并该分支再重试 |
+| `GIT_OPERATION_FAILED` | 核心执行 git 失败（含 push 被拒） | 核心对 `trending/` 日期分支只追加提交、普通 fast-forward 推送；被拒时自动 fetch + rebase 重试一次。若报 `stale info`：在仓库执行 `git fetch --prune origin` 后重试（升级核心后不再出现） |
 | `GITHUB_AUTH` / `PUSH_FAILED` / `PR_FAILED` / `NOT_MERGEABLE` | 推送与 PR | 本地 commit 已保留，修好后重试即可复用 |
 | `FETCH_FAILED` / `FETCH_RATE_LIMITED` | 抓取 | 检查网络/代理或稍后重试 |
 
 核心只在 stderr 给出 `error: <CODE>: ...` 文本；插件优先取核心自己的码，取不到时按稳定文本特征归类，并在结果里标 `inferred: true`（界面会注明「错误码由插件推断」）。
+
+运行结果还会带 `skipReason`（`merged` / `pr-closed` / `unchanged`）与 push 失败的 `reason`（`stale-lease` / `non-fast-forward` / `auth` / `protected` / `hook` / `pathspec`）。定时运行（`TRENDRADAR_TRIGGER=schedule`）尊重人工关闭的 PR，不重建分支；手动运行才会重开。
 
 ## 与本地 CLI 共存
 

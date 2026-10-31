@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import type { Settings } from '../config.js';
 import { validateSettings } from '../config.js';
-import { areaOf, hintOf, redact } from '../errors.js';
+import { areaOf, hintOf, reasonOf, redact } from '../errors.js';
 import { IpcError, type RunOutcome } from '../ipc.js';
 import { handshake, type HandshakeResult } from '../core/handshake.js';
 import { locateCore } from '../core/locate.js';
@@ -43,7 +43,18 @@ export interface RunSummary {
   commit?: string;
   prUrl?: string;
   preview?: PreviewMeta;
-  error?: { code: string; message: string; hint: string; area: string; retriable: boolean; inferred?: boolean };
+  /** 核心给出的跳过原因（merged / pr-closed / unchanged）。 */
+  skipReason?: string;
+  error?: {
+    code: string;
+    message: string;
+    hint: string;
+    area: string;
+    retriable: boolean;
+    inferred?: boolean;
+    /** 机器可判定的细分原因（push 失败时由核心给出）。 */
+    reason?: string;
+  };
   warnings: string[];
   logFile?: string;
   channel?: 'fifo' | 'tmpfile';
@@ -218,6 +229,7 @@ export class Runner {
         ...(github.token === undefined ? {} : { token: github.token }),
         date,
         dryRun,
+        trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
         ...(baseURLOverride === undefined ? {} : { baseURLOverride }),
         signal: controller.signal,
         secrets: [apiKey, github.token],
@@ -286,10 +298,12 @@ export class Runner {
         ? undefined
         : (() => {
             const message = redact(outcome.error.message);
+            const reason = reasonOf(outcome.error.code, message, outcome.error.details);
             return {
               code: outcome.error.code,
               message,
-              hint: hintOf(outcome.error.code, message),
+              ...(reason === undefined ? {} : { reason }),
+              hint: hintOf(outcome.error.code, message, reason),
               area: areaOf(outcome.error.code),
               retriable: outcome.error.retriable,
               inferred: outcome.error.details?.inferred === true,
@@ -308,6 +322,7 @@ export class Runner {
       ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
       ...(outcome.commit === undefined ? {} : { commit: outcome.commit }),
       ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
+      ...(outcome.skipReason === undefined ? {} : { skipReason: outcome.skipReason }),
       ...(error === undefined ? {} : { error }),
       warnings: outcome.warnings,
       logFile: input.logFile,
@@ -422,7 +437,14 @@ export class Runner {
       kind: summary.dryRun ? 'dry-run' : 'run',
       ok: summary.ok,
       skipped: summary.skipped,
-      ...(summary.error === undefined ? {} : { errorCode: summary.error.code, errorMessage: summary.error.message }),
+      ...(summary.error === undefined
+        ? {}
+        : {
+            errorCode: summary.error.code,
+            errorMessage: summary.error.message,
+            ...(summary.error.reason === undefined ? {} : { errorReason: summary.error.reason }),
+          }),
+      ...(summary.skipReason === undefined ? {} : { skipReason: summary.skipReason }),
       durationMs: summary.durationMs,
       files: summary.files,
       ...(summary.date === undefined ? {} : { date: summary.date }),
@@ -440,6 +462,7 @@ export class Runner {
     const state = store.readState();
     const next: Parameters<Store['recordRun']>[1] = {
       lastRunAt: record.at,
+      ...(summary.ok ? { lastSuccessAt: record.at } : {}),
       ...(summary.ok && summary.prUrl !== undefined
         ? { pendingPr: { url: summary.prUrl, createdAt: record.at, ...(summary.date === undefined ? {} : { date: summary.date }) } }
         : {}),

@@ -124,7 +124,7 @@
 - 插件是唯一状态写者：`~/.dsh/...` 下保存 `{ lastRunAt, lastDigest{date,contentHash,coreVersion}, lastResult, pendingPr }` 与最近 30 条记录。
 - 幂等以核心返回的 `contentHash` 为准：同日同内容 → `skipped=true`，零新增 commit、不重复开 PR。核心 `v0.2.0` 起幂等键还包含 `output.dir`（只改目录会重渲染，而不是被误判为“同内容”）。
 - **运行日期按 `schedule.timezone` 计算**并显式以 `--date` 传给核心，避免宿主机时区与调度时区不一致时跑错日期/分支。
-- **同日重跑由核心处理**：`trending/` 自有分支用 `--force-with-lease` 推送，open PR 会被更新、closed PR 会重建分支并新开 PR、merged 直接 skip。插件不再拦截同日重跑。
+- **同日重跑由核心处理**：`trending/` 日期分支只追加提交、普通 fast-forward 推送；open PR 会被更新，closed PR 在手动运行下重建并新开、定时运行则跳过，merged 直接 skip。插件不再拦截同日重跑。
 - **pendingPr 对账**：`/state` 只读核对 `pendingPr`（`open/merged/closed`），已合并/已关闭的陈旧记录自动清理，避免界面/工具长期显示已关闭的 PR。
 - **推送失败信息保真**：核心多行 stderr（含 `! [rejected] ... (non-fast-forward)`）会完整带回，不再只截首行；对应错误码给可执行提示（如被他人抢先推送时先 fetch/rebase）。
 - 核心自身无状态：上次状态随请求传入，新状态随结果返回。

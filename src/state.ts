@@ -56,6 +56,10 @@ export interface RunRecord {
   /** `null` 表示没有错误。 */
   errorCode?: string;
   errorMessage?: string;
+  /** push 等失败的机器可判定原因（stale-lease / non-fast-forward / auth ...）。 */
+  errorReason?: string;
+  /** 跳过原因：merged / pr-closed / unchanged。 */
+  skipReason?: string;
   durationMs: number;
   files: number;
   /** 运行所属的调度时区日期（YYYY-MM-DD）；旧记录可能没有。 */
@@ -83,6 +87,8 @@ export interface PendingPr {
 
 export interface PluginState {
   lastRunAt?: string;
+  /** 最近一次成功（ok=true，含 skipped）的运行时间；调度用它锁当天。 */
+  lastSuccessAt?: string;
   lastDigest?: DigestIdentity;
   lastResult?: RunRecord;
   pendingPr?: PendingPr;

@@ -61,3 +61,15 @@ test('错误码到界面落点的映射稳定', () => {
   assert.equal(errors.isRetriable('FETCH_RATE_LIMITED'), true);
   assert.equal(errors.isRetriable('MODEL_UNAUTHORIZED'), false);
 });
+
+test('stale info 与 non-fast-forward 是两种原因，提示不再串台', () => {
+  const stale = ' ! [rejected] trending/x -> trending/x (stale info)';
+  const diverged = ' ! [rejected] trending/x -> trending/x (non-fast-forward)';
+  assert.equal(errors.reasonOf('GIT_OPERATION_FAILED', stale), 'stale-lease');
+  assert.equal(errors.reasonOf('GIT_OPERATION_FAILED', diverged), 'non-fast-forward');
+  assert.match(errors.hintOf('GIT_OPERATION_FAILED', stale), /fetch --prune/);
+  assert.doesNotMatch(errors.hintOf('GIT_OPERATION_FAILED', stale), /non-fast-forward/);
+  // 核心给的结构化 reason 优先于文本推断
+  assert.equal(errors.reasonOf('GIT_OPERATION_FAILED', stale, { reason: 'auth' }), 'auth');
+  assert.equal(errors.reasonOf('MODEL_TIMEOUT', stale), undefined);
+});

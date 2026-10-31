@@ -59,7 +59,16 @@ export interface RunSummary {
   commit?: string;
   prUrl?: string;
   preview?: PreviewMeta;
-  error?: { code: string; message: string; hint: string; area: string; retriable: boolean; inferred?: boolean };
+  skipReason?: string;
+  error?: {
+    code: string;
+    message: string;
+    hint: string;
+    area: string;
+    retriable: boolean;
+    inferred?: boolean;
+    reason?: string;
+  };
   warnings: string[];
   channel?: 'fifo' | 'tmpfile';
   proxy?: boolean;
@@ -74,6 +83,8 @@ export interface RunRecord {
   skipped: boolean;
   errorCode?: string;
   errorMessage?: string;
+  errorReason?: string;
+  skipReason?: string;
   durationMs: number;
   files: number;
   date?: string;

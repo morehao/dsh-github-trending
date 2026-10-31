@@ -36,6 +36,8 @@ export interface RunCoreOptions {
   token?: string;
   date?: string;
   dryRun: boolean;
+  /** 谁触发的运行：核心用它在定时运行时尊重「人工关闭的 PR」。 */
+  trigger?: 'manual' | 'schedule';
   /** 回环代理地址：覆盖配置里的 model.baseURL（代理模式专用）。 */
   baseURLOverride?: string;
   signal?: AbortSignal;
@@ -83,7 +85,12 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
   const secrets = [options.apiKey, options.token, ...(options.secrets ?? [])];
 
   const child = spawn(options.core.path, buildCoreArgs(channel.path, { dryRun: options.dryRun, date: options.date }), {
-    env: sanitizedEnv(process.env, { GITHUB_TOKEN: options.token, GH_TOKEN: options.token }),
+    env: sanitizedEnv(process.env, {
+      GITHUB_TOKEN: options.token,
+      GH_TOKEN: options.token,
+      // 环境变量通道：旧核心会忽略它，不会因为多一个未知参数而失败。
+      TRENDRADAR_TRIGGER: options.trigger ?? 'manual',
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });

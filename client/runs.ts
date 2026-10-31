@@ -10,6 +10,7 @@ import { getLog, type RunRecord, type StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
+import { reasonHint, skipHint } from './error-copy.js';
 
 type Filter = 'all' | 'failed' | 'dry';
 const FILTERS: Array<{ id: Filter; key: string }> = [
@@ -29,7 +30,7 @@ function recordSummary(t: Translate, record: RunRecord): string {
   if (!record.ok) {
     return [record.errorCode, record.errorMessage].filter((item) => item !== undefined && item !== '').join(' · ') || t('state.failed');
   }
-  if (record.skipped) return t('runs.noChange');
+  if (record.skipped) return skipHint(t, record.skipReason, t('runs.noChange'));
   if (record.kind === 'dry-run') return t('runs.dryHint');
   if (record.branch !== undefined) return record.branch;
   if (record.commit !== undefined) return record.commit;
@@ -206,6 +207,9 @@ export function RunsView(props: RunsProps): any {
                           Alert,
                           { kind: 'err', title: `${t('error.prefix')} ${record.errorCode ?? 'INTERNAL'}` },
                           h('div', null, record.errorMessage ?? t('state.failed')),
+                          record.errorReason === undefined
+                            ? null
+                            : h('div', { className: 'dshgt-hint' }, reasonHint(t, record.errorReason) ?? ''),
                         )
                       : null,
                     h(

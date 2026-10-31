@@ -8,6 +8,7 @@ import { Btn, Pill, duration, h, localTime, shortHash } from './ui.js';
 import type { Translate } from './i18n.js';
 import type { RunRecord, StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
+import { reasonHint } from './error-copy.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
 import { credentialView } from './credential.js';
@@ -174,6 +175,9 @@ export function OverviewView(props: OverviewProps): any {
                 { className: 'dshgt-alert err dshgt-delivery-error' },
                 h('b', null, `${t('error.prefix')} ${last.errorCode ?? 'INTERNAL'}`),
                 h('div', null, last.errorMessage ?? t('state.failed')),
+                last.errorReason === undefined
+                  ? null
+                  : h('div', { className: 'dshgt-hint' }, reasonHint(t, last.errorReason) ?? ''),
               ),
           h(
             'div',
