@@ -37,7 +37,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 - 运行成功后，Host 从核心本次返回的 `outcome.files` 里挑当天的 `.md`（优先 `YYYY-MM-DD.md`，否则只有一个 `.md` 时用它），**只读**复制到 `$DSH_HOME/github-trending/previews/<runId>.md`：路径必须在 `repo.path` 内（词法 + realpath 各判一次）、不超过 512 KB、sha256 与契约声明一致；失败不阻断运行，只是这次没有预览。
 - 预览副本 0600、临时文件 + rename、最多保留 30 份；`state.json` / `history.json` 只存 `file` / `bytes` / `sha256` 元数据，不存正文。
-- `GET /preview?id=<runId>` 只接受历史里出现过的 id、不接路径参数；返回 `{ text, truncated }`。客户端渲染 Markdown 子集（标题 / 段落 / 列表 / 引用 / 粗体 / 行内代码 / 链接 / 分隔线），**只生成 React 文本节点**，链接仅放行 http(s)，不渲染图片或原始 HTML；也可以切「原文」。
+- `GET /preview?id=<runId>` 只接受历史里出现过的 id、不接路径参数；返回 `{ text, truncated }`。客户端渲染 Markdown 子集（标题 / 段落 / 列表 / 引用 / 代码块 / 表格（GFM 管道表，含列对齐）/ 粗体 / 行内代码 / 链接 / 分隔线），**只生成 React 文本节点**，链接仅放行 http(s)，不渲染图片或原始 HTML；也可以切「原文」。
 - 日报只列最近 30 天**有记录**的日期，每天一条；默认打开最近一期有预览的日报。失败 / 无变更 / 试跑 / 旧记录 / 副本被清理都有各自的空状态，不用示例内容兜底。
 - 预览是运行结束时的派生副本：你在仓库里事后编辑 canonical 文件，不会改变这次记录。
 - 关于入口在左轨底部：包名 / 版本 / GitHub 来自 `/state.plugin`（`repository` 由 `package.json` 规范化），仓库缺失时隐藏外链。

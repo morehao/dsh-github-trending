@@ -57,6 +57,57 @@ test('块解析：段落 / 无序列表 / 有序列表 / 引用 / 代码块 / �
   assert.equal(parsed.blocks[4].value, 'const a = 1;');
 });
 
+test('GFM 表格：表头 / 对齐 / 数据行 / 单元格内的链接', () => {
+  const parsed = md.parseMarkdown(
+    [
+      '## python',
+      '',
+      '| 仓库 | Stars | 今日新增 | 摘要 |',
+      '| --- | ---: | :---: | :--- |',
+      '| [HKUDS/DeepTutor](https://github.com/HKUDS/DeepTutor) | 51,897 | +2,282 | 面向**终身学习**的辅导系统 |',
+      '| [anthropics/skills](https://github.com/anthropics/skills) | 185,423 | +295 | 技能仓库 |',
+      '',
+      '后记',
+    ].join('\n'),
+  );
+  assert.deepEqual(parsed.blocks.map((block) => block.type), ['heading', 'table', 'paragraph']);
+  const table = parsed.blocks[1];
+  assert.deepEqual(table.align, [undefined, 'right', 'center', 'left']);
+  assert.deepEqual(table.header.map(textOf), ['仓库', 'Stars', '今日新增', '摘要']);
+  assert.equal(table.rows.length, 2);
+  assert.deepEqual(table.rows[1].map(textOf), ['anthropics/skills', '185,423', '+295', '技能仓库']);
+  const firstCell = table.rows[0][0];
+  assert.equal(firstCell[0].type, 'link');
+  assert.equal(firstCell[0].href, 'https://github.com/HKUDS/DeepTutor');
+  const summary = table.rows[0][3];
+  assert.equal(summary.some((node) => node.type === 'strong'), true);
+  assert.equal(textOf(parsed.blocks[2].children), '后记');
+});
+
+test('表格边界：列数不一致 / 缺少分隔行 / 行内代码与转义管道', () => {
+  // 分隔行列数与表头不一致：不是表格，退回段落（不丢内容）。
+  const mismatch = md.parseMarkdown('| a | b |\n| --- |\n| 1 | 2 |');
+  assert.deepEqual(mismatch.blocks.map((block) => block.type), ['paragraph']);
+  assert.equal(textOf(mismatch.blocks[0].children).includes('| a | b |'), true);
+  // 没有分隔行：仍然是段落。
+  const noDelim = md.parseMarkdown('| a | b |\n| 1 | 2 |');
+  assert.deepEqual(noDelim.blocks.map((block) => block.type), ['paragraph']);
+  // 单元格里的 `|`：反引号内保留，`\|` 还原成字面管道。
+  const escaped = md.parseMarkdown(['| cmd | note |', '| --- | --- |', '| `a | b` | x \\| y |'].join('\n'));
+  assert.equal(escaped.blocks[0].type, 'table');
+  assert.equal(escaped.blocks[0].rows[0][0][0].value, 'a | b');
+  assert.equal(textOf(escaped.blocks[0].rows[0][1]), 'x | y');
+  // 表体行数不足时补空单元格，多余单元格截断。
+  const ragged = md.parseMarkdown(['| a | b | c |', '| --- | --- | --- |', '| 1 |'].join('\n'));
+  assert.deepEqual(ragged.blocks[0].rows[0].map(textOf), ['1', '', '']);
+});
+
+test('表格可以打断段落，紧跟的下一个块不会被吞进表格', () => {
+  const parsed = md.parseMarkdown(['说明文字', '| a | b |', '| --- | --- |', '| 1 | 2 |', '- 列表项'].join('\n'));
+  assert.deepEqual(parsed.blocks.map((block) => block.type), ['paragraph', 'table', 'list']);
+  assert.equal(parsed.blocks[0].children.map((node) => node.value).join(''), '说明文字');
+});
+
 test('行内解析：粗体 / 行内代码 / 安全链接 / 图片只保留 alt', () => {
   const nodes = md.parseInline(
     '**粗** `code` [safe](https://example.com/x) ![alt](https://example.com/a.png) <b>raw</b>',
