@@ -2,7 +2,7 @@
  * 状态与运行记录：插件是这两份数据**唯一的写者**（ADR D-12）。
  *
  * - `state.json`：`{ lastRunAt, lastDigest, lastResult, pendingPr }`，界面与工具读它；
- * - `history.json`：最近 30 条记录，超出即裁掉最旧的；
+ * - `history.json`：最近 90 条记录（三周期共用），超出即裁掉最旧的；
  * - `runs/<id>.log`：单次核心 stderr（已脱敏），排障用。
  *
  * 写入一律「临时文件 + rename」，权限 0600：宿主崩溃时宁可丢最后一条，也不留半个 JSON。
@@ -13,10 +13,10 @@ import path from 'node:path';
 import { normalizeSettings, type Period, type Settings } from './config.js';
 import { HISTORY_FILE, SETTINGS_FILE, STATE_FILE, dataDir } from './paths.js';
 
-export const HISTORY_LIMIT = 30;
+export const HISTORY_LIMIT = 90;
 
-/** 预览副本上限：最多保留 30 份，和 history 的 30 天窗口对齐。 */
-export const PREVIEW_LIMIT = 30;
+/** 预览副本上限：与 history 对齐，三周期混跑时也要留够 90 期。 */
+export const PREVIEW_LIMIT = 90;
 
 /** 一次预览只读这么多字节；超过的不复制，避免把大文件塞进状态目录。 */
 export const PREVIEW_MAX_BYTES = 512 * 1024;
@@ -255,7 +255,7 @@ export class Store {
     return Array.isArray(file.records) ? file.records : [];
   }
 
-  /** 记录一次运行：历史裁剪到 30 条，state 同步更新。 */
+  /** 记录一次运行：历史裁剪到 HISTORY_LIMIT 条，state 同步更新。 */
   recordRun(record: RunRecord, next: Partial<PluginState> = {}): void {
     const records = [record, ...this.readHistoryRaw()].slice(0, HISTORY_LIMIT);
     writeJsonAtomic(this.historyPath, { records });

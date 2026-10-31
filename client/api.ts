@@ -10,6 +10,12 @@ export const HEADER = 'x-dsh-github-trending';
 /** 榜单周期（与 core 0.4.0 的 `--period` 一致）。 */
 export type Period = 'daily' | 'weekly' | 'monthly';
 
+/** 日报视图的定位：某个周期的某一期（期数桶由 `digest-core.periodBucket` 计算）。 */
+export interface DigestTarget {
+  period: Period;
+  bucket: string;
+}
+
 export interface ApiFailure extends Error {
   code?: string;
 }

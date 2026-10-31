@@ -22,6 +22,7 @@ import { IdentityBar } from './identity-bar.js';
 import { SidebarPanelIcon } from './panel-icon.js';
 import { useRunController } from './run-controller.js';
 import { credentialView } from './credential.js';
+import type { DigestTarget } from './api.js';
 import { Btn, h, React } from './ui.js';
 
 export const PANEL_ID = 'dsh-github-trending';
@@ -133,11 +134,11 @@ export function apply(ctx: any): void {
     const value = store();
     const controller = useRunController(value);
     const [view, setView] = React.useState<ViewId>('overview');
-    const [digestDate, setDigestDate] = React.useState<string | undefined>(undefined);
+    const [digestTarget, setDigestTarget] = React.useState<DigestTarget | undefined>(undefined);
     const [aboutOpen, setAboutOpen] = React.useState(false);
 
-    const openDigest = React.useCallback((date?: string): void => {
-      if (date !== undefined) setDigestDate(date);
+    const openDigest = React.useCallback((target?: DigestTarget): void => {
+      if (target !== undefined) setDigestTarget(target);
       setView('digest');
     }, []);
     const openRuns = React.useCallback((): void => setView('runs'), []);
@@ -155,7 +156,7 @@ export function apply(ctx: any): void {
           state.settings.repo.path.trim() !== '',
           state.github.configured,
         ].filter(Boolean).length;
-    const digestTail = digestDate ?? state?.status.lastResult?.date ?? state?.status.history[0]?.date;
+    const digestTail = state?.status.lastResult?.date ?? state?.status.history[0]?.date;
     const showActions = view === 'overview' || view === 'runs';
     const nextRun = schedule === undefined || !schedule.enabled
       ? t('shell.scheduleOff')
@@ -180,8 +181,8 @@ export function apply(ctx: any): void {
               t,
               lang,
               store: value,
-              ...(digestDate === undefined ? {} : { selectedDate: digestDate }),
-              onSelectDate: setDigestDate,
+              ...(digestTarget === undefined ? {} : { selected: digestTarget }),
+              onSelect: setDigestTarget,
               onOpenRuns: openRuns,
             })
           : view === 'runs'

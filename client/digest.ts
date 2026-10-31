@@ -1,20 +1,21 @@
 /**
- * 日报预览：最近 30 天日期切换 + 渲染/原文。
+ * 日报预览：按「日榜 / 周榜 / 月榜」三个周期分别回看。
  *
- * 日期列表只来自 `/state` 的 30 条 history；正文只在记录带 `preview` 元数据时
- * 按需请求 `GET /preview?id=`。快速切换用 AbortController 取消上一个请求，避免
- * 旧响应覆盖新选择。没有预览时显示诚实空状态，不用示例内容兜底。
+ * 三个周期各有自己的时间线（日按天、周按 ISO 周、月按月），互不吞并。期数列表
+ * 只来自 `/state` 的 history；正文只在记录带 `preview` 元数据时按需请求
+ * `GET /preview?id=`。快速切换用 AbortController 取消上一个请求，避免旧响应覆盖
+ * 新选择。没有预览时显示诚实空状态，不用示例内容兜底。
  */
 import { Btn, copyText, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
-import { getPreview, type PreviewPayload } from './api.js';
+import { getPreview, type DigestTarget, type Period, type PreviewPayload } from './api.js';
 import type { StoreValue } from './store.js';
 import {
-  buildDigestDates,
+  buildPeriodGroups,
+  formatBucketLabel,
   formatBytes,
-  formatDayLabel,
-  type DigestDay,
   type DigestStatus,
+  type PeriodDay,
 } from './digest-core.js';
 import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
 
@@ -22,8 +23,8 @@ export interface DigestProps {
   t: Translate;
   lang: 'zh' | 'en';
   store: StoreValue;
-  selectedDate?: string;
-  onSelectDate: (date: string) => void;
+  selected?: DigestTarget;
+  onSelect: (target: DigestTarget) => void;
   onOpenRuns: () => void;
 }
 
@@ -59,15 +60,14 @@ const META_KEYS = ['date', 'period', 'languages', 'count', 'degraded', 'coreVers
 function EmptyDigest(props: {
   t: Translate;
   lang: 'zh' | 'en';
-  day: DigestDay;
-  nearest?: DigestDay;
+  day: PeriodDay;
+  nearest?: PeriodDay;
   error?: string;
   onOpenRuns: () => void;
-  onSelectDate: (date: string) => void;
+  onSelect: (target: DigestTarget) => void;
 }): any {
-  const { t, day, nearest } = props;
+  const { t, lang, day, nearest } = props;
   const status: DigestStatus = props.error === undefined ? day.status : 'missing';
-  const key = status === 'legacy' ? 'legacy' : status === 'missing' ? 'missing' : status;
   return h(
     'div',
     { className: 'dshgt-digest-empty' },
@@ -76,10 +76,10 @@ function EmptyDigest(props: {
       { className: 'dshgt-status-line' },
       h('span', { className: `dshgt-lamp ${STATUS_LAMP[status]}` }),
       h('b', null, t(STATUS_LABEL[status])),
-      h('span', { className: 'dshgt-dim' }, formatDayLabel(day.date, props.lang)),
+      h('span', { className: 'dshgt-dim' }, formatBucketLabel(day.period, day.bucket, lang)),
     ),
-    h('h2', null, t(`digest.empty.${key}.title`)),
-    h('p', null, t(`digest.empty.${key}.reason`)),
+    h('h2', null, t(`digest.empty.${status}.title`)),
+    h('p', null, t(`digest.empty.${status}.reason`)),
     day.record.errorCode === undefined && props.error === undefined
       ? null
       : h(
@@ -93,13 +93,17 @@ function EmptyDigest(props: {
       h(Btn, { small: true, onClick: props.onOpenRuns }, t('digest.empty.viewRuns')),
       nearest === undefined
         ? null
-        : h(Btn, { small: true, onClick: () => props.onSelectDate(nearest.date) }, t('digest.empty.latest', { date: formatDayLabel(nearest.date, props.lang) })),
+        : h(
+            Btn,
+            { small: true, onClick: () => props.onSelect({ period: nearest.period, bucket: nearest.bucket }) },
+            t('digest.empty.latest', { date: formatBucketLabel(nearest.period, nearest.bucket, lang) }),
+          ),
     ),
   );
 }
 
 export function DigestView(props: DigestProps): any {
-  const { t, lang, store, selectedDate } = props;
+  const { t, lang, store, selected } = props;
   const [mode, setMode] = React.useState<'render' | 'raw'>('render');
   const [payload, setPayload] = React.useState<PreviewPayload | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -108,24 +112,31 @@ export function DigestView(props: DigestProps): any {
   const state = store.state;
   const history = state?.status.history ?? [];
   const timeZone = state?.schedule.timezone ?? 'UTC';
-  const days = buildDigestDates(history, { timeZone });
-  // 打开时默认最近一期「有预览」的日期；没有预览才回落到最近一条记录。
-  const defaultDate = days.find((item) => item.status === 'preview')?.date ?? days[0]?.date;
-  const effectiveDate =
-    selectedDate !== undefined && days.some((day) => day.date === selectedDate) ? selectedDate : defaultDate;
-  const day = days.find((item) => item.date === effectiveDate);
+  const groups = buildPeriodGroups(history, { timeZone });
+  const groupMap = new Map(groups.map((group) => [group.period, group] as const));
+  const activePeriod: Period = selected?.period ?? 'daily';
+  const activeGroup = groupMap.get(activePeriod) ?? { period: activePeriod, days: [], previewCount: 0 };
+  const days = activeGroup.days;
+  // 打开时默认该周期最近一期「有预览」的期数；没有预览才回落到最近一条记录。
+  const fallbackBucket = days.find((item) => item.status === 'preview')?.bucket ?? days[0]?.bucket;
+  const requestedBucket = selected?.period === activePeriod ? selected.bucket : undefined;
+  const effectiveBucket =
+    requestedBucket !== undefined && days.some((day) => day.bucket === requestedBucket) ? requestedBucket : fallbackBucket;
+  const day = days.find((item) => item.bucket === effectiveBucket);
   const index = day === undefined ? -1 : days.indexOf(day);
-  const previewCount = days.filter((item) => item.status === 'preview').length;
   const previewRunId =
     day !== undefined && day.status === 'preview' && day.record.preview !== undefined ? day.record.id : undefined;
 
   React.useEffect(() => {
-    if (effectiveDate !== undefined && effectiveDate !== selectedDate) props.onSelectDate(effectiveDate);
-  }, [effectiveDate, selectedDate, props.onSelectDate]);
+    if (effectiveBucket === undefined) return;
+    if (selected?.period !== activePeriod || selected?.bucket !== effectiveBucket) {
+      props.onSelect({ period: activePeriod, bucket: effectiveBucket });
+    }
+  }, [activePeriod, effectiveBucket, selected?.period, selected?.bucket, props.onSelect]);
 
   React.useEffect(() => {
     setMode('render');
-  }, [effectiveDate]);
+  }, [activePeriod, effectiveBucket]);
 
   React.useEffect(() => {
     if (previewRunId === undefined) {
@@ -156,7 +167,7 @@ export function DigestView(props: DigestProps): any {
     return h('div', { className: 'dshgt-empty' }, store.error ?? t('quickfill.loading'));
   }
 
-  const nearest = day === undefined ? undefined : days.find((item) => item.status === 'preview' && item.date !== day.date);
+  const nearest = day === undefined ? undefined : days.find((item) => item.status === 'preview' && item.bucket !== day.bucket);
 
   let rendered: RenderedMarkdown | null = null;
   let parseFailed = false;
@@ -168,7 +179,44 @@ export function DigestView(props: DigestProps): any {
     }
   }
 
-  const subbar = h(
+  const periodSeg = h(
+    'div',
+    { className: 'dshgt-period-seg', role: 'tablist', 'aria-label': t('digest.selectPeriod') },
+    groups.map((group) => {
+      const on = group.period === activePeriod;
+      const firstBucket = group.days.find((item) => item.status === 'preview')?.bucket ?? group.days[0]?.bucket;
+      return h(
+        'button',
+        {
+          key: group.period,
+          type: 'button',
+          role: 'tab',
+          'aria-selected': on ? 'true' : 'false',
+          className: on ? 'on' : '',
+          onClick: () => props.onSelect({ period: group.period, bucket: firstBucket ?? '' }),
+        },
+        h('span', null, t(`period.${group.period}`)),
+        h('span', { className: 'dshgt-period-count' }, String(group.days.length)),
+      );
+    }),
+  );
+
+  const periodBar = h(
+    'div',
+    { className: 'dshgt-digest-subbar' },
+    periodSeg,
+    h(
+      'span',
+      { className: 'dshgt-dim' },
+      days.length === 0
+        ? t('digest.window.empty')
+        : t('digest.window.period', { count: days.length, previews: activeGroup.previewCount }),
+    ),
+    h('span', { className: 'dshgt-grow' }),
+    h(Btn, { small: true, onClick: props.onOpenRuns }, t('digest.allRuns')),
+  );
+
+  const bucketBar = h(
     'div',
     { className: 'dshgt-digest-subbar' },
     h(
@@ -184,7 +232,7 @@ export function DigestView(props: DigestProps): any {
           disabled: index < 0 || index >= days.length - 1,
           onClick: () => {
             const target = days[index + 1];
-            if (target !== undefined) props.onSelectDate(target.date);
+            if (target !== undefined) props.onSelect({ period: activePeriod, bucket: target.bucket });
           },
         },
         '‹',
@@ -193,12 +241,20 @@ export function DigestView(props: DigestProps): any {
         'select',
         {
           className: 'dshgt-dateselect',
-          'aria-label': t('digest.select'),
-          value: effectiveDate ?? '',
-          onChange: (event: any) => props.onSelectDate(event.target.value),
+          'aria-label': t('digest.selectBucket'),
+          value: effectiveBucket ?? '',
+          onChange: (event: any) => props.onSelect({ period: activePeriod, bucket: event.target.value }),
           disabled: days.length === 0,
         },
-        days.map((item) => h('option', { key: item.date, value: item.date }, `${formatDayLabel(item.date, lang)} · ${t(STATUS_TAG[item.status])}`)),
+        days.length === 0
+          ? h('option', { value: '' }, t('digest.window.empty'))
+          : days.map((item) =>
+              h(
+                'option',
+                { key: item.bucket, value: item.bucket },
+                `${formatBucketLabel(activePeriod, item.bucket, lang)} · ${t(STATUS_TAG[item.status])}`,
+              ),
+            ),
       ),
       h(
         'button',
@@ -210,26 +266,21 @@ export function DigestView(props: DigestProps): any {
           disabled: index <= 0,
           onClick: () => {
             const target = days[index - 1];
-            if (target !== undefined) props.onSelectDate(target.date);
+            if (target !== undefined) props.onSelect({ period: activePeriod, bucket: target.bucket });
           },
         },
         '›',
       ),
     ),
-    h(
-      'span',
-      { className: 'dshgt-dim' },
-      days.length === 0 ? t('digest.window.empty') : t('digest.window', { days: days.length, previews: previewCount }),
-    ),
-    h('span', { className: 'dshgt-grow' }),
-    h(Btn, { small: true, onClick: props.onOpenRuns }, t('digest.allRuns')),
+    h('span', { className: 'dshgt-dim' }, t('digest.bucketNavHint')),
   );
 
   if (day === undefined) {
     return h(
       'div',
       { className: 'dshgt-view dshgt-digest' },
-      subbar,
+      periodBar,
+      bucketBar,
       h(
         'div',
         { className: 'dshgt-digest-empty' },
@@ -246,7 +297,8 @@ export function DigestView(props: DigestProps): any {
   return h(
     'div',
     { className: 'dshgt-view dshgt-digest' },
-    subbar,
+    periodBar,
+    bucketBar,
     h(
       'div',
       { className: 'dshgt-digest-sheet' },
@@ -258,7 +310,7 @@ export function DigestView(props: DigestProps): any {
             ...(nearest === undefined ? {} : { nearest }),
             ...(error === null ? {} : { error }),
             onOpenRuns: props.onOpenRuns,
-            onSelectDate: props.onSelectDate,
+            onSelect: props.onSelect,
           })
         : h(
             'div',
@@ -266,6 +318,7 @@ export function DigestView(props: DigestProps): any {
             h(
               'div',
               { className: 'dshgt-digest-bar' },
+              h('span', { className: `dshgt-pchip ${activePeriod}` }, t(`period.${activePeriod}`)),
               h(
                 'span',
                 { className: 'dshgt-filechip dshgt-filechip-static' },

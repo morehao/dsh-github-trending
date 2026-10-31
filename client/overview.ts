@@ -6,7 +6,7 @@
  */
 import { Btn, Pill, duration, h, localTime, shortHash } from './ui.js';
 import type { Translate } from './i18n.js';
-import type { RunRecord, StatePayload } from './api.js';
+import type { DigestTarget, RunRecord, StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
 import { reasonHint } from './error-copy.js';
 import type { RunController } from './run-controller.js';
@@ -15,6 +15,7 @@ import { PluginUpdateSection } from './update-panel.js';
 import { credentialView } from './credential.js';
 import {
   buildDigestDates,
+  digestTarget,
   formatDayLabel,
   recentDates,
   zonedDateString,
@@ -27,7 +28,7 @@ export interface OverviewProps {
   lang: 'zh' | 'en';
   store: StoreValue;
   controller: RunController;
-  onOpenDigest: (date?: string) => void;
+  onOpenDigest: (target?: DigestTarget) => void;
   onOpenRuns: () => void;
   onOpenSettings: () => void;
 }
@@ -129,6 +130,7 @@ export function OverviewView(props: OverviewProps): any {
   const days = buildDigestDates(state.status.history, { timeZone });
   const byDate = new Map(days.map((day) => [day.date, day]));
   const week = recentDates(today, 7);
+  const lastTarget = last === null ? undefined : digestTarget(last, timeZone);
 
   return h(
     'div',
@@ -149,6 +151,7 @@ export function OverviewView(props: OverviewProps): any {
             'div',
             { className: 'dshgt-delivery-top' },
             statusPill(t, last),
+            h('span', { className: `dshgt-pchip ${last.period ?? 'daily'}` }, t(`period.${last.period ?? 'daily'}`)),
             h('span', { className: 'dshgt-hint' }, last.date ?? localTime(last.at)),
             h(
               'span',
@@ -190,13 +193,13 @@ export function OverviewView(props: OverviewProps): any {
                   {
                     type: 'button',
                     className: 'dshgt-filechip',
-                    onClick: () => props.onOpenDigest(last.date),
+                    onClick: () => { if (lastTarget !== undefined) props.onOpenDigest(lastTarget); },
                   },
                   h('span', { className: 'dshgt-mono' }, last.preview.file),
                 ),
             last.preview === undefined
               ? null
-              : h(Btn, { small: true, onClick: () => props.onOpenDigest(last.date) }, t('overview.last.read')),
+              : h(Btn, { small: true, onClick: () => { if (lastTarget !== undefined) props.onOpenDigest(lastTarget); } }, t('overview.last.read')),
             pr === null || pr.url === undefined ? null : h(
               'a',
               { className: 'dshgt-btn dshgt-btn-sm', href: pr.url, target: '_blank', rel: 'noreferrer' },
@@ -272,7 +275,7 @@ export function OverviewView(props: OverviewProps): any {
               type: 'button',
               className: 'dshgt-day dshgt-day-clickable',
               key: date,
-              onClick: () => props.onOpenDigest(date),
+              onClick: () => props.onOpenDigest({ period: 'daily', bucket: date }),
               title: day.record.errorCode === undefined ? formatDayLabel(date, lang) : `${formatDayLabel(date, lang)} · ${day.record.errorCode}`,
             },
             h('div', { className: 'dshgt-day-date' }, date.slice(5).replace('-', '/')),

@@ -62,6 +62,9 @@ export const CSS = `
 .dshgt-table th,.dshgt-table td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--gt-border);vertical-align:top;}
 .dshgt-table th{color:var(--gt-muted);font-weight:500;}
 .dshgt-chips{display:flex;gap:6px;flex-wrap:wrap;}
+.dshgt-period-list{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;}
+.dshgt-period{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gt-fg);}
+.dshgt-period-check{color:var(--gt-ok);font-size:12px;line-height:1;}
 .dshgt-chip{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--gt-border);background:var(--gt-bg);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--gt-muted);}
 .dshgt-chip[aria-pressed="true"]{background:color-mix(in srgb,var(--gt-accent) 14%,var(--gt-bg));border-color:var(--gt-accent);color:var(--gt-fg);}
 .dshgt-switch{appearance:none;cursor:pointer;width:36px;height:20px;border-radius:999px;border:1px solid var(--gt-border);background:var(--gt-muted);position:relative;transition:background .15s;}
@@ -253,12 +256,24 @@ export const CSS = `
 .dshgt-md a{color:var(--gt-accent);text-decoration:none;}
 .dshgt-md a:hover{text-decoration:underline;}
 
+/* ——— 周期标签 / 分段 ——— */
+.dshgt-pchip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap;border:1px solid var(--gt-border);color:var(--gt-muted);background:var(--gt-bg);}
+.dshgt-pchip.daily{color:var(--gt-accent);border-color:color-mix(in srgb,var(--gt-accent) 35%,var(--gt-border));background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));}
+.dshgt-pchip.weekly{color:#7c3aed;border-color:#ddd6fe;background:#f5f3ff;}
+.dshgt-pchip.monthly{color:#0f766e;border-color:#99f6e4;background:#f0fdfa;}
+.dshgt-period-seg{display:inline-flex;border:1px solid var(--gt-border);border-radius:9px;padding:3px;background:var(--gt-card);gap:3px;}
+.dshgt-period-seg button{display:inline-flex;align-items:center;gap:7px;border:0;background:none;height:30px;padding:0 12px;border-radius:7px;font:inherit;font-size:13px;color:var(--gt-muted);cursor:pointer;}
+.dshgt-period-seg button:hover{color:var(--gt-fg);}
+.dshgt-period-seg button.on{background:var(--gt-bg);color:var(--gt-fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.08);}
+.dshgt-period-count{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 6%,var(--gt-bg));border-radius:999px;padding:0 6px;line-height:16px;}
+.dshgt-period-seg button.on .dshgt-period-count{color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 12%,var(--gt-bg));}
+
 /* ——— 运行记录 ——— */
 .dshgt-runs-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .dshgt-runs-filter{display:flex;gap:4px;margin-left:auto;}
 .dshgt-run-list{border-top:1px solid var(--gt-border);}
 .dshgt-run-item{border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
-.dshgt-run-row{display:grid;grid-template-columns:18px 132px minmax(0,1fr) 80px 82px 20px;align-items:center;gap:12px;min-height:52px;width:100%;padding:0 6px;border:0;background:none;text-align:left;font-family:inherit;color:var(--gt-fg);cursor:pointer;border-radius:6px;}
+.dshgt-run-row{display:grid;grid-template-columns:18px 120px 56px minmax(0,1fr) 78px 74px 20px;align-items:center;gap:12px;min-height:52px;width:100%;padding:0 6px;border:0;background:none;text-align:left;font-family:inherit;color:var(--gt-fg);cursor:pointer;border-radius:6px;}
 .dshgt-run-row:hover{background:color-mix(in srgb,var(--gt-fg) 4%,var(--gt-bg));}
 .dshgt-run-date{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gt-muted);white-space:nowrap;}
 .dshgt-run-what{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;}
@@ -314,7 +329,7 @@ export const CSS = `
   .dshgt-fact:nth-child(3){padding-left:0;border-left:0;}
   .dshgt-week{flex-wrap:wrap;}
   .dshgt-day{flex:1 1 88px;}
-  .dshgt-run-row{grid-template-columns:18px 112px minmax(0,1fr) 70px 20px;}
+  .dshgt-run-row{grid-template-columns:18px 104px 52px minmax(0,1fr) 70px 20px;}
   .dshgt-run-files{display:none;}
   .dshgt-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
   .dshgt-dateselect{min-width:180px;}

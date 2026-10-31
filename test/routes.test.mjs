@@ -224,10 +224,13 @@ test('GET /preview 返回预览正文；非法 id / 未知 id / 无副本 / 文�
   assert.equal(noHeader.status, 403);
 });
 
-test('/state 返回 30 条历史（不再截到 10）', async () => {
+test('/state 返回完整历史（不再截到 10 条）', async () => {
   for (let index = 0; index < 35; index += 1) store.recordRun(recordFor(`history-${index}`));
   const response = await fetch(`${base}/state`, { headers: HEADER });
   const payload = await response.json();
-  assert.equal(payload.status.history.length, 30);
+  // 该用例复用同一 store，前面用例已写入若干记录；只断言「不截断到 10」且最新在首位。
+  assert.ok(payload.status.history.length >= 35);
   assert.equal(payload.status.history[0].id, 'history-34');
+  const ids = new Set(payload.status.history.map((record) => record.id));
+  for (let index = 0; index < 35; index += 1) assert.ok(ids.has(`history-${index}`));
 });

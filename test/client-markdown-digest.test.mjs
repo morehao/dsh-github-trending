@@ -186,6 +186,31 @@ test('formatBytes 输出可读大小', () => {
   assert.equal(digest.formatBytes(Number.NaN), '—');
 });
 
+test('周期分组：日/周/月各自成组，同一天的日榜与月榜都保留', () => {
+  const rec = (id, at, period, extra = {}) => ({ ...baseRecord(id), at, period, ...extra });
+  const preview = (file) => ({ file, bytes: 1, sha256: 'a'.repeat(64) });
+  const records = [
+    rec('d1', '2026-10-31T00:31:00Z', 'daily', { date: '2026-10-31', preview: preview('trending/daily/2026-10-31.md') }),
+    rec('m1', '2026-10-31T00:32:00Z', 'monthly', { date: '2026-10-31', preview: preview('trending/monthly/2026-10.md') }),
+    rec('d2', '2026-10-30T00:30:00Z', 'daily', { date: '2026-10-30', preview: preview('trending/daily/2026-10-30.md') }),
+    rec('w1', '2026-10-25T00:31:00Z', 'weekly', { date: '2026-10-25', preview: preview('trending/weekly/2026-W43.md') }),
+  ];
+  const now = new Date('2026-10-31T04:00:00+08:00');
+  const groups = digest.buildPeriodGroups(records, { timeZone: 'Asia/Shanghai', now });
+  const by = Object.fromEntries(groups.map((group) => [group.period, group]));
+  assert.deepEqual(by.daily.days.map((day) => day.bucket), ['2026-10-31', '2026-10-30']);
+  assert.deepEqual(by.monthly.days.map((day) => day.bucket), ['2026-10']);
+  assert.deepEqual(by.weekly.days.map((day) => day.bucket), ['2026-W43']);
+  assert.equal(by.daily.previewCount, 2);
+
+  // 日榜日期视图不再被同一天的月榜吞并，也排除周/月记录
+  const dates = digest.buildDigestDates(records, { timeZone: 'Asia/Shanghai', now });
+  assert.deepEqual(dates.map((day) => day.date), ['2026-10-31', '2026-10-30']);
+
+  assert.deepEqual(digest.digestTarget(records[1], 'Asia/Shanghai'), { period: 'monthly', bucket: '2026-10' });
+  assert.deepEqual(digest.digestTarget(records[3], 'Asia/Shanghai'), { period: 'weekly', bucket: '2026-W43' });
+});
+
 function baseRecord(id) {
   return {
     id,
