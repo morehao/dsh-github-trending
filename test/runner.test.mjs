@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +55,12 @@ function makeRunner(overrides = {}) {
     [ENV_KEY]: 'sk-test-key',
     ...overrides.env,
   };
-  const runner = new runnerModule.Runner({ store, get: () => undefined, env });
+  const runner = new runnerModule.Runner({
+    store,
+    get: () => undefined,
+    env,
+    ...(overrides.logger === undefined ? {} : { logger: overrides.logger }),
+  });
   return { runner, store, repo, env };
 }
 
@@ -199,3 +205,152 @@ test('存在未合并 pendingPr 时也照常运行（核心 v0.2.0 用 force-wit
   assert.equal(store.readHistory().length, 1);
 });
 
+
+// ——— 预览副本 ———
+
+const DATED = '2026-10-30';
+
+function shaOf(text) {
+  return createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+}
+
+test('成功运行：从 outcome.files 复制当天 .md 到 previews/，并写 date/commit/preview', async () => {
+  const content = '# 日报\n\n今天的条目';
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: content },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.commit, 'deadbeef');
+  assert.deepEqual(summary.preview, {
+    file: `trending/${DATED}.md`,
+    bytes: Buffer.byteLength(content),
+    sha256: shaOf(content),
+  });
+  const preview = store.readPreview(summary.id);
+  assert.equal(preview.text, content);
+  const file = path.join(store.dir, 'previews', `${summary.id}.md`);
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  const record = store.readHistory()[0];
+  assert.equal(record.date, DATED);
+  assert.equal(record.commit, 'deadbeef');
+  assert.equal(record.preview.file, `trending/${DATED}.md`);
+});
+
+test('多个 .md 时优先 basename === <date>.md', async () => {
+  const { runner } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: 'trending/extra.md', content: 'extra' },
+        { path: `trending/${DATED}.md`, content: 'dated' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview.file, `trending/${DATED}.md`);
+});
+
+test('只有一个 .md 时回退使用它', async () => {
+  const { runner } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: 'trending/all.md', FAKE_ARTIFACT_CONTENT: 'single' },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview.file, 'trending/all.md');
+});
+
+test('多个 .md 且没有当天文件时不猜，不生成预览', async () => {
+  const events = [];
+  const { runner } = makeRunner({
+    logger: (event, data) => events.push({ event, data }),
+    scenario: {
+      FAKE_ARTIFACTS: JSON.stringify([
+        { path: 'trending/a.md', content: 'a' },
+        { path: 'trending/b.md', content: 'b' },
+      ]),
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview, undefined);
+  assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'ambiguous'));
+});
+
+test('路径穿越 / 绝对路径：不读 repo 外的文件', async () => {
+  const outsideDir = mkdtempSync(path.join(tmpdir(), 'dshgt-outside-'));
+  const outside = path.join(outsideDir, 'evil.md');
+  writeFileSync(outside, '# evil');
+
+  const traversal = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: '../evil.md', FAKE_ARTIFACT_CONTENT: '# evil' },
+  });
+  const traversalSummary = await traversal.runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(traversalSummary.preview, undefined);
+
+  const absolute = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: outside },
+  });
+  const absoluteSummary = await absolute.runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(absoluteSummary.preview, undefined);
+  assert.equal(existsSync(path.join(traversal.store.dir, 'previews', `${traversalSummary.id}.md`)), false);
+});
+
+test('超过 512 KB 的 artifact 不复制', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_SIZE: String(512 * 1024 + 1) },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview, undefined);
+  assert.equal(store.readHistory()[0].preview, undefined);
+});
+
+test('内容含 NUL 字节时跳过', async () => {
+  const { runner } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# a', FAKE_ARTIFACT_NUL: '1' },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview, undefined);
+});
+
+test('artifact 的 sha256 与内容不一致时跳过', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_ARTIFACT_PATH: `trending/${DATED}.md`,
+      FAKE_ARTIFACT_CONTENT: '# a',
+      FAKE_ARTIFACT_SHA: `sha256:${'d'.repeat(64)}`,
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.preview, undefined);
+  assert.equal(existsSync(path.join(store.dir, 'previews', `${summary.id}.md`)), false);
+});
+
+test('试跑 / 无变更 / 失败都不生成预览', async () => {
+  const dry = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# dry' },
+  });
+  const drySummary = await dry.runner.run({ trigger: 'manual', date: DATED, dryRun: true });
+  assert.equal(drySummary.preview, undefined);
+
+  const skipped = makeRunner({ scenario: { FAKE_SKIPPED: '1' } });
+  const skippedSummary = await skipped.runner.run({ trigger: 'schedule', date: DATED });
+  assert.equal(skippedSummary.preview, undefined);
+
+  const failed = makeRunner({ scenario: { FAKE_EXIT: '1', FAKE_STDERR: 'error: INTERNAL: boom' } });
+  const failedSummary = await failed.runner.run({ trigger: 'manual', date: DATED });
+  assert.equal(failedSummary.preview, undefined);
+  assert.equal(failed.store.readHistory()[0].preview, undefined);
+});
+
+test('预览生成失败不阻断运行，结果照常写盘', async () => {
+  const events = [];
+  const { runner, store } = makeRunner({
+    logger: (event, data) => events.push({ event, data }),
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_SHA: `sha256:${'d'.repeat(64)}`, FAKE_ARTIFACT_CONTENT: '# a' },
+  });
+  const summary = await runner.run({ trigger: 'manual', date: DATED });
+  assert.equal(summary.ok, true);
+  assert.equal(store.readHistory().length, 1);
+  const record = store.readHistory()[0];
+  assert.equal(record.ok, true);
+  assert.equal(record.preview, undefined);
+  assert.ok(events.some((item) => item.event === 'preview.skip'));
+});

@@ -10,6 +10,21 @@
 - **旧状态迁移**：读取时若 `lastDigest` 缺 `contentHashAlgo` 或 `coreVersion` 早于 0.3.0，判定为 legacy，清空 `lastDigest` 与绑定的 `pendingPr`；旧历史记录打 `legacy` 标。插件启动时（`migrateLegacyState`）把清洗结果落盘。
 - 新增 `scripts/set-core-version.mjs` 写 `dsh.core.version`（本版为 `0.3.0`）；`check:naming` 改为校验契约包依赖与 wire 版本。
 
+### 新增（工作台 / 日报预览 / 最近 30 天）
+
+- **01 工作台**：侧栏入口进入「概览 / 日报 / 运行记录 / 设置」四视图；概览回答下次运行、就绪检查（核心 / 模型 / 仓库 / GitHub）、上次交付与最近 7 天；运行记录支持筛选、展开交付物、pendingPr/legacy 状态与只读日志抽屉；设置继续沿用 #13 的六个 tab，本轮不重排。
+- **日报预览**：运行成功后只读核心本次 `outcome.files` 里的当天 `.md`（优先 `YYYY-MM-DD.md`，否则只有一个 `.md` 时用它），路径必须在 `repo.path` 内（词法 + realpath）、≤512 KB、无 NUL、sha256 与契约一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`；0600、临时文件 + rename、最多 30 份。预览失败只记日志，不阻断运行；`state.json` / `history.json` 只存元数据。
+- **最近 30 天日期切换**：日报按调度时区把 history 按日期分组，每天一条（优先当天成功且有预览的最近一条）；默认打开最近一期有预览的日期；失败 / 无变更 / 试跑 / 旧记录 / 副本缺失各有空状态；切换用 React state + AbortController，不写 URL hash。
+- **渲染安全**：Markdown 子集（标题 / 段落 / 列表 / 引用 / 粗体 / 行内代码 / 链接 / 分隔线 / frontmatter 元信息），只生成 React 文本节点，链接仅 http(s)，不渲染 HTML / 图片；可切「原文」。
+- **关于与仓库入口**：`/state.plugin` 增加 `repository`（由 `package.json.repository` 规范化），左轨包名点击打开关于弹层；完整包名可复制，外链 `target=_blank rel=noreferrer`。
+- **Host 数据**：`RunRecord` / `RunSummary` 补 `date` / `commit` / `preview`，`/state` history 从 10 条改为 30；新增 `GET /preview?id=<runId>`（只接受历史里出现过的 id、不接路径、自定义头鉴权、`no-store`）。
+- **测试**：新增 state / runner / routes / plugin-info / markdown-core / digest-core 用例；`npm run check` 134 条单测 + AC-P 11 条全绿。
+
+### 修复
+
+- **删掉「高级设置」开关**：它是设置页底部的全局按钮，只在「内容来源 / 模型」两个 tab 插入字段，且插在卡片顶部——用户滚到底部点它看不到任何变化（4 个 tab 更是完全无反应）。现在移除该按钮与两个仅它能编辑的字段（`TRENDING_DIGEST_CORE`、手动 `凭据引用`；前者继续支持环境变量与 `settings.json`，后者由「沿用 DSH 配置」自动带入）。「内容来源」没有可编辑项，因此该 tab 不再显示「保存本页」。
+- **凭据状态按密钥来源判断**：回环代理模式下密钥由宿主自己带上（已经复用 DSH 凭据），不再显示红色的「未配置」，改为「沿用 DSH 凭据」并说明本页无需填写；直传模式仍如实区分「已配置 · 来源」与「未配置（引用为空 / 解析不到）」。设置页、概览就绪检查与外壳就绪数统一走同一套判定。
+
 ## 0.2.0 - 2026-10-31
 
 ### 变更

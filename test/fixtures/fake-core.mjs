@@ -14,8 +14,21 @@
  *   FAKE_SLEEP           运行前睡多少毫秒（用于取消测试）
  *   FAKE_SKIPPED         输出 skipped: true（幂等）
  *   FAKE_GARBAGE         输出非 JSON（IPC_INVALID）
+ *
+ * 预览用例还要让「核心」真的在 temp repo 里写文件。默认行为不变（固定 artifact、不写盘）：
+ *   FAKE_ARTIFACT_PATH        单个 artifact 的仓库内相对路径
+ *   FAKE_ARTIFACT_CONTENT     文件内容（给空串也会真的写一个空文件）
+ *   FAKE_ARTIFACT_SIZE        生成 N 个字符的内容（避免把 512 KB 塞进 env）
+ *   FAKE_ARTIFACT_NUL         '1' 时在内容末尾追加 NUL 字节
+ *   FAKE_ARTIFACT_SHA         覆盖 artifact.sha256（测 sha 不一致）
+ *   FAKE_ARTIFACT_BYTES       覆盖 artifact.bytes
+ *   FAKE_ARTIFACTS            JSON 数组，每项 {path, content?, size?, nul?, sha256?, bytes?}
+ *
+ * 仓库路径从核心配置的 `repo.path` 解析（配置是插件生成的 YAML，字符串统一双引号）。
  */
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -24,6 +37,79 @@ const command = argv[0];
 // 「配置里带密钥」与「不带密钥」两种路径。
 const HASH_WITH_KEY = `sha256:${'a'.repeat(64)}`;
 const HASH_NO_KEY = `sha256:${'b'.repeat(64)}`;
+const DEFAULT_ARTIFACT = { path: 'trending/2026-10-30/all.md', bytes: 12, sha256: `sha256:${'c'.repeat(64)}` };
+
+/** 从插件生成的 YAML 配置里取 repo.path（唯一一个顶层 `path:`）。 */
+function repoPathFromConfig(config) {
+  const match = /^\s*path:\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(config);
+  if (match === null) return '';
+  try {
+    const value = JSON.parse(match[1]);
+    return typeof value === 'string' ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+function contentOf(spec) {
+  if (typeof spec.content === 'string') return spec.content;
+  if (typeof spec.size === 'number' && spec.size > 0) return 'x'.repeat(spec.size);
+  return undefined;
+}
+
+/** 把一个 spec 落成契约 FileArtifact；有 content 时真的写进 temp repo。 */
+function artifactFromSpec(spec, repoPath) {
+  const file = typeof spec.path === 'string' && spec.path !== '' ? spec.path : DEFAULT_ARTIFACT.path;
+  let content = contentOf(spec);
+  if (spec.nul === true || spec.nul === '1') content = `${content ?? ''}\0`;
+  if (content !== undefined) {
+    if (repoPath === '') throw new Error('FAKE_ARTIFACT_CONTENT requires repo.path in config');
+    const target = path.resolve(repoPath, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  const buffer = content === undefined ? undefined : Buffer.from(content, 'utf8');
+  const bytes = Number.isFinite(Number(spec.bytes)) ? Number(spec.bytes) : buffer === undefined ? DEFAULT_ARTIFACT.bytes : buffer.length;
+  const sha256 =
+    typeof spec.sha256 === 'string'
+      ? spec.sha256
+      : buffer === undefined
+        ? DEFAULT_ARTIFACT.sha256
+        : `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
+  return { path: file, bytes, sha256 };
+}
+
+/** 本用例要输出的 artifact 列表；默认保持「固定路径 + 固定 hash、不写盘」。 */
+function artifactsFor(config, skipped) {
+  if (skipped) return [];
+  if (typeof process.env.FAKE_ARTIFACTS === 'string' && process.env.FAKE_ARTIFACTS !== '') {
+    const specs = JSON.parse(process.env.FAKE_ARTIFACTS);
+    if (!Array.isArray(specs)) throw new Error('FAKE_ARTIFACTS must be a JSON array');
+    const repoPath = repoPathFromConfig(config);
+    return specs.map((spec) => artifactFromSpec(spec ?? {}, repoPath));
+  }
+  const custom =
+    process.env.FAKE_ARTIFACT_PATH !== undefined ||
+    process.env.FAKE_ARTIFACT_CONTENT !== undefined ||
+    process.env.FAKE_ARTIFACT_SIZE !== undefined ||
+    process.env.FAKE_ARTIFACT_NUL !== undefined ||
+    process.env.FAKE_ARTIFACT_SHA !== undefined ||
+    process.env.FAKE_ARTIFACT_BYTES !== undefined;
+  if (!custom) return [DEFAULT_ARTIFACT];
+  return [
+    artifactFromSpec(
+      {
+        path: process.env.FAKE_ARTIFACT_PATH,
+        content: process.env.FAKE_ARTIFACT_CONTENT,
+        size: process.env.FAKE_ARTIFACT_SIZE === undefined ? undefined : Number(process.env.FAKE_ARTIFACT_SIZE),
+        nul: process.env.FAKE_ARTIFACT_NUL,
+        sha256: process.env.FAKE_ARTIFACT_SHA,
+        bytes: process.env.FAKE_ARTIFACT_BYTES,
+      },
+      repoPathFromConfig(config),
+    ),
+  ];
+}
 
 if (command === 'version') {
   process.stdout.write(
@@ -65,6 +151,7 @@ if (command === 'run') {
   const skipped = process.env.FAKE_SKIPPED === '1';
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
+  const files = artifactsFor(config, skipped);
   process.stdout.write(
     JSON.stringify({
       ipcSchema: 2,
@@ -73,7 +160,7 @@ if (command === 'run') {
       startedAt: now,
       finishedAt: now,
       skipped,
-      files: skipped ? [] : [{ path: 'trending/2026-10-30/all.md', bytes: 12, sha256: `sha256:${'c'.repeat(64)}` }],
+      files,
       ...(skipped
         ? {}
         : {

@@ -7,13 +7,19 @@
  *
  * 写入一律「临时文件 + rename」，权限 0600：宿主崩溃时宁可丢最后一条，也不留半个 JSON。
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { normalizeSettings, type Settings } from './config.js';
 import { HISTORY_FILE, SETTINGS_FILE, STATE_FILE, dataDir } from './paths.js';
 
 export const HISTORY_LIMIT = 30;
+
+/** 预览副本上限：最多保留 30 份，和 history 的 30 天窗口对齐。 */
+export const PREVIEW_LIMIT = 30;
+
+/** 一次预览只读这么多字节；超过的不复制，避免把大文件塞进状态目录。 */
+export const PREVIEW_MAX_BYTES = 512 * 1024;
 
 /** 契约 v2 的固定内容哈希算法；旧版状态没有这个字段，据此识别 legacy。 */
 export const CONTENT_HASH_ALGO_V2 = 'jcs-sha256-v1';
@@ -29,6 +35,18 @@ export interface DigestIdentity {
   coreVersion: string;
 }
 
+/**
+ * 预览副本的元数据：只记「哪份文件、多大、内容 sha256」，正文进 previews/。
+ * `file` 是仓库内相对路径，不落绝对路径（避免把用户目录写进状态）。
+ */
+export interface PreviewMeta {
+  file: string;
+  bytes: number;
+  sha256: string;
+  /** 只读接口截断时为 true；当前 512 KB 上限下正常不会出现。 */
+  truncated?: boolean;
+}
+
 export interface RunRecord {
   id: string;
   at: string;
@@ -40,10 +58,13 @@ export interface RunRecord {
   errorMessage?: string;
   durationMs: number;
   files: number;
+  /** 运行所属的调度时区日期（YYYY-MM-DD）；旧记录可能没有。 */
+  date?: string;
   contentHash?: string;
   branch?: string;
   commit?: string;
   prUrl?: string;
+  preview?: PreviewMeta;
   coreVersion: string;
   model: { provider: string; model: string };
   languages: string[];
@@ -164,6 +185,10 @@ export class Store {
     return path.join(this.dir, 'runs');
   }
 
+  get previewsPath(): string {
+    return path.join(this.dir, 'previews');
+  }
+
   readSettings(): Settings {
     return normalizeSettings(readJson<unknown>(this.settingsPath, {}));
   }
@@ -248,6 +273,67 @@ export class Store {
       return text.length > maxBytes ? text.slice(text.length - maxBytes) : text;
     } catch {
       return '';
+    }
+  }
+
+  /** 预览副本路径；写入前才建目录，读接口不会凭空创建目录。 */
+  previewPath(id: string): string {
+    return path.join(this.previewsPath, `${id}.md`);
+  }
+
+  /** 写预览副本：同目录临时文件 + rename、0600；写完裁到 30 份。 */
+  writePreview(id: string, text: string): void {
+    ensureDir(this.previewsPath);
+    const file = this.previewPath(id);
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temp, text, { mode: 0o600 });
+    renameSync(temp, file);
+    this.prunePreviews();
+  }
+
+  /** 读预览副本；不存在/不可读返回 undefined，超过上限时截断。 */
+  readPreview(id: string, maxBytes = PREVIEW_MAX_BYTES): { text: string; truncated: boolean } | undefined {
+    const file = this.previewPath(id);
+    try {
+      const stat = statSync(file);
+      if (!stat.isFile()) return undefined;
+      const truncated = stat.size > maxBytes;
+      const buffer = readFileSync(file);
+      return {
+        text: (truncated ? buffer.subarray(0, maxBytes) : buffer).toString('utf8'),
+        truncated,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 只保留最近 `keep` 份预览副本；按 mtime 倒序，任何错误都忽略。 */
+  prunePreviews(keep = PREVIEW_LIMIT): void {
+    let names: string[];
+    try {
+      names = readdirSync(this.previewsPath);
+    } catch {
+      return;
+    }
+    const entries: Array<{ file: string; mtimeMs: number }> = [];
+    for (const name of names) {
+      if (!name.endsWith('.md')) continue;
+      const file = path.join(this.previewsPath, name);
+      try {
+        const stat = statSync(file);
+        if (stat.isFile()) entries.push({ file, mtimeMs: stat.mtimeMs });
+      } catch {
+        // 并发删除/权限问题：跳过这一份，不影响其余裁剪。
+      }
+    }
+    entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const entry of entries.slice(keep)) {
+      try {
+        unlinkSync(entry.file);
+      } catch {
+        // 忽略：下次写入时还会再尝试裁剪。
+      }
     }
   }
 }
