@@ -9,6 +9,7 @@
 - **定时运行尊重已关闭的 PR**：插件经 `TRENDRADAR_TRIGGER` 把触发来源传给核心；定时运行遇到 closed-unmerged 的 PR 会跳过，手动运行才会重建并重开。
 - **调度改为「成功才锁当天」**：失败不再吃掉一整天；同一 catch-up 窗口内最多重试 2 次、间隔至少 5 分钟。
 - 历史记录保存 `errorReason` / `skipReason`，重开界面仍能看到原因。
+- 核心版本锁定 `0.3.1`（`dsh.core.version`）：首次运行下载带 append-only 推送与 `TRENDRADAR_TRIGGER` 支持的核心。
 
 ## 0.3.0 - 2026-10-31
 
