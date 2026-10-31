@@ -2,8 +2,8 @@
  * Markdown 子集的纯解析层（不依赖 React，可在 Node 测试里直接跑）。
  *
  * 只覆盖核心日报实际会产出的结构：frontmatter、标题、段落、列表、引用、代码块、
- * 分隔线、粗体、行内代码与链接。解析结果只包含文本与结构化节点，**没有 HTML**；
- * 链接在解析阶段就做白名单（仅 http/https），渲染层不需要再判断一次。
+ * 分隔线、GFM 表格、粗体、行内代码与链接。解析结果只包含文本与结构化节点，
+ * **没有 HTML**；链接在解析阶段就做白名单（仅 http/https），渲染层不需要再判断一次。
  */
 export interface InlineText {
   type: 'text';
@@ -24,13 +24,24 @@ export interface InlineLink {
 }
 export type Inline = InlineText | InlineStrong | InlineCode | InlineLink;
 
+/** 表格列对齐：`---` 默认（左）、`:---` 左、`:---:` 居中、`---:` 右；缺省表示不指定。 */
+export type Align = 'left' | 'center' | 'right';
+
+export interface TableBlock {
+  type: 'table';
+  align: (Align | undefined)[];
+  header: Inline[][];
+  rows: Inline[][][];
+}
+
 export type Block =
   | { type: 'heading'; level: number; children: Inline[] }
   | { type: 'paragraph'; children: Inline[] }
   | { type: 'list'; ordered: boolean; items: Inline[][] }
   | { type: 'quote'; children: Inline[] }
   | { type: 'code'; value: string; lang?: string }
-  | { type: 'hr' };
+  | { type: 'hr' }
+  | TableBlock;
 
 export interface ParsedMarkdown {
   meta: Record<string, string>;
@@ -124,9 +135,89 @@ const HR = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const QUOTE = /^\s*>\s?(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/;
+const TABLE_DELIM_CELL = /^:?-+:?$/;
 
 function isBlockStart(line: string): boolean {
   return FENCE.test(line) || HEADING.test(line) || HR.test(line) || QUOTE.test(line) || BULLET.test(line) || ORDERED.test(line);
+}
+
+/**
+ * 拆一行 GFM 表格：跳过反引号里的 `|`，`\|` 还原成字面管道，首尾管道可有可无。
+ * 只做切分，不做行内解析。
+ */
+export function splitTableRow(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let inCode = false;
+  const text = line.trim();
+  for (let cursor = 0; cursor < text.length; cursor += 1) {
+    const char = text[cursor] ?? '';
+    if (char === '\\' && text[cursor + 1] === '|') {
+      current += '|';
+      cursor += 1;
+      continue;
+    }
+    if (char === '`') {
+      inCode = !inCode;
+      current += char;
+      continue;
+    }
+    if (char === '|' && !inCode) {
+      cells.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  if (cells.length > 1 && (cells[0] ?? '').trim() === '') cells.shift();
+  if (cells.length > 1 && (cells[cells.length - 1] ?? '').trim() === '') cells.pop();
+  return cells.map((cell) => cell.trim());
+}
+
+/** 解析分隔行（`| --- | :---: |`）；不是分隔行返回 null。 */
+export function parseAlignRow(line: string): (Align | undefined)[] | null {
+  const cells = splitTableRow(line);
+  if (cells.length === 0) return null;
+  const align: (Align | undefined)[] = [];
+  for (const cell of cells) {
+    const value = cell.trim();
+    if (!TABLE_DELIM_CELL.test(value)) return null;
+    const left = value.startsWith(':');
+    const right = value.endsWith(':');
+    // `---`（无冒号）让浏览器用默认对齐，和 GFM 一致；这里保留 undefined 便于渲染层不写 style。
+    align.push(left && right ? 'center' : right ? 'right' : left ? 'left' : undefined);
+  }
+  return align;
+}
+
+interface ParsedTable {
+  align: (Align | undefined)[];
+  header: Inline[][];
+  rows: Inline[][][];
+  next: number;
+}
+
+/** 从 index 开始尝试解析一张表：首行必须是带 `|` 的表头，第二行是列数一致的分隔行。 */
+function tableAt(lines: string[], index: number): ParsedTable | null {
+  const headerLine = lines[index] ?? '';
+  if (!headerLine.includes('|')) return null;
+  const align = parseAlignRow(lines[index + 1] ?? '');
+  if (align === null) return null;
+  const headerCells = splitTableRow(headerLine);
+  if (headerCells.length === 0 || headerCells.length !== align.length) return null;
+  const rows: Inline[][][] = [];
+  let cursor = index + 2;
+  while (cursor < lines.length) {
+    const line = lines[cursor] ?? '';
+    if (line.trim() === '' || !line.includes('|')) break;
+    if (isBlockStart(line)) break;
+    const cells = splitTableRow(line).slice(0, headerCells.length);
+    while (cells.length < headerCells.length) cells.push('');
+    rows.push(cells.map((cell) => parseInline(cell)));
+    cursor += 1;
+  }
+  return { align, header: headerCells.map((cell) => parseInline(cell)), rows, next: cursor };
 }
 
 export function parseBlocks(body: string): Block[] {
@@ -207,11 +298,18 @@ export function parseBlocks(body: string): Block[] {
       continue;
     }
 
+    const table = tableAt(lines, index);
+    if (table !== null) {
+      blocks.push({ type: 'table', align: table.align, header: table.header, rows: table.rows });
+      index = table.next;
+      continue;
+    }
+
     const buffer: string[] = [];
     while (index < lines.length) {
       const current = lines[index] ?? '';
       if (current.trim() === '') break;
-      if (buffer.length > 0 && isBlockStart(current)) break;
+      if (buffer.length > 0 && (isBlockStart(current) || tableAt(lines, index) !== null)) break;
       buffer.push(current.trim());
       index += 1;
     }

@@ -6,7 +6,7 @@
  * 过滤为 http(s)，这里只负责加 `target` / `rel`。
  */
 import { h } from './ui.js';
-import { parseMarkdown, type Block, type Inline } from './markdown-core.js';
+import { parseMarkdown, type Align, type Block, type Inline } from './markdown-core.js';
 
 export interface RenderedMarkdown {
   meta: Record<string, string>;
@@ -33,6 +33,10 @@ function renderInline(nodes: Inline[], prefix: string): any[] {
   });
 }
 
+function alignStyle(align: Align | undefined): any {
+  return align === undefined ? undefined : { textAlign: align };
+}
+
 function renderBlock(block: Block, key: string): any {
   switch (block.type) {
     case 'heading': {
@@ -57,6 +61,43 @@ function renderBlock(block: Block, key: string): any {
       );
     case 'hr':
       return h('hr', { key, className: 'dshgt-md-hr' });
+    case 'table':
+      return h(
+        'div',
+        { key, className: 'dshgt-md-tablewrap' },
+        h(
+          'table',
+          { className: 'dshgt-md-table' },
+          h(
+            'thead',
+            null,
+            h(
+              'tr',
+              null,
+              block.header.map((cell, index) =>
+                h('th', { key: `h${index}`, style: alignStyle(block.align[index]) }, renderInline(cell, `${key}-h${index}`)),
+              ),
+            ),
+          ),
+          h(
+            'tbody',
+            null,
+            block.rows.map((row, rowIndex) =>
+              h(
+                'tr',
+                { key: `r${rowIndex}` },
+                row.map((cell, cellIndex) =>
+                  h(
+                    'td',
+                    { key: `c${cellIndex}`, style: alignStyle(block.align[cellIndex]) },
+                    renderInline(cell, `${key}-r${rowIndex}c${cellIndex}`),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
   }
 }
 
