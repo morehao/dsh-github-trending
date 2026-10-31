@@ -12,7 +12,21 @@ export type Provider = string;
 export type CommitMode = 'branch' | 'direct';
 /** 只保留两种真正可用的方式：本机 `gh` 登录态、手动 PAT。历史的 `device` 在归一化时迁移为 `gh`。 */
 export type AuthMode = 'pat' | 'gh';
-export type Since = 'daily' | 'weekly';
+
+/**
+ * 榜单周期（core 0.4.0 的 `--period` 三取值）。
+ * `trending.since` 复用同一枚举：单次运行「抓取窗口 = 标注周期」由核心保证
+ * （`run --period` 会覆盖 `config.trending.since`）。
+ */
+export type Period = 'daily' | 'weekly' | 'monthly';
+export type Since = Period;
+
+/** 规范顺序（索引分组、去重、UI 展示都以它为准）。 */
+export const PERIODS: readonly Period[] = ['daily', 'weekly', 'monthly'];
+
+export function isPeriod(value: unknown): value is Period {
+  return value === 'daily' || value === 'weekly' || value === 'monthly';
+}
 
 export interface ModelSettings {
   provider: Provider;
@@ -65,6 +79,11 @@ export interface ScheduleSettings {
   /** `HH:MM:SS`（本地墙钟，按 timezone 解释）。 */
   time: string;
   timezone: string;
+  /**
+   * 定时自动产出的周期（插件侧调度概念，核心无此字段）。
+   * 每个周期按自己的节奏触发：日=每天、周=周日、月=月末。
+   */
+  periods: Period[];
 }
 
 export interface Settings {
@@ -110,7 +129,7 @@ export const DEFAULT_SETTINGS: Settings = {
   github: { authMode: 'gh', tokenRef: 'GITHUB_TOKEN' },
   trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
   output: { dir: 'trending' },
-  schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai' },
+  schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily'] },
   corePath: '',
   coreAutoDownload: true,
 };
@@ -190,6 +209,17 @@ function strArray(value: unknown, fallback: string[]): string[] {
 }
 
 /**
+ * 周期列表归一：只保留合法值、按 PERIODS 规范顺序去重。
+ * `undefined`（旧版设置没有该字段）→ 回退默认；显式空数组保留为空，
+ * 交给 validateSettings 在「调度开启却没有任何周期」时拦下。
+ */
+function periodList(value: unknown, fallback: Period[]): Period[] {
+  if (value === undefined || !Array.isArray(value)) return [...fallback];
+  const set = new Set(value.filter(isPeriod));
+  return PERIODS.filter((period) => set.has(period));
+}
+
+/**
  * 把任意来源的对象（磁盘上的旧版本、HTTP 请求体、CLI 导入）收敛成完整设置。
  * 未知字段一律丢弃：settings.json 只有以下形状，避免旧版本字段悄悄生效。
  */
@@ -237,7 +267,7 @@ export function normalizeSettings(input: unknown): Settings {
       tokenRef: str(github.tokenRef, DEFAULT_SETTINGS.github.tokenRef).trim() || DEFAULT_SETTINGS.github.tokenRef,
     },
     trending: {
-      since: since === 'weekly' ? 'weekly' : 'daily',
+      since: isPeriod(since) ? since : 'daily',
       languages: strArray(trending.languages, DEFAULT_SETTINGS.trending.languages),
       topN: Math.round(num(trending.topN, DEFAULT_SETTINGS.trending.topN)),
     },
@@ -248,6 +278,7 @@ export function normalizeSettings(input: unknown): Settings {
       enabled: bool(schedule.enabled, DEFAULT_SETTINGS.schedule.enabled),
       time: str(schedule.time, DEFAULT_SETTINGS.schedule.time),
       timezone: str(schedule.timezone, DEFAULT_SETTINGS.schedule.timezone),
+      periods: periodList(schedule.periods, DEFAULT_SETTINGS.schedule.periods),
     },
     corePath: str(raw.corePath, DEFAULT_SETTINGS.corePath).trim(),
     coreAutoDownload: bool(raw.coreAutoDownload, DEFAULT_SETTINGS.coreAutoDownload),
@@ -332,6 +363,9 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (!isValidTimezone(schedule.timezone)) {
     problems.push({ field: 'schedule.timezone', code: 'CONFIG_INVALID', message: '时区必须是 IANA 名称（如 Asia/Shanghai）' });
   }
+  if (schedule.enabled && schedule.periods.length === 0) {
+    problems.push({ field: 'schedule.periods', code: 'CONFIG_INVALID', message: '定时运行开启时至少要选择一个产出周期（日/周/月）' });
+  }
   return problems;
 }
 
@@ -364,9 +398,10 @@ export interface CoreConfig {
 
 /**
  * 生成核心配置。`apiKey` 单独传入：它只能来自宿主凭据或用户当次输入，
- * 绝不来自 settings.json。
+ * 绝不来自 settings.json。`period` 是本次运行的标的周期；核心 `run --period`
+ * 会用它覆盖 `trending.since`，这里同步写入以免旧核心/调试时口径不一致。
  */
-export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride?: string): CoreConfig {
+export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride?: string, period?: Period): CoreConfig {
   const config: CoreConfig = {
     model: {
       provider: settings.model.provider,
@@ -392,7 +427,7 @@ export function toCoreConfig(settings: Settings, apiKey: string, baseURLOverride
     },
     trending: {
       languages: settings.trending.languages,
-      since: settings.trending.since,
+      since: period ?? settings.trending.since,
       perLanguage: settings.trending.topN,
     },
     output: {

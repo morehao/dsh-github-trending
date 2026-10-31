@@ -3,7 +3,7 @@
 [![check](https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml/badge.svg)](https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml)
 [![npm version](https://img.shields.io/npm/v/@morehao/dsh-github-trending.svg)](https://www.npmjs.com/package/@morehao/dsh-github-trending)
 
-> GitHub 趋势日报的 **DSH 入口**：每天定时 spawn 本地 [`trendradar`](https://github.com/morehao/trendradar) 核心，抓取 Trending、生成中文简介与当日总结，提交到你自己的仓库并自动合并 PR。
+> GitHub 趋势榜的 **DSH 入口**：按日/周/月周期定时 spawn 本地 [`trendradar`](https://github.com/morehao/trendradar) 核心，抓取 Trending、生成中文简介与周期总结，提交到你自己的仓库并自动合并 PR。
 
 **状态：0.3.0。** 插件侧（配置、调度、核心调用、状态与工作台、两个工具）已完成。核心二进制走 **GitHub Release**：首次运行按 `os/arch` 下载、用 `checksums.txt` 校验 sha256、缓存到插件数据目录，之后离线复用。核心仓库打 tag 出资产之前，运行会明确报 `CORE_NOT_DOWNLOADED` / `CORE_UNAVAILABLE` 并给出下载地址——不会写空文件，也不会退回旧内容。
 
@@ -94,9 +94,10 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `pr.titleTemplate` | `chore(trending): add {date} digest` | 默认规则，界面不展示 |
 | `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
 | `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名（`pat` 用） |
-| `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | 实际支持范围由核心决定 |
+| `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | `since` 是单次运行周期（`daily`/`weekly`/`monthly`，抓取窗口=标的周期由核心保证）；实际支持范围由核心决定 |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
+| `schedule.periods` | `daily` | 定时自动产出的周期（`daily`/`weekly`/`monthly` 多选）：日=每天、周=周日、月=月末触发 |
 | `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障，界面不提供入口，用环境变量或直接改 `settings.json`；设了就完全不下载） |
 | `coreAutoDownload` | `true` | 缓存缺失时是否自动下载核心；关掉后只报 `CORE_NOT_DOWNLOADED`，由你在设置页点「下载核心」 |
 
@@ -104,7 +105,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `trending_run` | `{ dryRun?: boolean, date?: string }` | 结构化摘要：文件数、commit/分支、PR、内容哈希、错误码与下一步 |
+| `trending_run` | `{ dryRun?: boolean, date?: string, period?: 'daily'\|'weekly'\|'monthly' }` | 结构化摘要：文件数、commit/分支、PR、内容哈希、错误码与下一步 |
 | `trending_history` | `{ limit?: number }` | 上次/下次运行、最近 N 条记录、核心版本、模型、未合并 PR |
 
 工具名是稳定对外接口：**只新增不改名**。
@@ -141,7 +142,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 1. **结果信封**：核心 `run --config <path> --json` 输出契约 v2 `RunResult`（`ipcSchema=2`，可选 `branch/commit/prUrl/contentHash`）；插件只解析这一种形状，旧核心的 `runOutput` 不再兼容。
 2. **密钥传输**：POSIX 上配置经 **FIFO** 交给核心（文件系统里不出现明文）；Windows 无 FIFO，退化为 0600 临时文件并在读完后立即删除。
 3. **GitHub token** 经子进程环境变量传给核心（核心只认 `GITHUB_TOKEN`/`GH_TOKEN`）；不进 argv、不进配置、不进日志。
-4. **调度**用插件自己的 60 s tick（宿主 `schedule` 是会话本地提醒，覆盖不到无人值守场景）。
+4. **调度**用插件自己的 60 s tick（宿主 `schedule` 是会话本地提醒，覆盖不到无人值守场景）。按 `schedule.periods` 分别触发：日榜每天、周榜周日（ISO 周末）、月榜月末；去重键含周期与本地日期，同一周期当天只成功一次。
 5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（用 `node scripts/set-core-version.mjs <x.y.z>` 写入）。
 6. **核心版本固定**：`package.json` 的 `dsh.core.version` 是首次运行下载哪个核心 Release 的唯一来源（用 `node scripts/set-core-version.mjs <x.y.z>` 写入）；下载失败会给出下载地址与错误码，不会退回旧内容。
 7. **预览副本是派生数据**：不是第二份真相；仓库里的 canonical 文件才是。旧记录没有 `preview` 元数据，日报里只能看到对应的空状态，不承诺回填。

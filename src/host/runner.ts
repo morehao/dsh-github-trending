@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import type { Settings } from '../config.js';
+import type { Period, Settings } from '../config.js';
 import { validateSettings } from '../config.js';
 import { areaOf, hintOf, reasonOf, redact } from '../errors.js';
 import { IpcError, type RunOutcome } from '../ipc.js';
@@ -35,6 +35,8 @@ export interface RunSummary {
   skipped: boolean;
   dryRun: boolean;
   date?: string;
+  /** 本次产出周期（daily|weekly|monthly）。 */
+  period?: Period;
   durationMs: number;
   coreVersion: string;
   files: number;
@@ -67,6 +69,8 @@ export interface RunSummary {
 export interface RunRequestOptions {
   dryRun?: boolean;
   date?: string;
+  /** 标的周期；缺省取 settings.trending.since（手动/工具运行）。 */
+  period?: Period;
   trigger: 'manual' | 'schedule' | 'tool';
 }
 
@@ -120,6 +124,33 @@ function normalizeSha256(value: unknown): string | undefined {
   return /^[0-9a-f]{64}$/.test(hex) ? hex : undefined;
 }
 
+/**
+ * 与 core `render.NameOf` 对齐的产物基名（不含扩展名）：
+ *   daily → YYYY-MM-DD；weekly → YYYY-Wnn（ISO 周年/周）；monthly → YYYY-MM。
+ * 用于在 outcome.files 里按周期精确挑出本期 digest 的 `.md`（而不是猜）。
+ */
+export function isoWeekName(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (match === null) return date;
+  const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(d.getTime())) return date;
+  // ISO 周：以周四定年/周序，周一=0…周日=6。
+  const dayIdx = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayIdx + 3);
+  const isoYear = d.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstIdx = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstIdx + 3);
+  const week = 1 + Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+export function periodFileBase(period: Period, date: string): string {
+  if (period === 'monthly') return date.slice(0, 7);
+  if (period === 'weekly') return isoWeekName(date);
+  return date;
+}
+
 export class Runner {
   private active: { id: string; controller: AbortController; startedAt: string } | undefined;
   private readonly deps: RunnerDeps;
@@ -158,6 +189,7 @@ export class Runner {
 
     const dryRun = options.dryRun === true;
     const date = options.date !== undefined && options.date !== '' ? options.date : runDate(settings);
+    const period: Period = options.period ?? settings.trending.since;
 
     const id = newRunId();
     const controller = new AbortController();
@@ -228,6 +260,7 @@ export class Runner {
         apiKey,
         ...(github.token === undefined ? {} : { token: github.token }),
         date,
+        period,
         dryRun,
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
         ...(baseURLOverride === undefined ? {} : { baseURLOverride }),
@@ -241,6 +274,7 @@ export class Runner {
         outcome,
         dryRun,
         date,
+        period,
         logFile,
         channel: result.channelKind,
         proxy: proxy !== undefined,
@@ -250,6 +284,7 @@ export class Runner {
       const preview = this.capturePreview({
         id,
         date,
+        period,
         settings,
         outcome,
         secrets: [apiKey, github.token],
@@ -266,6 +301,7 @@ export class Runner {
           : error,
         dryRun,
         date,
+        period,
         logFile,
         durationMs: Date.now() - startedMs,
       });
@@ -286,6 +322,7 @@ export class Runner {
     outcome: RunOutcome;
     dryRun: boolean;
     date?: string;
+    period?: Period;
     logFile: string;
     channel?: 'fifo' | 'tmpfile';
     proxy: boolean;
@@ -315,6 +352,7 @@ export class Runner {
       skipped: outcome.skipped,
       dryRun: input.dryRun,
       ...(input.date === undefined ? {} : { date: input.date }),
+      ...(input.period === undefined ? {} : { period: input.period }),
       durationMs: outcome.durationMs,
       coreVersion: outcome.coreVersion,
       files: outcome.files.length,
@@ -333,7 +371,7 @@ export class Runner {
     };
   }
 
-  private failureSummary(input: { id: string; error: unknown; dryRun: boolean; date?: string; logFile: string; durationMs?: number }): RunSummary {
+  private failureSummary(input: { id: string; error: unknown; dryRun: boolean; date?: string; period?: Period; logFile: string; durationMs?: number }): RunSummary {
     const code = input.error instanceof IpcError ? input.error.code : 'INTERNAL';
     const message = redact(input.error instanceof Error ? input.error.message : String(input.error));
     return {
@@ -342,6 +380,7 @@ export class Runner {
       skipped: false,
       dryRun: input.dryRun,
       ...(input.date === undefined ? {} : { date: input.date }),
+      ...(input.period === undefined ? {} : { period: input.period }),
       durationMs: input.durationMs ?? 0,
       coreVersion: '',
       files: 0,
@@ -362,26 +401,32 @@ export class Runner {
   private capturePreview(input: {
     id: string;
     date?: string;
+    period?: Period;
     settings: Settings;
     outcome: RunOutcome;
     secrets: Array<string | undefined>;
   }): PreviewMeta | undefined {
-    const { outcome, settings, date, id } = input;
+    const { outcome, settings, date, period, id } = input;
     if (!outcome.ok || outcome.dryRun || outcome.skipped || date === undefined) return undefined;
     const skip = (reason: string, extra: Record<string, unknown> = {}): undefined => {
       this.deps.logger?.('preview.skip', { id, reason, ...extra });
       return undefined;
     };
 
+    // 排除索引页与 readme：真正的 digest 是本期唯一那份 `.md`。
     const markdown = outcome.files.filter((file) => {
       const ext = path.extname(file.path).toLowerCase();
-      return ext === '.md' && path.basename(file.path).toLowerCase() !== 'readme.md';
+      const base = path.basename(file.path).toLowerCase();
+      return ext === '.md' && base !== 'readme.md' && base !== 'index.md';
     });
     if (markdown.length === 0) return skip('no-markdown');
 
-    const dated = markdown.filter((file) => path.basename(file.path) === `${date}.md`);
-    const chosen = dated.length > 0 ? dated[0] : markdown.length === 1 ? markdown[0] : undefined;
-    if (chosen === undefined) return skip('ambiguous', { candidates: markdown.length });
+    // 按周期期望名精确匹配：daily=date.md；weekly=YYYY-Wnn.md；monthly=YYYY-MM.md。
+    // 若唯一命中则直接用；否则回退到「唯一一个非 index 的 .md」；仍不唯一就不猜。
+    const expected = period === undefined ? `${date}.md` : `${periodFileBase(period, date)}.md`;
+    const named = markdown.filter((file) => path.basename(file.path) === expected);
+    const chosen = named.length > 0 ? named[0] : markdown.length === 1 ? markdown[0] : undefined;
+    if (chosen === undefined) return skip('ambiguous', { candidates: markdown.length, expected, period: period ?? null });
 
     const repoPath = settings.repo.path;
     const resolved = path.resolve(repoPath, chosen.path);
@@ -448,6 +493,7 @@ export class Runner {
       durationMs: summary.durationMs,
       files: summary.files,
       ...(summary.date === undefined ? {} : { date: summary.date }),
+      ...(summary.period === undefined ? {} : { period: summary.period }),
       ...(summary.contentHash === undefined ? {} : { contentHash: summary.contentHash }),
       ...(summary.branch === undefined ? {} : { branch: summary.branch }),
       ...(summary.commit === undefined ? {} : { commit: summary.commit }),
@@ -460,9 +506,12 @@ export class Runner {
       logFile: summary.logFile,
     };
     const state = store.readState();
+    const periodSuccess = { ...(state.periodSuccess ?? {}) };
+    if (summary.ok && summary.period !== undefined) periodSuccess[summary.period] = record.at;
     const next: Parameters<Store['recordRun']>[1] = {
       lastRunAt: record.at,
       ...(summary.ok ? { lastSuccessAt: record.at } : {}),
+      ...(summary.ok && summary.period !== undefined ? { periodSuccess } : {}),
       ...(summary.ok && summary.prUrl !== undefined
         ? { pendingPr: { url: summary.prUrl, createdAt: record.at, ...(summary.date === undefined ? {} : { date: summary.date }) } }
         : {}),

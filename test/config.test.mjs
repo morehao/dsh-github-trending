@@ -87,4 +87,43 @@ test('分段合并只覆盖目标分区，字段归位正确', () => {
   assert.equal(config.sectionOfField('github.tokenRef'), 'auth');
   assert.equal(config.sectionOfField('trending.topN'), 'scope');
   assert.equal(config.sectionOfField('schedule.timezone'), 'schedule');
+  assert.equal(config.sectionOfField('schedule.periods'), 'schedule');
+});
+
+test('周期枚举：since 支持 monthly，非法值回落 daily', () => {
+  assert.equal(config.normalizeSettings({ trending: { since: 'monthly' } }).trending.since, 'monthly');
+  assert.equal(config.normalizeSettings({ trending: { since: 'weekly' } }).trending.since, 'weekly');
+  assert.equal(config.normalizeSettings({ trending: { since: 'hourly' } }).trending.since, 'daily');
+});
+
+test('schedule.periods：默认 daily、去重按规范序、空数组保留', () => {
+  assert.deepEqual(config.normalizeSettings({}).schedule.periods, ['daily']);
+  assert.deepEqual(
+    config.normalizeSettings({ schedule: { periods: ['monthly', 'daily', 'daily', 'bogus'] } }).schedule.periods,
+    ['daily', 'monthly'],
+  );
+  assert.deepEqual(config.normalizeSettings({ schedule: { periods: [] } }).schedule.periods, []);
+});
+
+test('校验：调度开启却没选周期要拦，关闭则允许为空', () => {
+  const enabled = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'x' },
+    repo: { path: '/tmp/x' },
+    schedule: { enabled: true, periods: [] },
+  });
+  assert.ok(config.validateSettings(enabled, ['deepseek']).some((problem) => problem.field === 'schedule.periods'));
+
+  const disabled = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'x' },
+    repo: { path: '/tmp/x' },
+    schedule: { enabled: false, periods: [] },
+  });
+  assert.equal(config.validateSettings(disabled, ['deepseek']).some((problem) => problem.field === 'schedule.periods'), false);
+});
+
+test('toCoreConfig 用本次运行的 period 覆盖 trending.since', () => {
+  const settings = config.normalizeSettings({ trending: { since: 'daily' } });
+  assert.equal(config.toCoreConfig(settings, 'k').trending.since, 'daily');
+  assert.equal(config.toCoreConfig(settings, 'k', undefined, 'weekly').trending.since, 'weekly');
+  assert.equal(config.toCoreConfig(settings, 'k', undefined, 'monthly').trending.since, 'monthly');
 });
