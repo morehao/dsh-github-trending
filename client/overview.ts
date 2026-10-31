@@ -4,7 +4,7 @@
  * 所有状态都来自 `/state`；运行中只显示开始时间、已用时与「核心执行中」，
  * 不伪造九步百分比。PR 不写「已合并」——state 无法区分 merged/closed。
  */
-import { Btn, Pill, duration, h, localTime, shortHash } from './ui.js';
+import { Btn, Pill, React, duration, h, localTime, shortHash } from './ui.js';
 import type { Translate } from './i18n.js';
 import type { DigestTarget, RunRecord, StatePayload } from './api.js';
 import type { StoreValue } from './store.js';
@@ -13,13 +13,13 @@ import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
 import { credentialView } from './credential.js';
 import {
-  buildDigestDates,
+  buildPeriodGroups,
   digestTarget,
-  formatDayLabel,
-  recentDates,
+  formatBucketLabel,
+  PERIODS,
   zonedDateString,
-  type DigestDay,
   type DigestStatus,
+  type Period,
 } from './digest-core.js';
 
 export interface OverviewProps {
@@ -48,7 +48,7 @@ const STATUS_LAMP: Record<DigestStatus, string> = {
   missing: 'warn',
 };
 
-function dayLabel(t: Translate, day: DigestDay): string {
+function dayLabel(t: Translate, day: { status: DigestStatus; record: RunRecord }): string {
   switch (day.status) {
     case 'preview':
       return duration(day.record.durationMs);
@@ -116,6 +116,7 @@ function readyRows(t: Translate, state: StatePayload): Array<{ ok: boolean; labe
 export function OverviewView(props: OverviewProps): any {
   const { t, lang, store, controller } = props;
   const state = store.state;
+  const [activePeriod, setActivePeriod] = React.useState<Period>('daily');
   if (state === null) {
     return h('div', { className: 'dshgt-empty' }, store.error ?? t('quickfill.loading'));
   }
@@ -126,9 +127,18 @@ export function OverviewView(props: OverviewProps): any {
   const readyCount = rows.filter((row) => row.ok).length;
   const timeZone = state.schedule.timezone;
   const today = zonedDateString(new Date(), timeZone);
-  const days = buildDigestDates(state.status.history, { timeZone });
-  const byDate = new Map(days.map((day) => [day.date, day]));
-  const week = recentDates(today, 7);
+  // 三榜（日/周/月）各自成组，只展示真正有记录的期数，不再为空白日期占位。
+  const groups = buildPeriodGroups(state.status.history, { timeZone });
+  const groupMap = new Map(groups.map((group) => [group.period, group] as const));
+  const enabledPeriods = PERIODS.filter((period) => state.schedule.periods.includes(period));
+  const periods = enabledPeriods.length > 0 ? enabledPeriods : PERIODS;
+  const period: Period = periods.includes(activePeriod) ? activePeriod : (periods[0] ?? 'daily');
+  const activeDays = groupMap.get(period)?.days ?? [];
+  // 日榜最多展示最近 7 期；周/月榜历史本身有限，全部展示。
+  const recent = period === 'daily' ? activeDays.slice(0, 7) : activeDays;
+  // 今天还没跑、且调度开着：日榜给一个「等待 {time}」提示位（不算空日期，只是状态）。
+  const todayHasDaily = groupMap.get('daily')?.days.some((day) => day.date === today) ?? false;
+  const showWaiting = period === 'daily' && !todayHasDaily && state.schedule.enabled;
   const lastTarget = last === null ? undefined : digestTarget(last, timeZone);
 
   return h(
@@ -254,39 +264,67 @@ export function OverviewView(props: OverviewProps): any {
         t('overview.week.title'),
         h('button', { type: 'button', className: 'dshgt-linkbtn dshgt-section-tail', onClick: props.onOpenRuns }, t('overview.week.all')),
       ),
-      h(
-        'div',
-        { className: 'dshgt-week' },
-        week.map((date) => {
-          const day = byDate.get(date);
-          if (day === undefined) {
-            const waiting = date === today && state.schedule.enabled;
-            return h(
-              'div',
-              { className: 'dshgt-day', key: date },
-              h('div', { className: 'dshgt-day-date' }, date.slice(5).replace('-', '/')),
-              h('div', { className: 'dshgt-day-status' }, waiting ? t('overview.week.wait', { time: state.schedule.time }) : t('overview.week.none')),
-            );
-          }
-          return h(
-            'button',
-            {
-              type: 'button',
-              className: 'dshgt-day dshgt-day-clickable',
-              key: date,
-              onClick: () => props.onOpenDigest({ period: 'daily', bucket: date }),
-              title: day.record.errorCode === undefined ? formatDayLabel(date, lang) : `${formatDayLabel(date, lang)} · ${day.record.errorCode}`,
-            },
-            h('div', { className: 'dshgt-day-date' }, date.slice(5).replace('-', '/')),
-            h(
-              'div',
-              { className: 'dshgt-day-status' },
-              h('span', { className: `dshgt-lamp ${STATUS_LAMP[day.status]}` }),
-              dayLabel(t, day),
+      periods.length > 1
+        ? h(
+            'div',
+            { className: 'dshgt-period-seg dshgt-overview-seg', role: 'tablist', 'aria-label': t('overview.week.selectPeriod') },
+            periods.map((item) => {
+              const on = item === period;
+              const count = groupMap.get(item)?.days.length ?? 0;
+              return h(
+                'button',
+                {
+                  key: item,
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': on ? 'true' : 'false',
+                  className: on ? 'on' : '',
+                  onClick: () => setActivePeriod(item),
+                },
+                h('span', null, t(`period.${item}`)),
+                h('span', { className: 'dshgt-period-count' }, String(count)),
+              );
+            }),
+          )
+        : null,
+      recent.length === 0 && !showWaiting
+        ? h('div', { className: 'dshgt-hint dshgt-overview-empty' }, t('overview.week.empty'))
+        : h(
+            'div',
+            { className: 'dshgt-week' },
+            recent.map((day) =>
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshgt-day dshgt-day-clickable',
+                  key: day.bucket,
+                  onClick: () => props.onOpenDigest({ period, bucket: day.bucket }),
+                  title:
+                    day.record.errorCode === undefined
+                      ? formatBucketLabel(period, day.bucket, lang)
+                      : `${formatBucketLabel(period, day.bucket, lang)} · ${day.record.errorCode}`,
+                },
+                h('div', { className: 'dshgt-day-date' }, shortBucket(period, day.bucket)),
+                h('div', { className: 'dshgt-day-status' }, h('span', { className: `dshgt-lamp ${STATUS_LAMP[day.status]}` }), dayLabel(t, day)),
+              ),
             ),
-          );
-        }),
-      ),
+            showWaiting
+              ? h(
+                  'div',
+                  { className: 'dshgt-day' },
+                  h('div', { className: 'dshgt-day-date' }, today.slice(5).replace('-', '/')),
+                  h('div', { className: 'dshgt-day-status' }, t('overview.week.wait', { time: state.schedule.time })),
+                )
+              : null,
+          ),
     ),
   );
+}
+
+/** 榜单格子上的短标签：日=MM/DD、周=Wnn、月=YY/MM。 */
+function shortBucket(period: Period, bucket: string): string {
+  if (period === 'daily') return bucket.slice(5).replace('-', '/');
+  if (period === 'weekly') return bucket.slice(5);
+  return bucket.slice(2).replace('-', '/');
 }

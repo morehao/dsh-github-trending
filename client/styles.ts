@@ -257,7 +257,7 @@ export const CSS = `
 .dshgt-md a:hover{text-decoration:underline;}
 
 /* ——— 周期标签 / 分段 ——— */
-.dshgt-pchip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap;border:1px solid var(--gt-border);color:var(--gt-muted);background:var(--gt-bg);}
+.dshgt-pchip{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap;border:1px solid var(--gt-border);color:var(--gt-muted);background:var(--gt-bg);}
 .dshgt-pchip.daily{color:var(--gt-accent);border-color:color-mix(in srgb,var(--gt-accent) 35%,var(--gt-border));background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));}
 .dshgt-pchip.weekly{color:#7c3aed;border-color:#ddd6fe;background:#f5f3ff;}
 .dshgt-pchip.monthly{color:#0f766e;border-color:#99f6e4;background:#f0fdfa;}
@@ -267,6 +267,8 @@ export const CSS = `
 .dshgt-period-seg button.on{background:var(--gt-bg);color:var(--gt-fg);font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.08);}
 .dshgt-period-count{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 6%,var(--gt-bg));border-radius:999px;padding:0 6px;line-height:16px;}
 .dshgt-period-seg button.on .dshgt-period-count{color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 12%,var(--gt-bg));}
+.dshgt-overview-seg{margin-bottom:8px;}
+.dshgt-overview-empty{padding:14px 2px;}
 
 /* ——— 运行记录 ——— */
 .dshgt-runs-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
