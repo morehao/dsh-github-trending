@@ -300,26 +300,25 @@ export const CSS = `
 .dshgt-about-head{display:flex;align-items:center;gap:10px;}
 .dshgt-about-title{margin:0;font-size:16px;}
 .dshgt-about-head .dshgt-btn{margin-left:auto;}
-.dshgt-about-pkg{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;border:1px solid var(--gt-border);background:var(--gt-card);border-radius:8px;padding:9px 10px;cursor:pointer;font-family:inherit;color:inherit;}
-.dshgt-about-pkg:hover{border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));}
-.dshgt-about-pkg .dshgt-mono{font-size:12px;word-break:break-all;}
+.dshgt-about-pkg{display:flex;align-items:center;width:100%;text-align:left;border:1px solid var(--gt-border);background:var(--gt-card);border-radius:8px;padding:9px 10px;cursor:pointer;font-family:inherit;color:inherit;transition:border-color .12s ease,background .12s ease;}
+.dshgt-about-pkg:hover{border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));background:color-mix(in srgb,var(--gt-fg) 4%,var(--gt-card));}
+.dshgt-about-pkg.is-copied{border-color:color-mix(in srgb,var(--gt-ok) 45%,var(--gt-border));}
+.dshgt-about-pkg .dshgt-mono{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text;}
 .dshgt-about .dshgt-kv{grid-template-columns:110px 1fr;}
-.dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;word-break:break-all;}
+.dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;}
 .dshgt-about .dshgt-kv a:hover{text-decoration:underline;}
-.dshgt-update{margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
-.dshgt-update-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
-.dshgt-update-head h4{margin:0;font-size:13px;font-weight:600;}
-.dshgt-update-head .dshgt-hint{font-size:11.5px;}
-.dshgt-update-line{margin:6px 0 0;font-size:12.5px;color:var(--gt-muted);line-height:1.55;}
-.dshgt-update-err{color:var(--gt-err);}
-.dshgt-update-warn{margin:6px 0 0;font-size:12px;color:var(--gt-warn);line-height:1.55;}
-.dshgt-update-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px;}
-.dshgt-update-manual{margin-top:9px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--gt-warn) 35%,var(--gt-border));border-radius:8px;background:color-mix(in srgb,var(--gt-warn) 6%,var(--gt-card));}
-.dshgt-update-manual .dshgt-update-warn{margin:0 0 6px;}
-.dshgt-update-cmd{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.5;color:var(--gt-fg);word-break:break-all;user-select:all;}
-.dshgt-update-dot{display:inline-block;width:6px;height:6px;margin-left:6px;border-radius:50%;background:var(--gt-err);vertical-align:middle;flex:none;}
-.dshgt-update-bare{margin-top:0;padding-top:0;border-top:0;}
-.dshgt-update-card .dshgt-card-h{margin-bottom:2px;}
+.dshgt-about-core{display:inline-flex;align-items:center;gap:7px;}
+.dshgt-about-gh{display:inline-flex;align-items:center;justify-content:center;color:var(--gt-muted);}
+.dshgt-about-gh:hover{color:var(--gt-fg);}
+.dshgt-gh{width:15px;height:15px;display:block;fill:currentColor;}
+/* 关于弹层的更新行：与身份条同构（左侧状态 + 右侧单按钮），无标题、无说明。 */
+.dshgt-about-upd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-about-status{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--gt-muted);}
+.dshgt-about-status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none;opacity:.9;}
+.dshgt-about-status.ok{color:var(--gt-ok);}
+.dshgt-about-status.new{color:var(--gt-warn);}
+.dshgt-about-status.err{color:var(--gt-err);}
+.dshgt-about-actions{display:flex;align-items:center;gap:8px;flex:none;}
 
 @media (max-width:1100px){
   .dshgt-app{grid-template-columns:190px minmax(0,1fr);}

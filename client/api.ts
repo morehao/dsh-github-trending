@@ -133,6 +133,8 @@ export interface CoreStatus {
   ipcSchema?: number;
   digestSchema?: number;
   supportedProviders: string[];
+  /** 核心开源仓库（`https://github.com/<owner>/<repo>`）；缺失时界面隐藏外链。 */
+  repository?: string;
   code?: string;
   message?: string;
   checkedAt: string;
