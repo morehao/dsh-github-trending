@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.5.0] - 2026-10-31
+
+### 新增
+
+- **总用量（token）**：每次运行记录 token 总量与历史累计总量，**只展示总用量、不拆维度**。本次任务总量 = 榜单摘要阶段（`usage.totalTokens`）+ 发版订阅阶段（`releases.usage.totalTokens`），订阅消耗计入总量；累计读时求和、不落盘。概览速览块、运行记录（本次 tokens / 发版明细卡 / 页脚累计）与两个工具均展示；旧核心无数据时显示「—」。插件不做费用估算、不内置定价表。
+- **发版订阅（releases）**：订阅一组仓库，每次运行把每个仓库新增的 Release（无 Release 时回退 Tag）写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单同分支同 PR。订阅列表随数据仓版本化（`<output.dir>/subscriptions.yaml`），经核心 `subscribe` IPC 读改（插件不直接写仓，`add/remove` 只写 `.git/pending`，`run` 落盘随 PR）。新增「订阅」视图与设置页「摘要与用量」「发版订阅」两分区；`releases.enabled=false` 时既有榜单产物逐字节不变。
+
+### 变更
+
+- **升级核心与契约**：`dsh.core.version` 0.4.0 → 0.6.0，`@morehao/trendradar-contract` 0.2.0 → 0.3.0（wire 仍 ipc=2 / digest=2，纯增量）。
+- **新增错误码**：`SUBSCRIBE_FAILED`（订阅命令失败）；不改已有错误码名。
+- **预览排除 releases/**：运行结束后挑 digest 预览时排除 `releases/` 前缀，保持「唯一 digest 预览」语义。
+
 ## [v0.4.4] - 2026-10-31
 
 ### 变更
