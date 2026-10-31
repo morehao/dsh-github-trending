@@ -113,6 +113,32 @@ function readyRows(t: Translate, state: StatePayload): Array<{ ok: boolean; labe
   ];
 }
 
+/** 速览卡里的一格：标签 + 数值 + 可选单位（如 tokens）。 */
+function glanceCell(label: string, value: string, unit?: string): any {
+  return h(
+    'div',
+    { className: 'dshgt-glance-cell' },
+    h('span', { className: 'dshgt-glance-label' }, label),
+    h(
+      'span',
+      { className: 'dshgt-glance-val' },
+      h('span', { className: 'dshgt-glance-num dshgt-mono' }, value),
+      unit === undefined ? null : h('span', { className: 'dshgt-glance-unit' }, unit),
+    ),
+  );
+}
+
+/** 一张速览卡；没有可用数据时整体不渲染（旧核心/无数据不留空壳）。 */
+function glanceCard(title: string, cells: any[]): any {
+  if (cells.length === 0) return null;
+  return h(
+    'div',
+    { className: 'dshgt-glance' },
+    h('div', { className: 'dshgt-glance-k' }, title),
+    h('div', { className: 'dshgt-glance-vs' }, cells),
+  );
+}
+
 export function OverviewView(props: OverviewProps): any {
   const { t, lang, store, controller } = props;
   const state = store.state;
@@ -140,6 +166,24 @@ export function OverviewView(props: OverviewProps): any {
   const todayHasDaily = groupMap.get('daily')?.days.some((day) => day.date === today) ?? false;
   const showWaiting = period === 'daily' && !todayHasDaily && state.schedule.enabled;
   const lastTarget = last === null ? undefined : digestTarget(last, timeZone);
+  // 速览只展示确有数据的格子；旧核心 / 无用量时整卡隐藏，不铺一排「—」。
+  const lastTokens = last?.tokens;
+  const releases = last?.releases;
+  const totalTokens = state.status.totalTokens;
+  const tokenCells = [
+    ...(lastTokens === undefined ? [] : [glanceCell(t('overview.tokens.thisRun'), formatTokens(lastTokens), 'tokens')]),
+    ...(totalTokens === undefined ? [] : [glanceCell(t('overview.tokens.total'), formatTokens(totalTokens), 'tokens')]),
+  ];
+  const releaseCells = releases === undefined
+    ? []
+    : [
+        glanceCell(t('overview.releases.new'), String(releases.newReleases)),
+        glanceCell(t('overview.releases.repos'), String(releases.repos)),
+      ];
+  const glanceCards = [
+    glanceCard(t('overview.tokens.title'), tokenCells),
+    glanceCard(t('overview.releases.title'), releaseCells),
+  ].filter((card) => card !== null);
 
   return h(
     'div',
@@ -225,37 +269,14 @@ export function OverviewView(props: OverviewProps): any {
           ),
         ),
 
-    h(
-      'section',
-      { className: 'dshgt-block dshgt-usage-glance' },
-      h(
-        'div',
-        { className: 'dshgt-glance-grid' },
-        h(
-          'div',
-          { className: 'dshgt-glance' },
-          h('div', { className: 'dshgt-glance-k' }, t('overview.tokens.title')),
-          h(
-            'div',
-            { className: 'dshgt-glance-vs' },
-            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.tokens.thisRun')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.tokens === undefined ? '—' : formatTokens(last.tokens)), h('span', { className: 'dshgt-hint' }, 'tokens')),
-            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.tokens.total')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, state.status.totalTokens === undefined ? '—' : formatTokens(state.status.totalTokens)), h('span', { className: 'dshgt-hint' }, 'tokens')),
-          ),
+    glanceCards.length === 0
+      ? null
+      : h(
+          'section',
+          { className: 'dshgt-block dshgt-usage-glance' },
+          h('div', { className: 'dshgt-glance-grid' }, glanceCards),
+          h('p', { className: 'dshgt-hint dshgt-glance-note' }, t('overview.tokens.note')),
         ),
-        h(
-          'div',
-          { className: 'dshgt-glance' },
-          h('div', { className: 'dshgt-glance-k' }, t('overview.releases.title')),
-          h(
-            'div',
-            { className: 'dshgt-glance-vs' },
-            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.releases.new')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.releases === undefined ? '—' : String(last.releases.newReleases))),
-            h('div', { className: 'dshgt-glance-cell' }, h('span', { className: 'dshgt-hint' }, t('overview.releases.repos')), h('span', { className: 'dshgt-glance-num dshgt-mono' }, last?.releases === undefined ? '—' : String(last.releases.repos))),
-          ),
-        ),
-      ),
-      h('p', { className: 'dshgt-hint dshgt-glance-note' }, t('overview.tokens.note')),
-    ),
 
     h(
       'section',

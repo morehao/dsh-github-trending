@@ -181,7 +181,7 @@ export function RunsView(props: RunsProps): any {
             const pr = prStatus(t, state, record);
             return h(
               'div',
-              { className: `dshgt-run-item${open ? ' open' : ''}`, key: record.id },
+              { className: `dshgt-run-item${open ? ' open' : ''}${record.tokens === undefined ? '' : ' has-tokens'}`, key: record.id },
               h(
                 'button',
                 {

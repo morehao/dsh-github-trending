@@ -187,6 +187,7 @@ export const CSS = `
 .dshgt-fact-k{font-size:11.5px;color:var(--gt-muted);margin-bottom:2px;}
 .dshgt-fact-v{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .dshgt-block{display:flex;flex-direction:column;gap:8px;}
+.dshgt-block > .dshgt-btn{align-self:flex-start;}
 .dshgt-section-label{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--gt-muted);letter-spacing:.02em;}
 .dshgt-section-label:after{content:"";height:1px;flex:1;background:color-mix(in srgb,var(--gt-border) 70%,transparent);}
 .dshgt-section-tail{margin-left:auto;font-size:11.5px;color:var(--gt-muted);}
@@ -276,6 +277,19 @@ export const CSS = `
 .dshgt-overview-seg{margin-bottom:8px;}
 .dshgt-overview-empty{padding:14px 2px;}
 
+/* 概览用量速览：Token / 发版两张卡，每卡两格；无数据时整卡不渲染。 */
+.dshgt-usage-glance{gap:8px;}
+.dshgt-glance-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
+.dshgt-glance{border:1px solid var(--gt-border);border-radius:12px;padding:14px 16px 13px;background:var(--gt-card);display:flex;flex-direction:column;gap:10px;min-width:0;}
+.dshgt-glance-k{font-size:12px;color:var(--gt-muted);letter-spacing:.02em;}
+.dshgt-glance-vs{display:flex;gap:30px;flex-wrap:wrap;}
+.dshgt-glance-cell{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.dshgt-glance-label{font-size:12px;color:var(--gt-muted);}
+.dshgt-glance-val{display:flex;align-items:baseline;gap:5px;min-width:0;}
+.dshgt-glance-num{font-size:22px;line-height:1.2;font-weight:650;letter-spacing:-.015em;color:var(--gt-fg);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.dshgt-glance-unit{font-size:11.5px;color:var(--gt-muted);}
+.dshgt-glance-note{margin:0;}
+
 /* ——— 运行记录 ——— */
 .dshgt-runs-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .dshgt-runs-filter{display:flex;gap:4px;margin-left:auto;}
@@ -287,6 +301,8 @@ export const CSS = `
 .dshgt-run-what{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;}
 .dshgt-run-muted{color:var(--gt-muted);font-size:12px;margin-left:6px;}
 .dshgt-run-files,.dshgt-run-duration{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gt-muted);text-align:right;}
+.dshgt-run-tokens{font-size:11.5px;color:var(--gt-muted);text-align:right;white-space:nowrap;}
+.dshgt-run-item.has-tokens .dshgt-run-row{grid-template-columns:18px 120px 56px minmax(0,1fr) 64px 78px 74px 20px;}
 .dshgt-run-chev{color:var(--gt-muted);text-align:center;transition:transform .15s;}
 .dshgt-run-item.open .dshgt-run-chev{transform:rotate(90deg);}
 .dshgt-run-detail{padding:2px 6px 16px 30px;display:flex;flex-direction:column;gap:10px;}
@@ -296,6 +312,11 @@ export const CSS = `
 .dshgt-detail-v a{color:var(--gt-accent);text-decoration:none;}
 .dshgt-detail-v a:hover{text-decoration:underline;}
 .dshgt-run-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.dshgt-releases-detail{padding-top:10px;border-top:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-releases-stats{display:flex;flex-wrap:wrap;gap:6px 20px;}
+.dshgt-releases-stat{display:inline-flex;align-items:baseline;gap:6px;}
+.dshgt-releases-stat .dshgt-hint{font-size:11.5px;}
+.dshgt-runs-foot{padding:4px 2px 0;text-align:right;}
 
 /* ——— 日志抽屉 / 关于 ——— */
 .dshgt-log-modal{max-width:820px;width:calc(100% - 32px);}
@@ -328,6 +349,20 @@ export const CSS = `
 .dshgt-about-status.err{color:var(--gt-err);}
 .dshgt-about-actions{display:flex;align-items:center;gap:8px;flex:none;}
 
+/* ——— 订阅 ——— */
+.dshgt-subs-card{gap:10px;}
+.dshgt-subs-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.dshgt-subs-head h2{margin:0;font-size:15px;font-weight:600;}
+.dshgt-subs-head-actions{margin-left:auto;display:flex;gap:8px;}
+.dshgt-subs-list{border-top:1px solid var(--gt-border);}
+.dshgt-subs-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;min-height:44px;padding:0 4px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-subs-row-head{min-height:30px;font-size:11.5px;color:var(--gt-muted);}
+.dshgt-subs-repo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;}
+.dshgt-subs-actions{display:flex;justify-content:flex-end;gap:6px;}
+.dshgt-subs-add{border:1px dashed var(--gt-border);border-radius:10px;padding:10px 12px;background:color-mix(in srgb,var(--gt-fg) 2%,var(--gt-bg));display:flex;flex-direction:column;gap:7px;}
+.dshgt-subs-add-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dshgt-subs-add .dshgt-input{max-width:100%;}
+
 @media (max-width:1100px){
   .dshgt-app{grid-template-columns:190px minmax(0,1fr);}
   .dshgt-page-head{padding:18px 22px 12px;}
@@ -337,6 +372,7 @@ export const CSS = `
   .dshgt-week{flex-wrap:wrap;}
   .dshgt-day{flex:1 1 88px;}
   .dshgt-run-row{grid-template-columns:18px 104px 52px minmax(0,1fr) 70px 20px;}
+  .dshgt-run-item.has-tokens .dshgt-run-row{grid-template-columns:18px 104px 52px minmax(0,1fr) 58px 70px 20px;}
   .dshgt-run-files{display:none;}
   .dshgt-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
   .dshgt-dateselect{min-width:180px;}
