@@ -1,16 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### 变更
-
-- **推送失败可自愈**：核心改为日期分支追加提交 + 普通推送，`stale info` / `non-fast-forward` 不再需要人工进仓库处理；插件把 push 失败细分为 `stale-lease` / `non-fast-forward` / `auth` / `protected` / `hook` / `pathspec`，并按原因给出下一步（zh/en）。
-- **跳过原因可见**：结果与历史记录新增 `skipReason`（`merged` / `pr-closed` / `unchanged`），运行页直接说明为什么没跑或没提交。
-- **定时运行尊重已关闭的 PR**：插件经 `TRENDRADAR_TRIGGER` 把触发来源传给核心；定时运行遇到 closed-unmerged 的 PR 会跳过，手动运行才会重建并重开。
-- **调度改为「成功才锁当天」**：失败不再吃掉一整天；同一 catch-up 窗口内最多重试 2 次、间隔至少 5 分钟。
-- 历史记录保存 `errorReason` / `skipReason`，重开界面仍能看到原因。
-- 核心版本锁定 `0.3.1`（`dsh.core.version`）：首次运行下载带 append-only 推送与 `TRENDRADAR_TRIGGER` 支持的核心。
-
 ## 0.3.0 - 2026-10-31
 
 ### 变更（含破坏性）
@@ -19,7 +8,16 @@
 - **wire 升级到 v2**：`ipcSchema=2` / `digestSchema=2`，握手额外校验 `contractVersion` 主版本（0）。与核心 0.3.0 配套；混搭旧核心会被 `CORE_INCOMPATIBLE` 明确拦下。
 - **单一 RunResult 解析**：`parseRunResult` 只接受契约 v2 `RunResult`（用契约包自带 ajv 校验器），删除对旧核心 `runOutput` 的兼容分支；`branch` / `commit` / `prUrl` / `contentHash` 为可选字段。
 - **旧状态迁移**：读取时若 `lastDigest` 缺 `contentHashAlgo` 或 `coreVersion` 早于 0.3.0，判定为 legacy，清空 `lastDigest` 与绑定的 `pendingPr`；旧历史记录打 `legacy` 标。插件启动时（`migrateLegacyState`）把清洗结果落盘。
-- 新增 `scripts/set-core-version.mjs` 写 `dsh.core.version`（本版为 `0.3.0`）；`check:naming` 改为校验契约包依赖与 wire 版本。
+- 新增 `scripts/set-core-version.mjs` 写 `dsh.core.version`（本版为 `0.3.1`）；`check:naming` 改为校验契约包依赖与 wire 版本。
+- **核心版本锁定 `0.3.1`**（`dsh.core.version`）：首次运行下载带 append-only 推送与 `TRENDRADAR_TRIGGER` 支持的核心。
+
+### 变更（运行与调度）
+
+- **推送失败可自愈**：核心改为日期分支追加提交 + 普通推送，`stale info` / `non-fast-forward` 不再需要人工进仓库处理；插件把 push 失败细分为 `stale-lease` / `non-fast-forward` / `auth` / `protected` / `hook` / `pathspec`，并按原因给出下一步（zh/en）。
+- **跳过原因可见**：结果与历史记录新增 `skipReason`（`merged` / `pr-closed` / `unchanged`），运行页直接说明为什么没跑或没提交。
+- **定时运行尊重已关闭的 PR**：插件经 `TRENDRADAR_TRIGGER` 把触发来源传给核心；定时运行遇到 closed-unmerged 的 PR 会跳过，手动运行才会重建并重开。
+- **调度改为「成功才锁当天」**：失败不再吃掉一整天；同一 catch-up 窗口内最多重试 2 次、间隔至少 5 分钟。
+- 历史记录保存 `errorReason` / `skipReason`，重开界面仍能看到原因。
 
 ### 新增（工作台 / 日报预览 / 最近 30 天）
 
@@ -29,7 +27,7 @@
 - **渲染安全**：Markdown 子集（标题 / 段落 / 列表 / 引用 / 粗体 / 行内代码 / 链接 / 分隔线 / frontmatter 元信息），只生成 React 文本节点，链接仅 http(s)，不渲染 HTML / 图片；可切「原文」。
 - **关于与仓库入口**：`/state.plugin` 增加 `repository`（由 `package.json.repository` 规范化），左轨包名点击打开关于弹层；完整包名可复制，外链 `target=_blank rel=noreferrer`。
 - **Host 数据**：`RunRecord` / `RunSummary` 补 `date` / `commit` / `preview`，`/state` history 从 10 条改为 30；新增 `GET /preview?id=<runId>`（只接受历史里出现过的 id、不接路径、自定义头鉴权、`no-store`）。
-- **测试**：新增 state / runner / routes / plugin-info / markdown-core / digest-core 用例；`npm run check` 134 条单测 + AC-P 11 条全绿。
+- **测试**：新增 state / runner / routes / plugin-info / markdown-core / digest-core 用例；`npm run check` 145 条单测 + AC-P 11 条全绿。
 
 ### 修复
 
