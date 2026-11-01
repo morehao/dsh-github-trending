@@ -422,21 +422,21 @@ export const CSS = `
 .dshgt-subs-linkbtn{appearance:none;border:0;background:none;font:inherit;font-size:12.5px;color:var(--gt-accent);cursor:pointer;padding:2px 4px;border-radius:5px;}
 .dshgt-subs-linkbtn:hover{text-decoration:underline;}
 .dshgt-subs-confirm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gt-muted);}
-.dshgt-subs-drawer-mask{position:fixed;inset:0;z-index:2147483000;display:flex;justify-content:flex-end;background:color-mix(in srgb,var(--gt-fg) 34%,transparent);backdrop-filter:blur(1.5px);}
-.dshgt-subs-drawer{width:460px;max-width:100%;height:100%;display:flex;flex-direction:column;background:var(--gt-bg);border-left:1px solid var(--gt-border);box-shadow:-30px 0 70px rgba(15,23,42,.3);}
+.dshgt-subs-drawer-mask{position:fixed;inset:0;z-index:2147483000;display:flex;justify-content:flex-end;background:rgba(4,6,9,.55);}
+.dshgt-subs-drawer{width:460px;max-width:100%;height:100%;display:flex;flex-direction:column;background:var(--gt-card);border-left:1px solid var(--gt-border);box-shadow:-30px 0 70px rgba(0,0,0,.38);}
 .dshgt-subs-drawer-head{flex:none;display:flex;align-items:flex-start;gap:10px;padding:16px 20px 12px;border-bottom:1px solid var(--gt-border);}
 .dshgt-subs-drawer-main{flex:1;min-width:0;}
 .dshgt-subs-drawer-repo{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600;word-break:break-all;}
 .dshgt-subs-drawer-sub{margin-top:4px;font-size:11.5px;color:var(--gt-muted);}
 .dshgt-subs-drawer-close{flex:none;width:28px;height:28px;display:grid;place-items:center;appearance:none;border:0;border-radius:6px;background:none;color:var(--gt-muted);font-size:18px;line-height:1;cursor:pointer;}
-.dshgt-subs-drawer-close:hover{background:var(--gt-card);color:var(--gt-fg);}
+.dshgt-subs-drawer-close:hover{background:var(--dsw-alias-bg-layer-2,var(--gt-card));color:var(--gt-fg);}
 .dshgt-subs-drawer-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:12px 20px 18px;}
 .dshgt-subs-vol{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--gt-muted);}
 .dshgt-subs-vol .label{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
 .dshgt-subs-drawer-note{margin-top:auto;padding-top:12px;border-top:1px solid var(--gt-border);font-size:11.5px;color:var(--gt-muted);line-height:1.65;word-break:break-word;}
 .dshgt-subs-drawer-raw{margin:0;padding:12px 14px;border-radius:8px;background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-card));font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:break-word;}
 /* 抽屉正文纸面：md 铺在卡面上（与日报预览 .dshgt-digest-sheet 同一观感），不再直接贴页面底色。 */
-.dshgt-subs-drawer-doc{border:1px solid var(--gt-border);border-radius:10px;background:var(--gt-card);padding:14px 16px;}
+.dshgt-subs-drawer-doc{border:1px solid var(--gt-border);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--gt-card));padding:14px 16px;}
 .dshgt-subs-drawer-doc .dshgt-subs-drawer-raw{background:transparent;padding:0;}
 /* 抽屉专用紧凑 md 排版：覆盖日报的大号 .dshgt-md（h1 24 / h2 18），保留结构其余样式。 */
 .dshgt-subs-drawer-doc .dshgt-md{font-size:12.5px;line-height:1.7;}
