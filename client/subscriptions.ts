@@ -56,6 +56,15 @@ function errorText(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
 }
 
+/**
+ * 单仓分析「还没纳入/没有记录」是业务前置条件不满足，不是故障：
+ * 核心会报 `repo "o/r" is not in the subscription list` 或 `has no release document yet`。
+ * 这类错误翻成一句人话，避免把裸核心错误糊到用户脸上。
+ */
+function isNotReadyMessage(message: string): boolean {
+  return /is not in the subscription list|has no release document|no release record|not subscribed/i.test(message);
+}
+
 /** `2026-10-25` → `10-25`；不是日期就原样返回。 */
 function monthDay(value: string | undefined): string {
   if (value === undefined || value === '') return '—';
@@ -230,8 +239,8 @@ function DocDrawer(props: DocDrawerProps): any {
             h('div', { style: { marginTop: 8 } }, h(Btn, { small: true, onClick: () => setAttempt((current) => current + 1) }, t('subs.drawer.retry'))),
           )
         : parseFailed || nodes === null
-          ? h('pre', { className: 'dshgt-subs-drawer-raw' }, doc?.markdown ?? '')
-          : h('div', { className: 'dshgt-md' }, nodes);
+          ? h('div', { className: 'dshgt-subs-drawer-doc' }, h('pre', { className: 'dshgt-subs-drawer-raw' }, doc?.markdown ?? ''))
+          : h('div', { className: 'dshgt-subs-drawer-doc' }, h('div', { className: 'dshgt-md' }, nodes));
 
   return h(
     'div',
@@ -339,6 +348,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const [openRepo, setOpenRepo] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [addValue, setAddValue] = React.useState('');
+  // 添加弹窗内的错误：模态遮住了页面级 error 条，失败原因要就地显示在弹窗里。
+  const [addError, setAddError] = React.useState<string | null>(null);
   // 发版分析：全局或单仓，任一进行中时其余触发都禁用（后端同一把运行锁）。
   const [analyzing, setAnalyzing] = React.useState<null | { scope: 'all' | 'one'; repo?: string }>(null);
   const [result, setResult] = React.useState<AnalyzeResult | null>(null);
@@ -376,6 +387,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     setBusy('add');
     setError(null);
     setNote(null);
+    setAddError(null);
     postSubscriptions('add', [repo])
       .then((next) => {
         setList(next);
@@ -383,7 +395,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         setAddOpen(false);
         setNote(t('subs.add.queued', { repo }));
       })
-      .catch((failure: unknown) => setError(errorText(failure)))
+      .catch((failure: unknown) => setAddError(errorText(failure)))
       .finally(() => setBusy(null));
   };
 
@@ -431,12 +443,14 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
       .then((record) => {
         setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: record.status !== 'failed', changed: record.changed });
         if (record.status === 'failed' && record.errorMessage !== undefined) {
-          setError(t('subs.analyze.failed', { message: record.errorMessage }));
+          const notReady = isNotReadyMessage(record.errorMessage);
+          setError(notReady ? t('subs.row.triggerFresh') : t('subs.analyze.failed', { message: record.errorMessage }));
         }
         load();
       })
       .catch((failure: unknown) => {
-        setError(errorText(failure));
+        const message = errorText(failure);
+        setError(isNotReadyMessage(message) ? t('subs.row.triggerFresh') : message);
         setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: false, changed: 0 });
       })
       .finally(() => setAnalyzing(null));
@@ -486,6 +500,9 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     const item = row.item;
     const tone = toneOf(item?.status);
     const rowAnalyzing = analyzing !== null && analyzing.scope === 'one' && analyzing.repo === row.name;
+    // baseline ＝ 从未跑过发版检查（新加 / 待首次分析）：单仓触发必被核心拒绝
+    // （--stages releases 不合并 pending），因此禁用按钮并给提示，不放必败请求。
+    const fresh = item?.status === 'baseline';
     const checkbox = selecting
       ? h(
           'span',
@@ -535,12 +552,12 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
               {
                 type: 'button',
                 className: 'dshgt-subs-act gen',
-                'aria-label': t('subs.row.triggerRepo', { repo: row.name }),
-                title: t('subs.row.triggerRepo', { repo: row.name }),
-                disabled: globalBusy || busy !== null,
+                'aria-label': fresh ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
+                title: fresh ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
+                disabled: globalBusy || busy !== null || fresh,
                 onClick: (event: any) => {
                   event.stopPropagation();
-                  runAnalyze(row.name);
+                  if (!fresh) runAnalyze(row.name);
                 },
               },
               t('subs.row.trigger'),
@@ -639,46 +656,19 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         }),
       ),
       h('div', { className: 'dshgt-subs-toolbar-spacer' }),
-      addOpen
-        ? h(
-            'div',
-            { className: 'dshgt-subs-addform' },
-            h('input', {
-              type: 'text',
-              value: addValue,
-              placeholder: t('subs.add.placeholder'),
-              'aria-label': t('subs.add.placeholder'),
-              autoComplete: 'off',
-              spellCheck: false,
-              autoFocus: true,
-              onInput: (event: any) => setAddValue(event.target.value),
-              onKeyDown: (event: any) => {
-                if (event.isComposing === true) return;
-                if (event.key === 'Enter' && canAdd && !alreadySubscribed) addRepo(addValue.trim());
-                if (event.key === 'Escape') {
-                  setAddOpen(false);
-                  setAddValue('');
-                }
-              },
-            }),
-            h(
-              Btn,
-              { small: true, variant: 'primary', disabled: busy !== null || !canAdd || alreadySubscribed, onClick: () => canAdd && !alreadySubscribed && addRepo(addValue.trim()) },
-              t('subs.add.confirm'),
-            ),
-          )
-        : h(
-            Btn,
-            {
-              small: true,
-              disabled: busy !== null,
-              onClick: () => {
-                setAddOpen(true);
-                setAddValue('');
-              },
-            },
-            t('subs.toolbar.add'),
-          ),
+      h(
+        Btn,
+        {
+          small: true,
+          disabled: busy !== null,
+          onClick: () => {
+            setAddOpen(true);
+            setAddValue('');
+            setAddError(null);
+          },
+        },
+        t('subs.toolbar.add'),
+      ),
       h(
         Btn,
         {
@@ -778,6 +768,79 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
             ),
           ),
         ),
+
+    addOpen
+      ? h(
+          'div',
+          {
+            className: 'dshgt-modal-mask',
+            onClick: (event: any) => {
+              if (event.target === event.currentTarget) {
+                setAddOpen(false);
+                setAddValue('');
+                setAddError(null);
+              }
+            },
+          },
+          h(
+            'div',
+            { className: 'dshgt-modal dshgt-addmodal', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('subs.add.title') },
+            h('h3', { style: { margin: 0, fontSize: 14 } }, t('subs.add.title')),
+            h('input', {
+              type: 'text',
+              className: 'dshgt-input dshgt-addmodal-input',
+              value: addValue,
+              placeholder: t('subs.add.placeholder'),
+              'aria-label': t('subs.add.placeholder'),
+              autoComplete: 'off',
+              spellCheck: false,
+              autoFocus: true,
+              onInput: (event: any) => {
+                setAddValue(event.target.value);
+                if (addError !== null) setAddError(null);
+              },
+              onKeyDown: (event: any) => {
+                if (event.isComposing === true) return;
+                if (event.key === 'Enter' && canAdd && !alreadySubscribed && busy === null) addRepo(addValue.trim());
+                if (event.key === 'Escape') {
+                  setAddOpen(false);
+                  setAddValue('');
+                  setAddError(null);
+                }
+              },
+            }),
+            addValue.trim() !== '' && !canAdd ? h('p', { className: 'dshgt-hint dshgt-addmodal-err', style: { margin: 0 } }, t('subs.input.invalid')) : null,
+            alreadySubscribed ? h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('subs.add.exists', { repo: addValue.trim() })) : null,
+            addError === null ? null : h('p', { className: 'dshgt-hint dshgt-addmodal-err', style: { margin: 0 } }, addError),
+            h(
+              'div',
+              { className: 'dshgt-footer', style: { justifyContent: 'flex-end' } },
+              h(
+                Btn,
+                {
+                  small: true,
+                  onClick: () => {
+                    setAddOpen(false);
+                    setAddValue('');
+                    setAddError(null);
+                  },
+                },
+                t('subs.cancel'),
+              ),
+              h(
+                Btn,
+                {
+                  small: true,
+                  variant: 'primary',
+                  disabled: busy !== null || !canAdd || alreadySubscribed,
+                  onClick: () => canAdd && !alreadySubscribed && addRepo(addValue.trim()),
+                },
+                busy === 'add' ? t('subs.adding') : t('subs.add.confirm'),
+              ),
+            ),
+          ),
+        )
+      : null,
 
     openRepo === null
       ? null

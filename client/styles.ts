@@ -359,9 +359,6 @@ export const CSS = `
 .dshgt-subs-search input:focus{outline:2px solid color-mix(in srgb,var(--gt-accent) 30%,transparent);outline-offset:1px;border-color:color-mix(in srgb,var(--gt-accent) 45%,var(--gt-border));}
 .dshgt-subs-search input::placeholder{color:var(--gt-muted);}
 .dshgt-subs-toolbar-spacer{flex:1 1 auto;min-width:0;}
-.dshgt-subs-addform{display:flex;align-items:center;gap:6px;}
-.dshgt-subs-addform input{height:32px;box-sizing:border-box;width:200px;padding:0 9px;border:1px solid var(--gt-border);border-radius:8px;background:var(--gt-bg);color:var(--gt-fg);font:inherit;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
-.dshgt-subs-addform input:focus{outline:2px solid color-mix(in srgb,var(--gt-accent) 30%,transparent);outline-offset:1px;}
 .dshgt-subs-act.gen{color:var(--gt-muted);}
 .dshgt-subs-act.gen:hover{color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 10%,transparent);}
 .dshgt-subs-act.gen:disabled{opacity:.5;cursor:not-allowed;}
@@ -425,8 +422,8 @@ export const CSS = `
 .dshgt-subs-linkbtn{appearance:none;border:0;background:none;font:inherit;font-size:12.5px;color:var(--gt-accent);cursor:pointer;padding:2px 4px;border-radius:5px;}
 .dshgt-subs-linkbtn:hover{text-decoration:underline;}
 .dshgt-subs-confirm-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gt-muted);}
-.dshgt-subs-drawer-mask{position:fixed;inset:0;z-index:2147483000;display:flex;justify-content:flex-end;background:color-mix(in srgb,var(--gt-fg) 26%,transparent);}
-.dshgt-subs-drawer{width:460px;max-width:100%;height:100%;display:flex;flex-direction:column;background:var(--gt-bg);border-left:1px solid var(--gt-border);box-shadow:-24px 0 60px color-mix(in srgb,var(--gt-fg) 16%,transparent);}
+.dshgt-subs-drawer-mask{position:fixed;inset:0;z-index:2147483000;display:flex;justify-content:flex-end;background:color-mix(in srgb,var(--gt-fg) 34%,transparent);backdrop-filter:blur(1.5px);}
+.dshgt-subs-drawer{width:460px;max-width:100%;height:100%;display:flex;flex-direction:column;background:var(--gt-bg);border-left:1px solid var(--gt-border);box-shadow:-30px 0 70px rgba(15,23,42,.3);}
 .dshgt-subs-drawer-head{flex:none;display:flex;align-items:flex-start;gap:10px;padding:16px 20px 12px;border-bottom:1px solid var(--gt-border);}
 .dshgt-subs-drawer-main{flex:1;min-width:0;}
 .dshgt-subs-drawer-repo{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600;word-break:break-all;}
@@ -438,6 +435,26 @@ export const CSS = `
 .dshgt-subs-vol .label{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
 .dshgt-subs-drawer-note{margin-top:auto;padding-top:12px;border-top:1px solid var(--gt-border);font-size:11.5px;color:var(--gt-muted);line-height:1.65;word-break:break-word;}
 .dshgt-subs-drawer-raw{margin:0;padding:12px 14px;border-radius:8px;background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-card));font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:break-word;}
+/* 抽屉正文纸面：md 铺在卡面上（与日报预览 .dshgt-digest-sheet 同一观感），不再直接贴页面底色。 */
+.dshgt-subs-drawer-doc{border:1px solid var(--gt-border);border-radius:10px;background:var(--gt-card);padding:14px 16px;}
+.dshgt-subs-drawer-doc .dshgt-subs-drawer-raw{background:transparent;padding:0;}
+/* 抽屉专用紧凑 md 排版：覆盖日报的大号 .dshgt-md（h1 24 / h2 18），保留结构其余样式。 */
+.dshgt-subs-drawer-doc .dshgt-md{font-size:12.5px;line-height:1.7;}
+.dshgt-subs-drawer-doc .dshgt-md-h1{font-size:15px;margin:0 0 4px;}
+.dshgt-subs-drawer-doc .dshgt-md-h2{font-size:13px;margin:14px 0 6px;padding-left:8px;border-left:3px solid var(--gt-accent);}
+.dshgt-subs-drawer-doc .dshgt-md-h3{font-size:12.5px;}
+.dshgt-subs-drawer-doc .dshgt-md-h4,.dshgt-subs-drawer-doc .dshgt-md-h5,.dshgt-subs-drawer-doc .dshgt-md-h6{font-size:12px;}
+.dshgt-subs-drawer-doc .dshgt-md-p{font-size:12.5px;margin:6px 0;}
+.dshgt-subs-drawer-doc .dshgt-md-list{font-size:12.5px;padding-left:18px;}
+.dshgt-subs-drawer-doc .dshgt-md-list li{margin:3px 0;}
+.dshgt-subs-drawer-doc .dshgt-md-quote{font-size:12.5px;}
+.dshgt-subs-drawer-doc .dshgt-md-table{min-width:0;font-size:12px;}
+.dshgt-subs-drawer-doc .dshgt-md-pre{font-size:11.5px;padding:10px 12px;}
+.dshgt-subs-drawer-doc .dshgt-md-code{font-size:11.5px;}
+/* 添加订阅居中小弹窗 */
+.dshgt-addmodal{max-width:420px;}
+.dshgt-addmodal-input{height:34px;width:100%;}
+.dshgt-addmodal-err{color:var(--gt-err);}
 @media (max-width:1040px){
   .dshgt-subs-thead,.dshgt-subs-row{grid-template-columns:240px 120px 110px minmax(0,1fr);}
   .dshgt-subs-table.is-selecting .dshgt-subs-thead,.dshgt-subs-table.is-selecting .dshgt-subs-row{grid-template-columns:22px 240px 120px 110px minmax(0,1fr);}
