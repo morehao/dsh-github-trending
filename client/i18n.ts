@@ -9,7 +9,7 @@ export type Lang = 'zh' | 'en';
 export const DICT: Record<Lang, Record<string, string>> = {
   zh: {
     'section.title': 'GitHub 趋势',
-    'section.subtitle': '每天定时把 GitHub Trending 抓取、总结并提交到你的仓库；内容全部由本地核心产出。',
+    'section.subtitle': '按日 / 周 / 月定时抓取、总结 GitHub Trending 并提交到你的仓库；内容全部由本地核心产出。',
     'tab.settings': '设置',
     'tab.runs': '运行',
     'st.source': '内容来源',
@@ -541,7 +541,7 @@ export const DICT: Record<Lang, Record<string, string>> = {
   en: {
     'section.title': 'GitHub Trending',
     'section.subtitle':
-      'Fetch, summarize and commit GitHub Trending into your own repo on a daily schedule. All content comes from the local core binary.',
+      'Fetch, summarize and commit GitHub Trending (daily / weekly / monthly) into your own repo on a schedule. All content comes from the local core binary.',
     'tab.settings': 'Settings',
     'tab.runs': 'Runs',
     'st.source': 'Source',
