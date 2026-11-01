@@ -34,12 +34,17 @@ test('wire 版本是 v2（ipcSchema=2 / digestSchema=2 / contractVersion 主版�
 });
 
 test('v2 fixtures 全部通过对应的 ajv 校验', () => {
-  // 契约 0.3.0 起 fixtures 同时含 digest 与 release 两类；
-  // release* 走 releases 校验器，其余走 digest 校验器。
+  // 契约 0.4.0 起 fixtures 含 digest / release / 订阅三类，各自有专用校验器。
+  // 顺序有讲究：subscriptionDocNormal 不能落到 subscriptionList。
+  const validatorFor = (name) => {
+    if (name === 'subscriptionDocNormal') return ['subscriptionDoc', validators.subscriptionDoc];
+    if (name.startsWith('subscriptions')) return ['subscriptionList', validators.subscriptionList];
+    if (name.startsWith('release')) return ['releases', validators.releases];
+    return ['digest', validators.digest];
+  };
   for (const [name, fixture] of Object.entries(fixtures)) {
-    const isRelease = name.startsWith('release');
-    const ok = isRelease ? validators.releases(fixture) : validators.digest(fixture);
-    assert.equal(ok, true, `fixture ${name} 未通过 ${isRelease ? 'releases' : 'digest'} 校验`);
+    const [validatorName, validate] = validatorFor(name);
+    assert.equal(validate(fixture), true, `fixture ${name} 未通过 ${validatorName} 校验`);
   }
 });
 

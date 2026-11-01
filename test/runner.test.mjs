@@ -119,9 +119,14 @@ test('模型 401 → MODEL_UNAUTHORIZED，并标记 error 由文本推断', asyn
 });
 
 test('取消：SIGTERM 终止核心，返回 CORE_CANCELLED 且不写 lastDigest', async () => {
-  const { runner, store } = makeRunner({ scenario: { FAKE_SLEEP: '4000' } });
+  // 等核心真的读到配置（假核心落 ready 标记）再取消：否则机器忙时取消可能撞在
+  // 「已 spawn、还没读 FIFO」的窗口，插件会等满配置通道的 15 s 写超时，测到的就不是取消延迟了。
+  const ready = path.join(mkdtempSync(path.join(tmpdir(), 'dshgt-ready-')), 'core-ready');
+  const { runner, store } = makeRunner({ scenario: { FAKE_SLEEP: '4000', FAKE_READY_FILE: ready } });
   const pending = runner.run({ trigger: 'manual' });
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(ready) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(existsSync(ready), true, '核心应已读到配置并进入运行');
   assert.equal(runner.running !== undefined, true);
   // 只测「取消后多快结束」，不测整次运行的墙钟时长：并行跑测试文件时进程启动会被
   // 拖慢，用总时长做阈值会把机器负载误判成取消失效。

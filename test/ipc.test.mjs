@@ -99,6 +99,8 @@ const USAGE = {
 const RELEASES = {
   enabled: true,
   repos: 3,
+  checked: 3,
+  changed: 2,
   newReleases: 2,
   summarized: 2,
   durationMs: 900,

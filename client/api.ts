@@ -4,6 +4,17 @@
  * 所有请求都打到 Host half 的 `/api/morehao/github-trending/*`；客户端不直接碰核心、
  * 不读本地文件、不持有任何密钥。
  */
+import type {
+  SubscriptionDoc,
+  SubscriptionItem,
+  SubscriptionList,
+  SubscriptionStatus,
+  SubscriptionVolume,
+} from '@morehao/trendradar-contract';
+
+// 订阅相关类型直接来自契约包（type-only：运行时不加载契约包，bundle 仍只依赖 react）。
+export type { SubscriptionDoc, SubscriptionItem, SubscriptionList, SubscriptionStatus, SubscriptionVolume };
+
 export const API = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 
@@ -167,43 +178,6 @@ export interface CoexistenceStatus {
   ipcSchema?: number;
   compatible?: boolean;
   message?: string;
-}
-
-/** 订阅项的周状态（核心 `subscribe list` 的 `items[].status`）。 */
-export type SubscriptionStatus = 'baseline' | 'ok' | 'no_change' | 'rate_limited' | 'failed';
-
-/** 列表页的每仓摘要；旧核心只回 `repos`，此时 `items` 为空数组。 */
-export interface SubscriptionItem {
-  fullName: string;
-  url?: string;
-  latestTag?: string;
-  /** 最近一节发版记录的周末日期（`YYYY-MM-DD`）。 */
-  latestSummaryAt?: string;
-  lastCheckedAt?: string;
-  status: SubscriptionStatus;
-}
-
-export interface SubscriptionList {
-  repos: string[];
-  items: SubscriptionItem[];
-}
-
-/** 发版记录的卷索引（一册一份文件，超过行数阈值核心才开新册）。 */
-export interface SubscriptionVolume {
-  index: number;
-  file: string;
-  from?: string;
-  to?: string;
-  lines?: number;
-}
-
-/** 某个仓库的发版记录：`markdown` 是数据仓里那份文件的原文。 */
-export interface SubscriptionDoc {
-  fullName: string;
-  volume: number;
-  volumes?: SubscriptionVolume[];
-  updatedAt?: string;
-  markdown: string;
 }
 
 /** 发版运行记录（`state.releaseRuns`，最多 30 条）；旧状态文件没有该字段。 */

@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.6.1] - 2026-11-01
+
+### 变更
+
+- 契约依赖 `@morehao/trendradar-contract` 0.3.0 → 0.4.0：`SubscriptionStatus` / `SubscriptionItem` /
+  `SubscriptionVolume` / `SubscriptionDoc` 改为从契约包 `import type`，删除 `src/ipc.ts` 与
+  `client/api.ts` 里的本地兜底声明（0.6.0 的临时载体）。
+- **无行为变化**：wire 仍 `ipcSchema=2` / `digestSchema=2`，`dsh.core.version` 仍为 `0.7.0`；
+  运行时守卫与错误文案保持原样（契约包的 `subscriptionDoc` 校验比本地守卫更严，换用会改变对旧核心
+  的接受范围，故不动）。
+
 ## [v0.6.0] - 2026-11-01
 
 > **发版顺序**：先发布核心 `0.7.0`（含契约 0.4.0 的字段），再发布本插件——本版

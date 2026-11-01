@@ -94,9 +94,11 @@ function statusLabel(t: Translate, status: SubscriptionStatus | undefined): stri
 function mergeRows(list: SubscriptionList | null): RepoRow[] {
   if (list === null) return [];
   const byName = new Map<string, SubscriptionItem>();
-  for (const item of list.items) byName.set(item.fullName, item);
+  // 契约里 items 可选（旧核心只回 repos）；归一化后一般都有，这里再兜一次。
+  const items = list.items ?? [];
+  for (const item of items) byName.set(item.fullName, item);
   const names: string[] = [...list.repos];
-  for (const item of list.items) {
+  for (const item of items) {
     if (!names.includes(item.fullName)) names.push(item.fullName);
   }
   return names.map((name) => {

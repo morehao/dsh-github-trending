@@ -11,7 +11,17 @@
  * 不再兼容——协议版本不匹配会在握手阶段被拦下，这里绝不「猜字段」。
  */
 import { validators } from '@morehao/trendradar-contract';
-import type { ErrorInfo, FileArtifact, RunResult, Usage, ReleasesReport, SubscriptionList } from '@morehao/trendradar-contract';
+import type {
+  ErrorInfo,
+  FileArtifact,
+  RunResult,
+  Usage,
+  ReleasesReport,
+  SubscriptionDoc,
+  SubscriptionItem,
+  SubscriptionList,
+  SubscriptionStatus,
+} from '@morehao/trendradar-contract';
 import type { AnyCode } from './errors.js';
 
 export type {
@@ -24,7 +34,11 @@ export type {
   StateRun,
   Usage,
   ReleasesReport,
+  SubscriptionDoc,
+  SubscriptionItem,
   SubscriptionList,
+  SubscriptionStatus,
+  SubscriptionVolume,
 } from '@morehao/trendradar-contract';
 
 /** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v2.json` 的 wire 整数）。 */
@@ -78,43 +92,8 @@ export interface RunOutcome {
   coreVersion: string;
 }
 
-/**
- * 契约 0.4.0（核心 0.7.0）新增的 wire 类型。
- *
- * 契约包尚未发布：npm 上的 `@morehao/trendradar-contract` 还停在 0.3.0，
- * 因此这三块按 `contract/schema/releases.v2.json` 原样在本地声明，等 0.4.0 发布后
- * 改回 `@morehao/trendradar-contract` 的 `import type`。除这里列出的字段外，
- * 不补任何契约里没有的东西——本地声明只是「包还没发」的临时载体，不是第二份契约。
- */
-export type SubscriptionStatus = 'baseline' | 'ok' | 'no_change' | 'rate_limited' | 'failed';
-
-/** 订阅表的一行：只放列表展示需要的字段，正文在 `SubscriptionDoc` 里（首屏体积预算）。 */
-export interface SubscriptionItem {
-  fullName: string;
-  url?: string;
-  latestTag?: string;
-  latestSummaryAt?: string;
-  lastCheckedAt?: string;
-  status: SubscriptionStatus;
-}
-
-/** 发版文档的一卷：每册都带两位序号，index N 是 `<repo>-0N.md`（第 1 册是 `-01`）。 */
-export interface SubscriptionVolume {
-  index: number;
-  file: string;
-  from?: string;
-  to?: string;
-  lines?: number;
-}
-
-/** 一个仓库某卷的发版文档；`markdown` 是文件原文，面板逐字渲染、不再二次摘要。 */
-export interface SubscriptionDoc {
-  fullName: string;
-  volume: number;
-  volumes?: SubscriptionVolume[];
-  updatedAt?: string;
-  markdown: string;
-}
+// 订阅相关类型（`SubscriptionStatus` / `SubscriptionItem` / `SubscriptionVolume` /
+// `SubscriptionDoc`，契约 0.4.0 起）直接来自 npm 契约包，本地不再保留第二份形状。
 
 const SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = ['baseline', 'ok', 'no_change', 'rate_limited', 'failed'];
 

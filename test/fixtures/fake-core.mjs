@@ -151,6 +151,10 @@ if (command === 'run') {
     process.exit(1);
   }
   const sleep = Number(process.env.FAKE_SLEEP ?? '0');
+  // 取消测试用：配置真的读到了才落标记，测试等它再取消，避免撞在「已 spawn、未读 FIFO」
+  // 的窗口里（那里取消会让插件等满配置通道的 15 s 写超时）。
+  const readyFile = process.env.FAKE_READY_FILE;
+  if (readyFile !== undefined && readyFile !== '') writeFileSync(readyFile, 'ready');
   if (sleep > 0) {
     await new Promise((resolve) => setTimeout(resolve, sleep));
   }
@@ -176,7 +180,8 @@ if (command === 'run') {
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
   const files = artifactsFor(config, skipped);
-  // 契约 0.3.0：可选 usage / releases 块。用 FAKE_USAGE_* / FAKE_RELEASES_* 控制。
+  // 契约 0.4.0：可选 usage / releases 块；给了就按各自 schema 生成（releases 的
+  // checked/changed 必填）。用 FAKE_USAGE_* / FAKE_RELEASES_* 控制。
   const usageSpec = process.env.FAKE_USAGE;
   let usage;
   if (usageSpec === 'unknown') {
@@ -189,7 +194,7 @@ if (command === 'run') {
   let releases;
   if (releasesSpec !== undefined && releasesSpec !== '') {
     if (releasesSpec === 'off') {
-      releases = { enabled: false, repos: 0, newReleases: 0, durationMs: 0, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, usageKnown: false, calls: 0, retries: 0, batches: 0, cacheHits: 0 } };
+      releases = { enabled: false, repos: 0, checked: 0, changed: 0, newReleases: 0, durationMs: 0, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, usageKnown: false, calls: 0, retries: 0, batches: 0, cacheHits: 0 } };
     } else {
       // 形如 "repos,newReleases,tokens[,degraded,failed,skipped,checked,changed]"（契约 0.4.0 末尾两个计数）
       const [repos, newReleases, tokens, degraded, failed, skippedCount, checked, changed] = releasesSpec
@@ -203,8 +208,9 @@ if (command === 'run') {
         ...(Number.isFinite(degraded) ? { degraded } : {}),
         ...(Number.isFinite(failed) ? { failed } : {}),
         ...(Number.isFinite(skippedCount) ? { skipped: skippedCount } : {}),
-        ...(Number.isFinite(checked) ? { checked } : {}),
-        ...(Number.isFinite(changed) ? { changed } : {}),
+        // 契约 0.4.0 起 checked / changed 必填（核心 0.7.0 总是序列化）：缺省按「全查、未写」。
+        checked: Number.isFinite(checked) ? checked : repos,
+        changed: Number.isFinite(changed) ? changed : 0,
         summarized: newReleases,
         durationMs: 1000,
         usage: { promptTokens: Math.floor(rTotal * 0.8), completionTokens: Math.floor(rTotal * 0.2), totalTokens: rTotal, cachedTokens: 0, usageKnown: true, calls: 1, retries: 0, batches: 1, cacheHits: 0 },
