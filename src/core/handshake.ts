@@ -4,7 +4,7 @@
  * 不匹配就**不运行**，也不做「尽力兼容」。核心的协议版本是硬闸：混搭版本带来的
  * 是静默的产出差异，比一次明确的失败昂贵得多。
  */
-import { execCapture } from './exec.js';
+import { spawnCollect as execCapture } from '@morehao/dsh-plugin-kit/exec';
 import {
   IpcError,
   IPC_SCHEMA_VERSION,
@@ -29,14 +29,13 @@ export async function handshake(
   core: CoreLocation,
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<HandshakeResult> {
-  let result;
-  try {
-    result = await execCapture(core.path, ['version', '--json'], {
-      timeoutMs: options.timeoutMs ?? 5000,
-      signal: options.signal,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+  const result = await execCapture(core.path, ['version', '--json'], {
+    timeoutMs: options.timeoutMs ?? 5000,
+    signal: options.signal,
+  });
+  // kit 的 spawnCollect 永不 reject：spawn 本身失败（ENOENT/EACCES 等）落到 error 字段。
+  if (result.error !== undefined) {
+    const detail = result.error.message;
     throw new IpcError('CORE_SPAWN_FAILED', `无法执行核心 ${core.path}：${detail}`);
   }
   // 取消可能发生在握手途中：这是「用户取消」，不是「核心不兼容」。

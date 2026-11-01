@@ -8,6 +8,7 @@
  */
 import type http from 'node:http';
 
+import { createRouteHandler, HttpError } from '@morehao/dsh-plugin-kit/http';
 import { PluginUpdateError, type Updater } from '@morehao/dsh-plugin-kit/update';
 
 import {
@@ -57,69 +58,40 @@ export interface RouteDeps {
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
-function sendJson(response: http.ServerResponse, status: number, payload: unknown): void {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'content-length': Buffer.byteLength(body),
-  });
-  response.end(body);
-}
-
-async function readBody(request: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new IpcError('PAYLOAD_TOO_LARGE', '请求体过大');
-    chunks.push(chunk as Buffer);
-  }
-  if (chunks.length === 0) return {};
-  const text = Buffer.concat(chunks).toString('utf8').trim();
-  if (text === '') return {};
-  try {
-    const value: unknown = JSON.parse(text);
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('body must be a JSON object');
-    }
-    return value as Record<string, unknown>;
-  } catch (error) {
-    throw new IpcError('CONFIG_INVALID', `请求体不是 JSON 对象：${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 export function createRoutes(deps: RouteDeps) {
-  return async function handler(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-    if (request.headers[HEADER] !== '1') {
-      sendJson(response, 403, { ok: false, code: 'FORBIDDEN', message: `缺少 ${HEADER}: 1 头` });
-      return;
-    }
-    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    const pathname = url.pathname.startsWith(ROUTE_PREFIX)
-      ? url.pathname.slice(ROUTE_PREFIX.length) || '/'
-      : url.pathname;
-    const method = (request.method ?? 'GET').toUpperCase();
-    try {
-      const result = await dispatch(method, pathname, url, request, deps);
-      if (!response.writableEnded) sendJson(response, 200, { ok: true, ...result });
-    } catch (error) {
-      if (response.writableEnded) return;
+  const logger = deps.logger;
+  // 记录当前请求的 method/pathname，供 onError 的日志保留原有字段（onError 不带 ctx）。
+  let current: { method: string; pathname: string } = { method: 'GET', pathname: '/' };
+
+  const handler = createRouteHandler({
+    prefix: ROUTE_PREFIX,
+    header: HEADER,
+    maxBodyBytes: MAX_BODY,
+    dispatch: async ({ method, pathname, url, body }) => {
+      current = { method, pathname };
+      return dispatch(method, pathname, url, body, deps);
+    },
+    // 错误码翻译留在插件侧（dispatcher 不做映射）：保持与原实现的响应形状逐字一致。
+    onError: (error) => {
       if (error instanceof PluginUpdateError) {
         // 更新失败是可预期的业务结果（link 安装 / 无 pluginManager / 安装失败），用 409 而不是 500。
-        deps.logger?.('update.failed', { code: error.code, message: error.message });
-        sendJson(response, 409, {
-          ok: false,
+        logger?.('update.failed', { code: error.code, message: error.message });
+        return {
+          status: 409,
           code: 'UPDATE_FAILED',
-          updateCode: error.code,
           message: redact(error.message),
-          update: deps.update?.view() ?? null,
-        });
-        return;
+          extra: { updateCode: error.code, update: deps.update?.view() ?? null },
+        };
+      }
+      // 请求体解析失败：kit 的 readJsonBody 抛 HttpError（PAYLOAD_TOO_LARGE / INVALID_JSON），
+      // 这里翻译回本插件对外原本的码与状态（PAYLOAD_TOO_LARGE→400 同码；INVALID_JSON→400 CONFIG_INVALID）。
+      if (error instanceof HttpError) {
+        const code = error.code === 'PAYLOAD_TOO_LARGE' ? 'PAYLOAD_TOO_LARGE' : 'CONFIG_INVALID';
+        return { status: 400, code, message: redact(error.message) };
       }
       const code = error instanceof IpcError ? error.code : 'INTERNAL';
       const message = redact(error instanceof Error ? error.message : String(error));
-      deps.logger?.('route.error', { pathname, method, code, message });
+      logger?.('route.error', { pathname: current.pathname, method: current.method, code, message });
       const status =
         code === 'CONFIG_INVALID'
           ? // 「已有一次运行在进行中」是并发冲突而非参数错误：用 409，前端据此禁用按钮并提示。
@@ -129,8 +101,13 @@ export function createRoutes(deps: RouteDeps) {
           : code === 'NOT_FOUND'
             ? 404
             : 500;
-      sendJson(response, status, { ok: false, code, message });
-    }
+      return { status, code, message };
+    },
+    logger,
+  });
+
+  return async function routeHandler(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+    await handler(request, response);
   };
 }
 
@@ -138,7 +115,7 @@ async function dispatch(
   method: string,
   pathname: string,
   url: URL,
-  request: http.IncomingMessage,
+  body: Record<string, unknown>,
   deps: RouteDeps,
 ): Promise<Record<string, unknown>> {
   const env = deps.env ?? process.env;
@@ -154,7 +131,6 @@ async function dispatch(
 
   if (method === 'POST' && pathname === '/update') {
     if (deps.update === undefined) throw new IpcError('NOT_FOUND', '自更新服务不可用');
-    const body = await readBody(request);
     const version = typeof body.version === 'string' && body.version.trim() !== '' ? body.version.trim() : undefined;
     const result = await deps.update.apply(version === undefined ? {} : { version });
     return { result, update: deps.update.view() };
@@ -174,7 +150,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/config') {
-    const body = await readBody(request);
     const incoming = normalizeSettings(body.settings ?? body);
     const section =
       typeof body.section === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(body.section)
@@ -200,7 +175,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/preflight') {
-    const body = await readBody(request);
     const candidate = body.settings === undefined ? settings : normalizeSettings(body.settings);
     const result = await preflightModel({
       settings: candidate,
@@ -212,7 +186,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/run') {
-    const body = await readBody(request);
     const base = {
       dryRun: body.dryRun === true,
       ...(typeof body.date === 'string' && body.date !== '' ? { date: body.date } : {}),
@@ -235,7 +208,6 @@ async function dispatch(
   // 发版订阅运行触发：全量（无 repo）或单仓（repo=owner/repo）。
   // 复用 Runner.runReleases，与榜单 POST /run 共用同一把 active 锁（并发 → 409）。
   if (method === 'POST' && pathname === '/releases/run') {
-    const body = await readBody(request);
     let repo: string | undefined;
     if (body.repo !== undefined) {
       if (typeof body.repo !== 'string' || !isValidRepo(body.repo.trim())) {
@@ -292,7 +264,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/subscriptions') {
-    const body = await readBody(request);
     const action = body.action === 'add' || body.action === 'remove' ? body.action : undefined;
     if (action === undefined) throw new IpcError('CONFIG_INVALID', 'action 必须是 add 或 remove');
     const repos = Array.isArray(body.repos)
@@ -314,7 +285,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/github/test') {
-    const body = await readBody(request);
     const candidate = body.settings === undefined ? settings : normalizeSettings(body.settings);
     const probe = await probeGithubAuth({
       credentials: credentialServices(deps.get),
@@ -335,7 +305,6 @@ async function dispatch(
   }
 
   if (method === 'POST' && pathname === '/quickfill') {
-    const body = await readBody(request);
     const candidates = await listProviderCandidates({
       llm: llmServices(deps.get),
       credentials: credentialServices(deps.get),

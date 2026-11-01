@@ -10,7 +10,7 @@
 import { normalizeProfile } from '@morehao/dsh-plugin-kit';
 import { createPluginUpdater, type Logger, type PluginMeta, type Updater } from '@morehao/dsh-plugin-kit/update';
 
-import { execCapture, sanitizedEnv, type ExecOptions, type ExecResult } from '../core/exec.js';
+import { spawnCollect as execCapture, sanitizedEnv, type ExecOptions, type ExecResult } from '@morehao/dsh-plugin-kit/exec';
 
 export interface UpdateServiceDeps {
   get: (name: string) => unknown;

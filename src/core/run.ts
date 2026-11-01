@@ -18,7 +18,7 @@ import {
 } from '../ipc.js';
 import type { CoreLocation } from './locate.js';
 import { openConfigChannel, removeChannelDir, type ChannelKind } from './channel.js';
-import { sanitizedEnv } from './exec.js';
+import { sanitizedEnv } from '@morehao/dsh-plugin-kit/exec';
 
 export const DEFAULT_RUN_TIMEOUT_MS = 120_000;
 const MAX_STDOUT = 16 * 1024 * 1024;

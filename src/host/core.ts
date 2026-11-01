@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import type { Settings } from '../config.js';
 import { IpcError, IPC_SCHEMA_VERSION, SUPPORTED_DIGEST_SCHEMA } from '../ipc.js';
-import { execCapture } from '../core/exec.js';
+import { spawnCollect as execCapture } from '@morehao/dsh-plugin-kit/exec';
 import { inspectRelease, locateCore, type CoreLocation } from '../core/locate.js';
 import { readCoreRelease, type ReleaseDescriptor } from '../core/release.js';
 import { handshake } from '../core/handshake.js';

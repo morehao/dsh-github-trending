@@ -8,7 +8,7 @@
 import { statSync } from 'node:fs';
 import path from 'node:path';
 
-import { execCapture } from '../core/exec.js';
+import { spawnCollect as execCapture } from '@morehao/dsh-plugin-kit/exec';
 
 export interface DefaultBranchResult {
   branch?: string;

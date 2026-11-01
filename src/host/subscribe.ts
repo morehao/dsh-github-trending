@@ -21,7 +21,7 @@ import path from 'node:path';
 import { effectiveBaseURL, toCoreConfig, toYaml, validateSettings, type Settings } from '../config.js';
 import { IpcError, parseSubscribeResult, type SubscribeAction, type SubscribeOutcome } from '../ipc.js';
 import { locateCore } from '../core/locate.js';
-import { execCapture, sanitizedEnv } from '../core/exec.js';
+import { spawnCollect as execCapture, sanitizedEnv } from '@morehao/dsh-plugin-kit/exec';
 import type { Store } from '../state.js';
 
 /** 订阅命令超时：核心只做一次 GitHub 请求/本地文件读写，8 s 足够。 */

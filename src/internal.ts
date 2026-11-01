@@ -13,7 +13,7 @@ export * as locate from './core/locate.js';
 export * as release from './core/release.js';
 export * as handshake from './core/handshake.js';
 export * as channel from './core/channel.js';
-export * as exec from './core/exec.js';
+export * as exec from '@morehao/dsh-plugin-kit/exec';
 export * as run from './core/run.js';
 export * as core from './host/core.js';
 export * as credentials from './host/credentials.js';

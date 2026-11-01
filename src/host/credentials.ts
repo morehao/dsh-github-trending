@@ -104,7 +104,7 @@ async function defaultGhToken(fresh = false): Promise<string | undefined> {
   if (!fresh && ghTokenCache !== undefined && Date.now() - ghTokenCache.at < GH_TOKEN_TTL_MS) {
     return ghTokenCache.value;
   }
-  const { execCapture } = await import('../core/exec.js');
+  const { spawnCollect: execCapture } = await import('@morehao/dsh-plugin-kit/exec');
   const result = await execCapture('gh', ['auth', 'token'], { timeoutMs: 2000 });
   const token = result.code === 0 ? result.stdout.trim() : '';
   const value = token === '' ? undefined : token;
