@@ -198,6 +198,10 @@ function normalizeError(value: unknown): RunError | undefined {
  */
 export function parseRunResult(text: string, options: ParseRunOptions): RunOutcome {
   const value = parseJsonObject(text);
+  // 契约 RunResult.files 必填且为数组，但核心在「跳过 / 空阶段」时（如 --stages releases 但订阅为空）
+  // 会吐 `files:null`。这是良性的「无事可做」，不该判成 IPC_INVALID 让整次运行报错。
+  // 在契约校验前把 null 归一成 []，不触碰任何产物内容。
+  if (value.files === null || value.files === undefined) value.files = [];
   if (value.command !== 'run' || value.ipcSchema !== IPC_SCHEMA_VERSION || !validators.runResult(value)) {
     throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=2 / command=run）');
   }

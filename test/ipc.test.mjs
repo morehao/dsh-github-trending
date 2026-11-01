@@ -85,6 +85,23 @@ test('parseRunResult 透传 skipReason（契约允许额外字段）', () => {
   assert.equal(dirty.skipReason, undefined);
 });
 
+test('parseRunResult 容忍核心 skipped 时的 files:null（归一成 []，不判 IPC_INVALID）', () => {
+  // 回归：--stages releases 且订阅为空/内容无变化时，核心 v0.8.0 会吐 files:null +
+  // skipped:true（契约 files 要求 array，直接校验会误判 IPC_INVALID，前端表现为一闪而过报错）。
+  const outcome = ipc.parseRunResult(
+    JSON.stringify(runResult({ skipped: true, skipReason: 'unchanged', files: null })),
+    timing,
+  );
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.skipped, true);
+  assert.equal(outcome.skipReason, 'unchanged');
+  assert.deepEqual(outcome.files, []);
+  // files 缺失同样归一成 []
+  const missing = ipc.parseRunResult(JSON.stringify(runResult({ files: undefined })), timing);
+  assert.deepEqual(missing.files, []);
+});
+
+
 const USAGE = {
   promptTokens: 100,
   completionTokens: 40,

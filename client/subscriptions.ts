@@ -330,7 +330,11 @@ interface AnalyzeResult {
   scope: 'all' | 'one';
   repo?: string;
   ok: boolean;
+  /** 核心判定 skipped（无订阅 / 内容无变化）：不生成新分析，但也不是失败。 */
+  skipped: boolean;
   changed: number;
+  /** 本轮实际检查的仓库数（用于 skipped 时区分「没订阅」和「都无变化」）。 */
+  checked: number;
   message?: string;
 }
 
@@ -441,7 +445,15 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     setResult(null);
     postReleasesRun(repo)
       .then((record) => {
-        setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: record.status !== 'failed', changed: record.changed });
+        const scope = repo === undefined ? 'all' : 'one';
+        setResult({
+          scope,
+          ...(repo === undefined ? {} : { repo }),
+          ok: record.status !== 'failed',
+          skipped: record.status === 'skipped',
+          changed: record.changed,
+          checked: record.checked,
+        });
         if (record.status === 'failed' && record.errorMessage !== undefined) {
           const notReady = isNotReadyMessage(record.errorMessage);
           setError(notReady ? t('subs.row.triggerFresh') : t('subs.analyze.failed', { message: record.errorMessage }));
@@ -451,7 +463,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
       .catch((failure: unknown) => {
         const message = errorText(failure);
         setError(isNotReadyMessage(message) ? t('subs.row.triggerFresh') : message);
-        setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: false, changed: 0 });
+        setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: false, skipped: false, changed: 0, checked: 0 });
       })
       .finally(() => setAnalyzing(null));
   };
@@ -486,15 +498,23 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const banner =
     result === null
       ? null
-      : result.ok
-        ? h(
-            Alert,
-            { kind: 'ok' },
-            result.scope === 'all'
-              ? t('subs.analyze.done', { count: result.changed })
-              : t('subs.analyze.doneOne', { repo: result.repo ?? '' }),
-          )
-        : null;
+      : !result.ok
+        ? null
+        : result.skipped
+          ? h(
+              Alert,
+              { kind: 'warn' },
+              result.scope === 'all'
+                ? t('subs.analyze.skipped')
+                : t('subs.analyze.skippedOne', { repo: result.repo ?? '' }),
+            )
+          : h(
+              Alert,
+              { kind: 'ok' },
+              result.scope === 'all'
+                ? t('subs.analyze.done', { count: result.changed })
+                : t('subs.analyze.doneOne', { repo: result.repo ?? '' }),
+            );
 
   const rowNodes = sorted.map((row) => {
     const item = row.item;
