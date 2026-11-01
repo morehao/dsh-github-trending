@@ -226,3 +226,28 @@ function baseRecord(id) {
     warnings: [],
   };
 }
+
+test('regenTarget：用该期代表日期 + 周期（周/月同天映射到同一期）', () => {
+  const makeDay = (period, bucket, date) => ({
+    period,
+    bucket,
+    date,
+    record: baseRecord('r1'),
+    status: 'preview',
+    legacy: false,
+  });
+  assert.deepEqual(digest.regenTarget(makeDay('daily', '2026-10-30', '2026-10-30')), {
+    period: 'daily',
+    date: '2026-10-30',
+  });
+  // 周榜：代表日期落在该 ISO 周内的某天，重跑 date 仍是那一天，core 的 NameOf 会归到同一周
+  assert.deepEqual(digest.regenTarget(makeDay('weekly', '2026-W44', '2026-10-28')), {
+    period: 'weekly',
+    date: '2026-10-28',
+  });
+  // 月榜：代表日期落在该月内
+  assert.deepEqual(digest.regenTarget(makeDay('monthly', '2026-10', '2026-10-15')), {
+    period: 'monthly',
+    date: '2026-10-15',
+  });
+});
