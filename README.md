@@ -52,7 +52,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 ## 发版订阅
 
-- 订阅一组仓库，之后**每周一次**把每个仓库这一周「**新增的 Release**（无 Release 时回退 Tag）」合成一段中文总结，写到 `<output.dir>/releases/<owner>/<repo>-01.md`（每册都带两位序号，超出行数预算后下一次写入开 `-02.md`，最新一周在最上面），与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。跨仓的周汇总（`releases/weekly/<年>/<ISO周>.{md,json}`）继续生成，供外部 Web 服务的 `GET /api/v2/releases*` 消费。
+- 订阅一组仓库，之后**每周一次**把每个仓库这一周「**新增的 Release**（无 Release 时回退 Tag）」合成一段中文总结，写到 `<output.dir>/releases/<owner>/<repo>-01.md`（每册都带两位序号，超出行数预算后下一次写入开 `-02.md`，最新一周在最上面），与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。跨仓的周汇总（`releases/_weekly/<年>/<ISO周>.{md,json}`）继续生成，供外部 Web 服务的 `GET /api/v2/releases*` 消费。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
 - **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, volume?, configPath}`；核心把 payload 放进结果信封（`subscriptions` / `subscriptionDoc`），旧核心把 `list` 结果逐行打到信封前，插件两种都认。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
 - 界面：「订阅」页管理列表（增删 + 逐仓库状态），可展开某仓库的发版文档（`GET /subscriptions/releases?repo=&volume=`）；「设置 → 发版订阅」分区放行为参数与每周触发节奏。
