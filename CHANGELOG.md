@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.7.9] - 2026-11-01
+
+> 内部重构：把重复的通用实现收敛到共享底座 `@morehao/dsh-plugin-kit@^0.3.1`。对外接口与业务语义保持不变。
+
+### 改进 — 迁移到 dsh-plugin-kit 0.3.1
+
+- **子进程执行**：`src/core/exec.ts` 收敛到 kit `./exec` 的 `spawnCollect` / `sanitizedEnv`，删除本地实现；握手阶段改为判 `result.error` 抛 `CORE_SPAWN_FAILED`（kit 的 `spawnCollect` 永不 reject）。
+- **插件身份**：`plugin-info.ts` 的仓库地址规范化与读包改用 kit `./github` + `./meta`（`createPluginMeta`），保留 `readPluginInfo` / `normalizeRepositoryUrl` 导出面与返回形状。
+- **HTTP 路由**：`routes.ts` 的 `sendJson` / `readBody` / 头校验改用 kit `./http` 的 `createRouteHandler`；业务 `dispatch`、`IpcError` 错误码与 `PluginUpdateError→409` 映射保持不变，错误码翻译仍留在插件侧。
+- 对外路由响应形状、读包字段、错误码/映射均无变化（行为等价）。
+
 ## [v0.7.8] - 2026-11-01
 
 > 统一「订阅」口径：这个功能不再叫「发版」，运行记录、概览、设置、订阅页与提示文案一致；顺带修好运行记录里的类型胶囊样式。
