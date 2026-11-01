@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.7.2] - 2026-11-01
+
+> 依赖升级：`@morehao/dsh-plugin-kit` 0.1.0 → **0.2.1**。
+
+### 改进 — 依赖
+
+- 升级共用工具包 `@morehao/dsh-plugin-kit` 到 `0.2.1`（自更新引擎复用宿主原生 registryPlan）。
+  0.2.1 保留插件使用的 `createPluginUpdater` / `normalizeProfile` / `PluginUpdateError` 等导出，行为兼容。
+
 ## [v0.7.1] - 2026-11-01
 
 > 依赖升级：`dsh.core.version` 0.7.1 → **0.8.0**，`@morehao/trendradar-contract` 0.4.0 → **0.5.0**。
