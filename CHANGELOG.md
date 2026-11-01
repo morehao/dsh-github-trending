@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.7.6] - 2026-11-01
+
+> 升级核心 `dsh.core.version` 0.8.1 → 0.8.2：修正核心握手自报的 `contractVersion`（0.4.0 → 0.5.0），与契约包版本对齐。对插件行为无影响，仅版本自检更准确。
+
+### 升级
+
+- **核心 0.8.2**：`dsh.core.version` 由 `scripts/set-core-version.mjs` 写入为 `0.8.2`。核心修正了
+  `internal/ipc/version.go` 的 `ContractVersion` 常量（此前自报 0.4.0，实际契约包为 0.5.0），并新增
+  单测锁定其与 `contract/package.json` 一致。`ipcSchema`/`digestSchema` 仍为 2，wire 与解析逻辑不变。
+
 ## [v0.7.5] - 2026-11-01
 
 > 升级核心 `dsh.core.version` 0.8.0 → 0.8.1：发版订阅在周期分支缺 `subscriptions.yaml` 时回退基准分支读取，「生成变更分析」不再因 0 订阅而 skipped。
