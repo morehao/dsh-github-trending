@@ -30,6 +30,7 @@ export const CSS = `
 .dshgt-card-h h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap;}
 .dshgt-hint{color:var(--gt-muted);font-size:12px;}
 .dshgt-desc{margin:0;color:var(--gt-muted);font-size:12px;}
+.dshgt-subhead{margin:4px 0 0;padding-top:8px;border-top:1px solid var(--gt-border);font-size:12px;font-weight:600;color:var(--gt-muted);}
 .dshgt-row{display:flex;gap:10px;align-items:center;min-height:28px;flex-wrap:wrap;}
 .dshgt-row>label.dshgt-label{width:96px;color:var(--gt-muted);flex:none;font-size:12px;display:flex;align-items:flex-start;gap:5px;}
 .dshgt-label-text{flex:1;min-width:0;}
@@ -404,6 +405,8 @@ export const CSS = `
 .dshgt-subs-cb{width:14px;height:14px;margin:0;accent-color:var(--gt-accent);justify-self:center;}
 .dshgt-subs-ident{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .dshgt-subs-ident mark{background:color-mix(in srgb,var(--gt-accent) 18%,transparent);color:inherit;border-radius:3px;padding:0 1px;}
+.dshgt-subs-ident-link{color:inherit;text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.dshgt-subs-ident-link:hover{color:var(--gt-accent);text-decoration:underline;text-underline-offset:2px;}
 .dshgt-subs-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gt-fg);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .dshgt-subs-sum{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--gt-muted);text-align:right;white-space:nowrap;}
 .dshgt-subs-stat{display:flex;align-items:center;gap:6px;padding-left:4px;font-size:12px;color:var(--gt-muted);white-space:nowrap;}

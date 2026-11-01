@@ -27,12 +27,12 @@ import { credentialView } from './credential.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
 
-type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'summarize' | 'releases' | 'schedule';
+type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'summarize' | 'releases';
 
 /** 分区顺序，与左侧 tab 一致；用于「是否还有未保存改动」的判定。 */
-const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases', 'schedule'];
+const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases'];
 
-const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, summarize: false, releases: false, schedule: false };
+const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, summarize: false, releases: false };
 
 function cloneSettings(settings: SettingsShape): SettingsShape {
   return JSON.parse(JSON.stringify(settings)) as SettingsShape;
@@ -50,13 +50,11 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
     case 'auth':
       return { github: settings.github };
     case 'scope':
-      return { trending: settings.trending };
+      return { trending: settings.trending, schedule: settings.schedule };
     case 'summarize':
       return { summarize: settings.summarize };
     case 'releases':
       return { releases: settings.releases };
-    case 'schedule':
-      return { schedule: settings.schedule };
   }
 }
 
@@ -310,7 +308,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     { id: 'scope', label: t('st.scope') },
     { id: 'summarize', label: t('st.summarize') },
     { id: 'releases', label: t('st.releases') },
-    { id: 'schedule', label: t('st.schedule') },
   ];
 
   const sourceCard = h(
@@ -513,7 +510,10 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
 
   const scopeCard = h(
     Card,
-    { title: t('card.scope.title') },
+    {
+      title: t('card.scope.title'),
+      hint: state.schedule.nextRunAt === undefined ? undefined : `${t('schedule.next')} ${localTime(state.schedule.nextRunAt)}`,
+    },
     h(
       Row,
       { label: t('scope.period') },
@@ -544,11 +544,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         onChange: (next: string[]) => update((draftNext) => { draftNext.trending.languages = next; }),
       }),
     ),
-  );
-
-  const scheduleCard = h(
-    Card,
-    { title: t('card.schedule.title'), hint: state.schedule.nextRunAt === undefined ? undefined : `${t('schedule.next')} ${localTime(state.schedule.nextRunAt)}` },
+    h('h4', { className: 'dshgt-subhead' }, t('card.schedule.title')),
     h(
       Row,
       { label: t('schedule.enabled') },
@@ -705,8 +701,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           : section === 'auth' ? authCard
             : section === 'scope' ? scopeCard
               : section === 'summarize' ? summarizeCard
-                : section === 'releases' ? releasesCard
-                  : scheduleCard;
+                : releasesCard;
 
   return h(
     'div',

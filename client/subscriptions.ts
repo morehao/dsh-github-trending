@@ -139,6 +139,11 @@ function highlight(text: string, needle: string): any {
   return parts;
 }
 
+/** `owner/repo` → GitHub 仓库地址；格式不认识就返回 undefined，不拼一个可能 404 的地址。 */
+function repoUrl(name: string): string | undefined {
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(name) ? `https://github.com/${name}` : undefined;
+}
+
 /**
  * 抽屉错误 → 空态：核心对「还没生成过文档」是当作业务错误报出来的
  * （`repo "o/r" has no release document yet`，HTTP 侧包成 SUBSCRIBE_FAILED），
@@ -561,7 +566,23 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         },
       },
       checkbox,
-      h('span', { key: 'name', role: 'cell', className: 'dshgt-subs-ident', title: row.name }, highlight(row.name, needle)),
+      h(
+        'span',
+        { key: 'name', role: 'cell', className: 'dshgt-subs-ident', title: row.name },
+        repoUrl(row.name) === undefined
+          ? highlight(row.name, needle)
+          : h(
+              'a',
+              {
+                className: 'dshgt-subs-ident-link',
+                href: repoUrl(row.name),
+                target: '_blank',
+                rel: 'noreferrer',
+                onClick: (event: any) => event.stopPropagation(),
+              },
+              highlight(row.name, needle),
+            ),
+      ),
       h('span', { key: 'tag', role: 'cell', className: 'dshgt-subs-ver', title: item?.latestTag ?? '' }, item?.latestTag ?? '—'),
       h(
         'span',
