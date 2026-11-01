@@ -191,6 +191,8 @@ export interface ReleaseRunRecord {
   finishedAt: string;
   status: 'ok' | 'failed' | 'skipped' | 'cancelled';
   checked: number;
+  /** 该周期分支上解析到的订阅仓库总数；缺省表示旧核心/旧记录未提供。 */
+  subscribed?: number;
   changed: number;
   newTags: number;
   summarized: number;
@@ -510,6 +512,7 @@ function normalizeReleaseRun(raw: unknown): ReleaseRunRecord {
   };
   const maybe = {
     tokens: typeof r.tokens === 'number' ? r.tokens : undefined,
+    subscribed: typeof r.subscribed === 'number' ? r.subscribed : undefined,
     commit: opt(r.commit),
     prUrl: opt(r.prUrl),
     branch: opt(r.branch),

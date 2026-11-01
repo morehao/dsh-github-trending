@@ -123,6 +123,8 @@ export interface ReleaseRunRecord {
   finishedAt: string;
   status: 'ok' | 'failed' | 'skipped' | 'cancelled';
   checked: number;
+  /** 本轮该周期分支上解析到的订阅仓库总数（releases.repos）。用于区分「没订阅」与「无变化」。 */
+  subscribed?: number;
   changed: number;
   newTags: number;
   summarized: number;

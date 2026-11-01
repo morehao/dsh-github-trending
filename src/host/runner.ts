@@ -578,6 +578,7 @@ export class Runner {
       finishedAt: new Date().toISOString(),
       status,
       checked: counterOf(releases?.checked),
+      ...(releases === undefined ? {} : { subscribed: counterOf(releases.repos) }),
       changed: counterOf(releases?.changed),
       newTags: counterOf(releases?.newReleases),
       summarized: counterOf(releases?.summarized),

@@ -335,6 +335,10 @@ interface AnalyzeResult {
   changed: number;
   /** 本轮实际检查的仓库数（用于 skipped 时区分「没订阅」和「都无变化」）。 */
   checked: number;
+  /** 该周期分支上解析到的订阅仓库总数（缺省表示旧核心/旧记录未提供）。 */
+  subscribed?: number;
+  /** 本次运行的目标分支（用于「没有订阅列表」提示里指路）。 */
+  branch?: string;
   message?: string;
 }
 
@@ -453,6 +457,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
           skipped: record.status === 'skipped',
           changed: record.changed,
           checked: record.checked,
+          ...(record.subscribed === undefined ? {} : { subscribed: record.subscribed }),
+          ...(record.branch === undefined ? {} : { branch: record.branch }),
         });
         if (record.status === 'failed' && record.errorMessage !== undefined) {
           const notReady = isNotReadyMessage(record.errorMessage);
@@ -504,9 +510,15 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
           ? h(
               Alert,
               { kind: 'warn' },
-              result.scope === 'all'
-                ? t('subs.analyze.skipped')
-                : t('subs.analyze.skippedOne', { repo: result.repo ?? '' }),
+              // subscribed === 0 ⇒ 周期分支上根本没有订阅列表（最坑的「不知道发生了什么」场景）；
+              // 否则才是「有订阅但都没变化」。
+              result.subscribed === 0
+                ? result.scope === 'all'
+                  ? t('subs.analyze.noSubs', { branch: result.branch ?? '' })
+                  : t('subs.analyze.noSubsOne')
+                : result.scope === 'all'
+                  ? t('subs.analyze.skipped')
+                  : t('subs.analyze.skippedOne', { repo: result.repo ?? '' }),
             )
           : h(
               Alert,
