@@ -4,7 +4,7 @@
  * 列表本身**不落 settings.json**，也不由插件直接写仓：全部经核心 `subscribe` IPC 读改
  * （add/remove 只写 `.git/pending`，随下次运行落盘并随产物提交）。
  *
- * 抽屉里的正文是数据仓 `releases/<owner>/<repo>.md` 的原文：面板只渲染、不改写、
+ * 抽屉里的正文是数据仓 `releases/<owner>/<repo>-01.md` 的原文：面板只渲染、不改写、
  * 不二次总结——「看到的就是仓库里那份」是这一页的硬约束，所以这里既不做摘要也不
  * 重排段落，卷切换时按 `volume` 重新取一次，不缓存跨周内容。
  */
@@ -222,10 +222,15 @@ function isMissingDoc(code: string | undefined, message: string): boolean {
   return /not\s*found|no such file|enoent|404|不存在|no release document|has no release|无发版记录/i.test(message);
 }
 
-/** 数据仓里的文件路径：第 1 册 `<repo>.md`，第 N 册 `<repo>.0N.md`。 */
-function docPath(repo: string, volume: number): string {
-  const suffix = volume <= 1 ? '' : `.${String(volume).padStart(2, '0')}`;
-  return `releases/${repo}${suffix}.md`;
+/**
+ * 数据仓里的文件路径。优先用核心返回的卷索引（`volumes[].file` 是权威值，
+ * 命名规则变了面板也不用跟着改），拿不到时按 `<repo>-0N.md` 兜底——每册都带
+ * 两位序号，第 1 册也是 `-01`。
+ */
+function docPath(repo: string, volume: number, volumes?: SubscriptionDoc['volumes']): string {
+  const entry = volumes?.find((item) => item.index === volume);
+  if (entry !== undefined && entry.file !== '') return `releases/${entry.file}`;
+  return `releases/${repo}-${String(volume).padStart(2, '0')}.md`;
 }
 
 interface DocDrawerProps {
@@ -381,7 +386,13 @@ function DocDrawer(props: DocDrawerProps): any {
             )
           : null,
         content,
-        loading ? null : h('div', { className: 'dshgt-subs-drawer-note' }, t('subs.drawer.note', { path: docPath(repo, current) })),
+        loading
+          ? null
+          : h(
+              'div',
+              { className: 'dshgt-subs-drawer-note' },
+              t('subs.drawer.note', { path: docPath(repo, current, doc?.volumes) }),
+            ),
       ),
     ),
   );

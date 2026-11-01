@@ -98,7 +98,7 @@ export interface SubscriptionItem {
   status: SubscriptionStatus;
 }
 
-/** 发版文档的一卷：index 1 是 `<repo>.md`，>=2 是 `<repo>.0N.md`。 */
+/** 发版文档的一卷：每册都带两位序号，index N 是 `<repo>-0N.md`（第 1 册是 `-01`）。 */
 export interface SubscriptionVolume {
   index: number;
   file: string;

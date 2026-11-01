@@ -500,7 +500,7 @@ export async function postSubscriptions(action: 'add' | 'remove', repos: string[
 }
 
 /**
- * 读某个仓库的发版记录（数据仓 `releases/<owner>/<repo>.md` 的原文）。
+ * 读某个仓库的发版记录（数据仓 `releases/<owner>/<repo>-0N.md` 的原文）。
  *
  * 不传 `volume` 时由核心给当前册；传了就按册取（抽屉切册时重新请求，不做跨周缓存，
  * 保证面板看到的永远是文件当前内容）。
