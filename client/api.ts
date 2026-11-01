@@ -234,7 +234,7 @@ export interface SettingsShape {
   };
   repo: { path: string; baseBranch: string; remote: string; commitMode: 'branch' | 'direct'; authorName: string; authorEmail: string };
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };
-  github: { authMode: 'pat' | 'gh'; tokenRef: string };
+  github: { authMode: 'pat' | 'gh' | 'browser'; tokenRef: string };
   trending: { since: Period; languages: string[]; topN: number };
   summarize: {
     batchSize: number;
@@ -306,10 +306,54 @@ export interface StatePayload {
     credential: { ref: string; configured: boolean; source: string | null; writable: boolean };
     effectiveBaseURL: string;
   };
-  github: { authMode: string; configured: boolean; source: string };
+  github: {
+    authMode: string;
+    configured: boolean;
+    source: string;
+    /** 浏览器登录 attempt 视图。 */
+    attempt?: GithubAttemptView;
+    /** 是否配置了 browser 模式的 client_id。 */
+    browserAvailable?: boolean;
+  };
   /** 发版运行记录的另一种挂载位置；与 `status.releaseRuns` 二者读其一即可。 */
   releaseRuns?: ReleaseRunRecord[];
   lastReleaseAt?: string | null;
+}
+
+/** 浏览器 GitHub 登录 attempt 视图（与 Host `github-auth.attemptView` 同构）。 */
+export type GithubAttemptPhase = 'idle' | 'waiting-browser' | 'waiting-device' | 'exchanging' | 'done' | 'error';
+
+export interface GithubAttemptView {
+  phase: GithubAttemptPhase;
+  authorizeUrl?: string;
+  verificationUri?: string;
+  userCode?: string;
+  expiresAt?: number;
+  login?: string;
+  error?: string;
+}
+
+/** 启动浏览器 GitHub 登录（method 默认 browser，可传 device）。 */
+export async function beginGithubSignIn(method: 'browser' | 'device' = 'browser'): Promise<GithubAttemptView> {
+  const payload = await apiCall<{ attempt: GithubAttemptView }>('POST', '/github/browser/begin', { method });
+  return payload.attempt;
+}
+
+/** 轮询登录 attempt 视图。 */
+export async function getGithubSignInStatus(signal?: AbortSignal): Promise<GithubAttemptView> {
+  const payload = await apiCall<{ attempt: GithubAttemptView }>(
+    'GET',
+    '/github/browser/status',
+    undefined,
+    signal === undefined ? {} : { signal },
+  );
+  return payload.attempt;
+}
+
+/** 取消进行中的登录 attempt。 */
+export async function cancelGithubSignIn(): Promise<GithubAttemptView> {
+  const payload = await apiCall<{ attempt: GithubAttemptView }>('POST', '/github/browser/cancel', {});
+  return payload.attempt;
 }
 
 /** 发版运行记录：根与 `status` 两处都可能带，取第一个存在的数组。 */

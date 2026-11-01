@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes, runner as runnerModule, schedule as scheduleModule, state as stateModule } from '../lib/internal.js';
+import { routes, runner as runnerModule, schedule as scheduleModule, state as stateModule, githubAuth } from '../lib/internal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures', 'fake-core.mjs');
@@ -439,4 +439,95 @@ test('/releases/run 并发（已有运行在跑）→ 409', async () => {
   } finally {
     isolated.close();
   }
+});
+
+// --- GitHub 浏览器登录路由 ---
+async function browserServer() {
+  const bStore = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-routes-browser-')) });
+  const bRepo = mkdtempSync(path.join(tmpdir(), 'dshgt-routes-browser-repo-'));
+  mkdirSync(path.join(bRepo, '.git'));
+  bStore.writeSettings({
+    model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' },
+    repo: { path: bRepo },
+    github: { authMode: 'browser', tokenRef: 'GITHUB_TOKEN' },
+  });
+  const routesMap = new Map();
+  const flows = new Map();
+  let committed;
+  const authorization = {
+    registerFlow(flow) { flows.set(flow.key, flow); return () => flows.delete(flow.key); },
+    async begin(request) {
+      const flow = flows.get(request.key);
+      const session = {
+        method: request.method,
+        signal: request.signal,
+        notify: (n) => request.interaction?.notify?.(n),
+        prompt: () => Promise.reject(new Error('no')),
+        commit: async (record) => { committed = record; },
+      };
+      try { await flow.run(session); return { status: 'authorized' }; }
+      catch (e) { if (request.signal?.aborted) return { status: 'cancelled' }; throw e; }
+    },
+    cancel() {},
+  };
+  const webServer = {
+    port: 45123,
+    host: '127.0.0.1',
+    register(route) { routesMap.set(route.path, route.handler); return () => routesMap.delete(route.path); },
+  };
+  const bEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DSHGT_ROUTES_KEY: 'sk-routes' };
+  const get = (name) => (name === 'authorization' ? authorization : name === 'webServer' ? webServer : undefined);
+  // 真实链路里 flow 由 apply() 注册；这里显式注册（routes 本身不注册）。
+  githubAuth.registerGithubFlow({ get, clientId: 'test-client-id', logger: () => {} });
+  const bRunner = new runnerModule.Runner({ store: bStore, get, env: bEnv });
+  const bScheduler = new scheduleModule.Scheduler({ store: bStore, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
+  const server = http.createServer(routes.createRoutes({
+    store: bStore, runner: bRunner, scheduler: bScheduler, get, env: bEnv,
+    version: '0.1.0-test', githubClientId: 'test-client-id',
+  }));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return {
+    base: `http://127.0.0.1:${server.address().port}${routes.ROUTE_PREFIX}`,
+    routesMap, committedRef: () => committed,
+    close: () => { server.closeAllConnections?.(); server.close(); },
+  };
+}
+
+test('GET /github/browser/status 初始为 idle 且 browserAvailable=true', async () => {
+  const b = await browserServer();
+  try {
+    const res = await fetch(`${b.base}/github/browser/status`, { headers: HEADER });
+    const body = await res.json();
+    assert.equal(body.attempt.phase, 'idle');
+    const state = await (await fetch(`${b.base}/state`, { headers: HEADER })).json();
+    assert.equal(state.github.browserAvailable, true);
+    assert.equal(state.github.authMode, 'browser');
+  } finally { b.close(); }
+});
+
+test('POST /github/browser/begin → 回调被接受且离开 idle，cancel 可收尾', async () => {
+  const b = await browserServer();
+  try {
+    const beginRes = await fetch(`${b.base}/github/browser/begin`, { method: 'POST', headers: HEADER, body: JSON.stringify({ method: 'browser' }) });
+    const begin = await beginRes.json();
+    assert.ok(begin.attempt.authorizeUrl, 'has authorizeUrl');
+
+    // 模拟 GitHub 回调：从 authorizeUrl 取 state，喂给注册的 exact 路由 handler。
+    const state = new URL(begin.attempt.authorizeUrl).searchParams.get('state');
+    const handler = [...b.routesMap.values()][0];
+    assert.ok(handler, 'callback route registered');
+    let code = 0;
+    const res = { writeHead(c) { code = c; return this; }, end() { return this; } };
+    // 状态不匹配 → 400（URL 校验分支），不断言 exchange（真实 fetch 无法离线）。
+    handler({ method: 'GET', url: `${'/api/morehao/github-trending/oauth/github/callback'}?code=abc&state=WRONG` }, res);
+    assert.equal(code, 400);
+    // 正确 state → 200
+    const res2 = { writeHead(c) { code = c; return this; }, end() { return this; } };
+    handler({ method: 'GET', url: `${'/api/morehao/github-trending/oauth/github/callback'}?code=abc&state=${state}` }, res2);
+    assert.equal(code, 200);
+    await new Promise((r) => setTimeout(r, 30));
+    const status = await (await fetch(`${b.base}/github/browser/status`, { headers: HEADER })).json();
+    assert.notEqual(status.attempt.phase, 'idle');
+    await fetch(`${b.base}/github/browser/cancel`, { method: 'POST', headers: HEADER, body: '{}' });
+  } finally { b.close(); }
 });

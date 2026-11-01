@@ -18,6 +18,7 @@ export * as run from './core/run.js';
 export * as core from './host/core.js';
 export * as credentials from './host/credentials.js';
 export * as github from './host/github.js';
+export * as githubAuth from './host/github-auth.js';
 export * as repo from './host/repo.js';
 export * as quickfill from './host/quickfill.js';
 export * as preflight from './host/preflight.js';

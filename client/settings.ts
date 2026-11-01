@@ -14,7 +14,11 @@ import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, duration
 import type { Translate } from './i18n.js';
 import {
   apiCall,
+  beginGithubSignIn,
+  cancelGithubSignIn,
+  getGithubSignInStatus,
   type DefaultSelection,
+  type GithubAttemptView,
   type GithubProbeResult,
   type Period,
   type PreflightResult,
@@ -93,6 +97,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [branchLoading, setBranchLoading] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [githubTest, setGithubTest] = React.useState<GithubProbeResult | null>(null);
+  const [signIn, setSignIn] = React.useState<GithubAttemptView>({ phase: 'idle' });
 
   const anyDirty = SECTIONS.some((id) => dirtySections[id]);
   // 「内容来源」只有状态与核心操作（重新检查 / 下载），没有可保存的字段。
@@ -243,6 +248,62 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
+  const startSignIn = async (method: 'browser' | 'device'): Promise<void> => {
+    try {
+      const view = await beginGithubSignIn(method);
+      setSignIn(view);
+      // browser 方法：把授权页在浏览器打开（远程场景下这步可能被浏览器拦，提供复制链接兜底）。
+      if (view.phase === 'waiting-browser' && view.authorizeUrl !== undefined) {
+        try {
+          window.open(view.authorizeUrl, '_blank', 'noopener,noreferrer');
+        } catch {
+          /* window.open 被拦截不是错误：下方「复制链接」仍可用 */
+        }
+      }
+    } catch (error) {
+      notify('err', error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const cancelSignIn = async (): Promise<void> => {
+    try {
+      setSignIn(await cancelGithubSignIn());
+    } catch (error) {
+      notify('err', error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const copyAuthorizeLink = (): void => {
+    if (signIn.authorizeUrl === undefined) return;
+    void navigator.clipboard?.writeText(signIn.authorizeUrl).then(() => notify('ok', t('auth.browser.copied')));
+  };
+
+  // 登录进行中时轮询状态；终态（done/error/idle）后停止。
+  const signInActive = signIn.phase === 'waiting-browser' || signIn.phase === 'waiting-device' || signIn.phase === 'exchanging';
+  React.useEffect(() => {
+    if (!signInActive) return undefined;
+    let alive = true;
+    const timer = setInterval(() => {
+      void getGithubSignInStatus()
+        .then((view) => {
+          if (!alive) return;
+          setSignIn(view);
+          if (view.phase === 'done') {
+            setGithubTest(view.login === undefined ? { ok: true } : { ok: true, login: view.login });
+            notify('ok', t('auth.browser.done'));
+            void store.refresh({ quiet: true });
+          }
+        })
+        .catch(() => {
+          /* 轮询失败保持当前状态，下次再试 */
+        });
+    }, 1500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [signInActive]);
+
   const importCli = async (): Promise<void> => {
     try {
       const result = await apiCall<{ import: { ok: boolean; imported: string[]; skippedSecrets: string[]; problems: string[]; settings?: SettingsShape } }>(
@@ -299,6 +360,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           : t('branch.readonlyHint');
 
   const isGh = draft.github.authMode === 'gh';
+  const isBrowser = draft.github.authMode === 'browser';
+  const browserAvailable = state.github.browserAvailable === true;
 
   const sections: Array<{ id: SectionId; label: string }> = [
     { id: 'source', label: t('st.source') },
@@ -480,20 +543,68 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         options: [
           { value: 'gh', label: t('auth.gh') },
           { value: 'pat', label: t('auth.pat') },
+          { value: 'browser', label: t('auth.browser') },
         ],
-        onChange: (value: string) => update((next) => { next.github.authMode = value === 'pat' ? 'pat' : 'gh'; }),
+        onChange: (value: string) =>
+          update((next) => {
+            next.github.authMode = value === 'pat' ? 'pat' : value === 'browser' ? 'browser' : 'gh';
+          }),
       }),
       h(Pill, { kind: state.github.configured ? 'ok' : 'warn' }, state.github.configured ? `${t('auth.configured')} · ${state.github.source}` : t('auth.missing')),
     ),
-    h('p', { className: 'dshgt-hint' }, isGh ? t('auth.gh.hint') : t('auth.pat.hint')),
+    h('p', { className: 'dshgt-hint' }, isGh ? t('auth.gh.hint') : isBrowser ? t('auth.browser.hint') : t('auth.pat.hint')),
     isGh
       ? null
-      : h(
-          Row,
-          { label: t('auth.tokenRef') },
-          h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
-          h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
-        ),
+      : isBrowser
+        ? h(
+            Row,
+            { label: t('auth.status') },
+            browserAvailable
+              ? h(
+                  Btn,
+                  {
+                    small: true,
+                    variant: 'primary',
+                    onClick: () => void startSignIn('browser'),
+                    disabled: signInActive,
+                  },
+                  signIn.phase === 'done' && signIn.login !== undefined
+                    ? `${t('auth.browser.done')} · @${signIn.login}`
+                    : signInActive
+                      ? t('auth.browser.waiting')
+                      : t('auth.browser.signin'),
+                )
+              : h('span', { className: 'dshgt-hint' }, t('auth.browser.unavailable')),
+            browserAvailable
+              ? h(Btn, { small: true, variant: 'ghost', onClick: () => void startSignIn('device'), disabled: signInActive }, t('auth.browser.device'))
+              : null,
+            signInActive ? h(Btn, { small: true, variant: 'ghost', onClick: () => void cancelSignIn() }, t('auth.browser.cancel')) : null,
+          )
+        : h(
+            Row,
+            { label: t('auth.tokenRef') },
+            h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
+            h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
+          ),
+    // 浏览器登录进行中的状态行：授权页链接（可复制）+ 设备码。
+    isBrowser && signIn.phase !== 'idle' && signIn.phase !== 'done'
+      ? h(
+          'div',
+          { className: 'dshgt-hint' },
+          signIn.authorizeUrl !== undefined
+            ? h(
+                'div',
+                { className: 'dshgt-desc' },
+                h('span', null, t('auth.browser.openHint')),
+                ' ',
+                h(Btn, { small: true, variant: 'ghost', onClick: () => copyAuthorizeLink() }, t('auth.browser.copy')),
+              )
+            : null,
+          signIn.userCode !== undefined
+            ? h('div', { className: 'dshgt-mono' }, `${t('auth.browser.code')} ${signIn.userCode}`)
+            : null,
+        )
+      : null,
     h(
       Row,
       { label: t('auth.test') },

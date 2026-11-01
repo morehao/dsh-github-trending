@@ -10,6 +10,7 @@ import { Runner } from './host/runner.js';
 import { readPluginInfo } from './host/plugin-info.js';
 import { Scheduler } from './host/schedule.js';
 import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
+import { registerGithubFlow } from './host/github-auth.js';
 import { createUpdateService } from './host/update.js';
 import { createTrendingHistoryTool, createTrendingRunTool } from './tools.js';
 
@@ -44,7 +45,7 @@ function readVersion(): string {
 
 export const VERSION = readVersion();
 
-export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?: string } = {}): void {
+export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?: string; githubClientId?: string } = {}): void {
   const env = process.env;
   const get = (key: string): unknown => (typeof ctx.get === 'function' ? ctx.get(key) : undefined);
   const log = (event: string, data?: Record<string, unknown>): void => {
@@ -96,6 +97,12 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
   });
 
   const pluginInfo = readPluginInfo();
+  // 浏览器 GitHub 登录：向核心 `ctx.authorization` 注册 flow（无该服务则降级 no-op，不影响 gh/pat）。
+  registerGithubFlow({
+    get,
+    logger: log,
+    ...(config.githubClientId === undefined ? {} : { clientId: config.githubClientId }),
+  });
   const update = createUpdateService({
     get,
     env,
@@ -116,6 +123,7 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
     version: VERSION,
     pluginName: pluginInfo.name,
     ...(pluginInfo.repository === undefined ? {} : { repository: pluginInfo.repository }),
+    ...(config.githubClientId === undefined ? {} : { githubClientId: config.githubClientId }),
     logger: log,
   });
   const register = (): unknown => {

@@ -10,8 +10,11 @@ import path from 'node:path';
 
 export type Provider = string;
 export type CommitMode = 'branch' | 'direct';
-/** 只保留两种真正可用的方式：本机 `gh` 登录态、手动 PAT。历史的 `device` 在归一化时迁移为 `gh`。 */
-export type AuthMode = 'pat' | 'gh';
+/**
+ * 三种可用方式：本机 `gh` 登录态、手动 PAT、浏览器 GitHub 登录（读核心凭据记录）。
+ * 历史的 `device` 在归一化时迁移为 `gh`；`browser` 无记录时会降级到 ref/env 兜底。
+ */
+export type AuthMode = 'pat' | 'gh' | 'browser';
 
 /**
  * 榜单周期（core 0.4.0 的 `--period` 三取值）。
@@ -381,8 +384,8 @@ export function normalizeSettings(input: unknown): Settings {
       labels: strArray(pr.labels, DEFAULT_SETTINGS.pr.labels),
     },
     github: {
-      // 旧版本可能存 'device'：它没有对应实现，统一迁移到真正可用的「本机 gh」。
-      authMode: authMode === 'pat' ? 'pat' : 'gh',
+      // 白名单三值：'pat' / 'gh' / 'browser'；其余（含旧版 'device'）统一迁移到真正可用的「本机 gh」。
+      authMode: authMode === 'pat' || authMode === 'browser' ? authMode : 'gh',
       tokenRef: str(github.tokenRef, DEFAULT_SETTINGS.github.tokenRef).trim() || DEFAULT_SETTINGS.github.tokenRef,
     },
     trending: {

@@ -16,11 +16,24 @@ export interface ResolvedSecret {
   source?: string;
 }
 
+export interface CredentialRecord {
+  kind: string;
+  payload: unknown;
+}
+
 export interface CredentialServices {
   describe?: (ref: string) => Promise<CredentialDescription> | CredentialDescription;
   resolve?: (ref: string) => Promise<ResolvedSecret | undefined | null> | ResolvedSecret | undefined | null;
   set?: (ref: string, value: string) => Promise<unknown> | unknown;
+  /**
+   * record 半边（`<scope>/<id>` 键）：只读，用于 `authMode=browser` 读 GitHub 登录记录。
+   * 由核心 `dsh-credentials-local` 的同一对象提供（与 ref 半边并存）；缺失时 browser 模式退回 ref/env。
+   */
+  readRecord?: (key: string) => Promise<CredentialRecord | undefined> | CredentialRecord | undefined;
 }
+
+/** 浏览器登录写入核心凭据记录的键（与核心 `@deepseek-ai/dsh-github-auth` 提案同名同构）。 */
+export const GITHUB_RECORD_KEY = 'github/default';
 
 export function credentialServices(get: (name: string) => unknown): CredentialServices | undefined {
   const service = get('credentials') as CredentialServices | undefined;
@@ -74,14 +87,39 @@ export async function resolveRef(
   return envValue === undefined ? {} : { value: envValue, source: 'env' };
 }
 
-/** GitHub token：按 authMode 取，`gh` 模式读本机 gh 的登录态，`pat` 读凭据/环境变量。 */
+/** 读核心凭据记录里的 GitHub grant；服务缺失 / 未登录 / 形态不符一律返回 undefined（不抛）。 */
+async function readGithubRecord(services: CredentialServices | undefined): Promise<CredentialRecord | undefined> {
+  if (typeof services?.readRecord !== 'function') return undefined;
+  try {
+    return (await services.readRecord(GITHUB_RECORD_KEY)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 从 grant 记录里取 access token；非 grant 或 payload 无 token 返回 undefined。 */
+function grantToken(record: CredentialRecord | undefined): string | undefined {
+  if (record === undefined || record.kind !== 'grant') return undefined;
+  const payload = record.payload as { token?: unknown } | null | undefined;
+  const token = payload?.token;
+  return typeof token === 'string' && token.trim() !== '' ? token : undefined;
+}
+
+/** GitHub token：按 authMode 取，`gh` 读本机 gh 登录态，`browser` 读核心凭据记录，`pat` 读 ref/env。 */
 export async function resolveGithubToken(
   services: CredentialServices | undefined,
-  authMode: 'pat' | 'gh',
+  authMode: 'pat' | 'gh' | 'browser',
   tokenRef: string,
   deps: { env?: NodeJS.ProcessEnv; execGh?: () => Promise<string | undefined>; freshGh?: boolean } = {},
 ): Promise<{ token?: string; source: string }> {
   const env = deps.env ?? process.env;
+  if (authMode === 'browser') {
+    // 浏览器登录：token 由 `ctx.authorization` 的 flow 提交到核心凭据记录（grant.payload.token）。
+    const record = await readGithubRecord(services);
+    const token = grantToken(record);
+    if (token !== undefined) return { token, source: 'github-browser' };
+    // 未登录：如实降级到 ref/env 兜底（与 gh 模式一致的策略），由调用方决定是否提示去登录。
+  }
   if (authMode === 'gh') {
     const execGh = deps.execGh ?? (() => defaultGhToken(deps.freshGh === true));
     try {

@@ -24,6 +24,11 @@ export const PLUGIN_CODES = [
   'MODEL_NOT_FOUND',
   'MODEL_PROVIDER_UNSUPPORTED',
   'GITHUB_AUTH',
+  'GITHUB_AUTH_CANCELLED',
+  'GITHUB_AUTH_EXPIRED',
+  'GITHUB_AUTH_STATE',
+  'GITHUB_AUTH_EXCHANGE',
+  'GITHUB_AUTH_UNAVAILABLE',
   'PUSH_FAILED',
   'REPO_DIRTY',
   'SUBSCRIBE_FAILED',
@@ -72,6 +77,11 @@ const RETRIABLE: Record<string, boolean> = {
   MODEL_NOT_FOUND: false,
   MODEL_PROVIDER_UNSUPPORTED: false,
   GITHUB_AUTH: false,
+  GITHUB_AUTH_CANCELLED: false,
+  GITHUB_AUTH_EXPIRED: true,
+  GITHUB_AUTH_STATE: false,
+  GITHUB_AUTH_EXCHANGE: true,
+  GITHUB_AUTH_UNAVAILABLE: false,
   PUSH_FAILED: true,
   SUBSCRIBE_FAILED: true,
 };
@@ -87,7 +97,7 @@ export function areaOf(code: string): ErrorArea {
   if (code.startsWith('CORE_') || code === 'IPC_INVALID') return 'core';
   if (code.startsWith('MODEL_')) return 'model';
   if (code.startsWith('REPO_') || code === 'GIT_NOT_INSTALLED' || code === 'GIT_OPERATION_FAILED') return 'repo';
-  if (code === 'GITHUB_AUTH') return 'auth';
+  if (code === 'GITHUB_AUTH' || code.startsWith('GITHUB_AUTH_')) return 'auth';
   return 'run';
 }
 
@@ -174,6 +184,16 @@ export function hintOf(code: string, message?: string, reason?: string): string 
       return '仓库有未提交改动：插件不 stash、不 reset，请先处理。';
     case 'GITHUB_AUTH':
       return 'GitHub 认证失效：重新连接或更新 PAT；本地 commit 会保留，可直接重试。';
+    case 'GITHUB_AUTH_CANCELLED':
+      return '已取消 GitHub 登录：需要时在设置页重新点「用 GitHub 登录」。';
+    case 'GITHUB_AUTH_EXPIRED':
+      return 'GitHub 登录超时：重新发起登录即可（未写入任何凭据）。';
+    case 'GITHUB_AUTH_STATE':
+      return 'GitHub 回调校验失败（state 不匹配或重复回调）：这是一次异常回调，重新发起登录。';
+    case 'GITHUB_AUTH_EXCHANGE':
+      return '用授权码换取 GitHub token 失败：检查网络后重试；若持续失败，确认 OAuth App 的 client_id 与回调地址配置一致。';
+    case 'GITHUB_AUTH_UNAVAILABLE':
+      return '当前环境不支持浏览器登录（缺少 authorization 服务）：改用「本机 gh」或 PAT 方式。';
     case 'NOT_MERGEABLE':
       return 'PR 无法自动合并（常见于分支保护）：PR 已保留，需人工处理。';
     case 'PUSH_FAILED':

@@ -28,6 +28,7 @@ import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
 import { probeGithubAuth } from './github.js';
+import { attemptView, beginGithubSignIn, cancelGithubSignIn } from './github-auth.js';
 import { importFirstAvailable } from './import-cli.js';
 import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
@@ -40,6 +41,21 @@ import type { Scheduler } from './schedule.js';
 export const ROUTE_PREFIX = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 const MAX_BODY = 512 * 1024;
+
+/** 组装 GitHub 浏览器登录 adapter 的依赖（get/fetch/clientId/logger）。 */
+function githubAuthDeps(deps: RouteDeps): {
+  get: (name: string) => unknown;
+  fetchImpl?: typeof fetch;
+  clientId?: string;
+  logger?: (event: string, data?: Record<string, unknown>) => void;
+} {
+  return {
+    get: deps.get,
+    ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
+    ...(deps.githubClientId === undefined ? {} : { clientId: deps.githubClientId }),
+    ...(deps.logger === undefined ? {} : { logger: deps.logger }),
+  };
+}
 
 export interface RouteDeps {
   store: Store;
@@ -55,6 +71,8 @@ export interface RouteDeps {
   /** 包名与仓库地址都来自 package.json，由 src/index.ts 传入。 */
   pluginName?: string;
   repository?: string;
+  /** 浏览器 GitHub 登录用的 public client_id（由 apply 的 config 传入；缺省时按钮会提示未配置）。 */
+  githubClientId?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -295,6 +313,31 @@ async function dispatch(
     return { github: probe };
   }
 
+  // 浏览器 GitHub 登录：begin 启动一次 attempt（进程内 authorization.begin，不阻塞），
+  // 返回 attempt 视图（含 authorizeUrl / userCode）；status 供前端轮询；cancel 取消。
+  if (method === 'POST' && pathname === '/github/browser/begin') {
+    const method = body.method === 'device' ? 'device' : 'browser';
+    try {
+      const view = await beginGithubSignIn(githubAuthDeps(deps), method);
+      return { attempt: view };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === 'already-in-flight') {
+        return { attempt: attemptView(), alreadyInFlight: true };
+      }
+      throw new IpcError('GITHUB_AUTH_UNAVAILABLE', redact(message));
+    }
+  }
+
+  if (method === 'GET' && pathname === '/github/browser/status') {
+    return { attempt: attemptView() };
+  }
+
+  if (method === 'POST' && pathname === '/github/browser/cancel') {
+    cancelGithubSignIn(githubAuthDeps(deps));
+    return { attempt: attemptView() };
+  }
+
   if (method === 'GET' && pathname === '/quickfill') {
     const candidates = await listProviderCandidates({
       llm: llmServices(deps.get),
@@ -434,6 +477,10 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       authMode: settings.github.authMode,
       configured: github.token !== undefined,
       source: github.source,
+      /** 浏览器登录 attempt 视图（idle / waiting-browser / waiting-device / exchanging / done / error）。 */
+      attempt: attemptView(),
+      /** 是否配置了 browser 模式的 client_id（未配置时前端禁用「用 GitHub 登录」并给提示）。 */
+      browserAvailable: deps.githubClientId !== undefined && deps.githubClientId !== '',
     },
   };
 }

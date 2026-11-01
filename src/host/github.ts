@@ -18,7 +18,7 @@ export interface GithubProbeResult {
 
 export async function probeGithubAuth(options: {
   credentials: CredentialServices | undefined;
-  authMode: 'pat' | 'gh';
+  authMode: 'pat' | 'gh' | 'browser';
   tokenRef: string;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
@@ -36,7 +36,9 @@ export async function probeGithubAuth(options: {
       message:
         options.authMode === 'gh'
           ? '没有取到本机 gh 的登录态：先在终端执行 `gh auth login`。'
-          : `没有取到凭据「${options.tokenRef}」：请在环境变量或凭据里配置一个 Personal Access Token。`,
+          : options.authMode === 'browser'
+            ? '还没有通过浏览器登录 GitHub：在设置页点「用 GitHub 登录」完成授权。'
+            : `没有取到凭据「${options.tokenRef}」：请在环境变量或凭据里配置一个 Personal Access Token。`,
     };
   }
   const doFetch = options.fetchImpl ?? fetch;
