@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.7.11] - 2026-11-01
+
+### Refactors
+
+- **settings**: merge schedule into scope card and link subscription repos (#65)
+
+### Docs
+
+- 新增英文版 README.en.md，中文 README 默认并加语言切换 (#64)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.7.10...v0.7.11
+
 ## [v0.7.10] - 2026-11-01
 
 > 修复 peer / engine 版本区间漏掉 `0.2.2-*` 预发布的问题，让插件在宿主升到 `0.2.2` 线后仍能正常安装。
