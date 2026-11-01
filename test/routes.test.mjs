@@ -30,7 +30,7 @@ async function isolatedServer(coreEnv = {}) {
     model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' },
     repo: { path: isolatedRepo },
   });
-  const isolatedEnv = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CORE: scenarioCore(coreEnv) };
+  const isolatedEnv = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CORE: scenarioCore(coreEnv), DSHGT_ROUTES_KEY: 'sk-routes' };
   const isolatedRunner = new runnerModule.Runner({ store: isolatedStore, get: () => undefined, env: isolatedEnv });
   const isolatedScheduler = new scheduleModule.Scheduler({
     store: isolatedStore,
@@ -380,4 +380,63 @@ test('/subscriptions POST 缺 action 或 repo → 400', async () => {
 test('/subscriptions 缺自定义头 → 403', async () => {
   const response = await fetch(`${base}/subscriptions`);
   assert.equal(response.status, 403);
+});
+
+// ——— POST /releases/run：发版订阅运行触发（全量 / 单仓） ———
+
+test('/releases/run 缺自定义头 → 403', async () => {
+  const response = await fetch(`${base}/releases/run`, { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(response.status, 403);
+});
+
+test('/releases/run 全量 → 返回一条 release 记录，不写 history', async () => {
+  const isolated = await isolatedServer({ FAKE_REQUIRE_STAGES: '1', FAKE_RELEASES: '2,1,1' });
+  try {
+    const response = await fetch(`${isolated.base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({}) });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.release.status, 'ok');
+    assert.equal(payload.release.scopeRepo, undefined);
+  } finally {
+    isolated.close();
+  }
+});
+
+test('/releases/run 单仓 → 透传 repo（核心支持时），记录带 scopeRepo', async () => {
+  const isolated = await isolatedServer({
+    FAKE_REQUIRE_STAGES: '1',
+    FAKE_REQUIRE_REPO: 'vercel/next.js',
+    FAKE_VERSION: '0.8.0',
+    FAKE_RELEASES: '1,1,0',
+  });
+  try {
+    const response = await fetch(`${isolated.base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({ repo: 'vercel/next.js' }) });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.release.status, 'ok');
+    assert.equal(payload.release.scopeRepo, 'vercel/next.js');
+  } finally {
+    isolated.close();
+  }
+});
+
+test('/releases/run 非法 repo → 400 CONFIG_INVALID', async () => {
+  const response = await fetch(`${base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({ repo: 'not-a-repo' }) });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, 'CONFIG_INVALID');
+});
+
+test('/releases/run 并发（已有运行在跑）→ 409', async () => {
+  const isolated = await isolatedServer({ FAKE_SLEEP: '1200', FAKE_REQUIRE_STAGES: '1' });
+  try {
+    const first = fetch(`${isolated.base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({}) });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const second = await fetch(`${isolated.base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({}) });
+    assert.equal(second.status, 409);
+    assert.equal((await second.json()).code, 'CONFIG_INVALID');
+    await first;
+  } finally {
+    isolated.close();
+  }
 });

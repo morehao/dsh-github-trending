@@ -40,6 +40,12 @@ import { versionAtLeast } from './version.js';
  */
 export const FORCE_MIN_CORE_VERSION = '0.7.1';
 
+/**
+ * 支持 `run --stages releases --repo`（单仓发版分析）的最低核心版本。
+ * 与 core v0.8.0 对齐；核心更旧时单仓触发降级为全量（不传 --repo）。
+ */
+export const REPO_MIN_CORE_VERSION = '0.8.0';
+
 export interface RunSummary {
   id: string;
   ok: boolean;
@@ -384,7 +390,7 @@ export class Runner {
    * `state.releaseRuns`（不碰 history.json）、自己**不**合并订阅 pending 队列
    * （`--stages releases` 让核心跳过那一步，合并只在完整 run 里发生）。
    */
-  async runReleases(options: { trigger: 'manual' | 'schedule' }): Promise<ReleaseRunRecord> {
+  async runReleases(options: { trigger: 'manual' | 'schedule'; repo?: string }): Promise<ReleaseRunRecord> {
     const env = this.deps.env ?? process.env;
     const store = this.deps.store;
     const settings = store.readSettings();
@@ -409,6 +415,9 @@ export class Runner {
     this.active = { id, controller, startedAt };
     const logFile = store.newLogPath(id);
     let proxy: ProxyHandle | undefined;
+    // 单仓意图（options.repo）在 try/catch 都要用到：catch 里记录失败也要带上 scopeRepo。
+    // 实际是否传 --repo 取决于核心版本闸门（见 try 内 effectiveRepo）。
+    const requestedRepo = options.repo !== undefined && options.repo !== '' ? options.repo : undefined;
 
     try {
       const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
@@ -421,6 +430,17 @@ export class Runner {
           'MODEL_PROVIDER_UNSUPPORTED',
           `核心不支持 provider「${settings.model.provider}」；可用：${handshakeResult.supportedProviders.join(' / ')}`,
         );
+      }
+
+      // 单仓触发：核心需支持 `--repo`（>= REPO_MIN_CORE_VERSION）。旧核心不传 --repo，
+      // 降级为全量跑（前端只展示该仓结果），与 --force 的降级风格一致，绝不裸错。
+      let effectiveRepo = requestedRepo;
+      if (requestedRepo !== undefined && !versionAtLeast(handshakeResult.version.version, REPO_MIN_CORE_VERSION)) {
+        store.appendLog(
+          logFile,
+          `[release] 核心 ${handshakeResult.version.version} 低于 ${REPO_MIN_CORE_VERSION}，单仓分析降级为全量`,
+        );
+        effectiveRepo = undefined;
       }
 
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
@@ -446,6 +466,7 @@ export class Runner {
         dryRun: false,
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
         stages: ['releases'],
+        ...(effectiveRepo === undefined ? {} : { repo: effectiveRepo }),
         repoCount,
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
@@ -459,10 +480,11 @@ export class Runner {
         startedAt,
         logFile,
         cancelled: controller.signal.aborted,
+        ...(requestedRepo === undefined ? {} : { scopeRepo: requestedRepo }),
       });
     } catch (error) {
       const aborted = controller.signal.aborted || (error instanceof IpcError && error.code === 'CORE_CANCELLED');
-      return this.recordReleaseFailure({ id, error, aborted, settings, startedAt, startedMs, logFile });
+      return this.recordReleaseFailure({ id, error, aborted, settings, startedAt, startedMs, logFile, ...(requestedRepo === undefined ? {} : { scopeRepo: requestedRepo }) });
     } finally {
       if (proxy !== undefined) {
         const port = proxy.port;
@@ -538,6 +560,7 @@ export class Runner {
     startedAt: string;
     logFile: string;
     cancelled: boolean;
+    scopeRepo?: string;
   }): ReleaseRunRecord {
     const { outcome, settings } = input;
     // 契约里 skipped 的信封 ok 也是 true，所以 skipped 必须先于 ok 判断，否则永远判不出「跳过」。
@@ -574,8 +597,9 @@ export class Runner {
           : {}
         : { errorCode: outcome.error.code, errorMessage: redact(outcome.error.message) }),
       ...(outcome.coreVersion === '' ? {} : { coreVersion: outcome.coreVersion }),
+      ...(input.scopeRepo === undefined ? {} : { scopeRepo: input.scopeRepo }),
     };
-    this.persistReleaseRun(record, settings, input.logFile);
+    this.persistReleaseRun(record, settings, input.logFile, { advanceWeek: input.scopeRepo === undefined });
     return record;
   }
 
@@ -588,6 +612,7 @@ export class Runner {
     startedAt: string;
     startedMs: number;
     logFile: string;
+    scopeRepo?: string;
   }): ReleaseRunRecord {
     const code = input.aborted ? 'CORE_CANCELLED' : input.error instanceof IpcError ? input.error.code : 'INTERNAL';
     const message = redact(input.error instanceof Error ? input.error.message : String(input.error));
@@ -606,20 +631,25 @@ export class Runner {
       durationMs: Date.now() - input.startedMs,
       errorCode: code,
       errorMessage: message,
+      ...(input.scopeRepo === undefined ? {} : { scopeRepo: input.scopeRepo }),
     };
-    this.persistReleaseRun(record, input.settings, input.logFile);
+    // 单仓失败同样不推进 lastReleaseWeek（避免把本周标记成已跑），但仍记一条可复盘的失败。
+    this.persistReleaseRun(record, input.settings, input.logFile, { advanceWeek: input.scopeRepo === undefined });
     return record;
   }
 
   /**
    * 落盘发版运行：只写 state（history.json 是榜单的），顺带推进 lastReleaseAt；
    * 只有 ok/skipped 才锁 `lastReleaseWeek`——失败不锁，调度下一 tick 才有机会重试。
+   * `advanceWeek=false`（单仓手动触发）时：仍写 releaseRuns 与 lastReleaseAt，但**不**锁
+   * lastReleaseWeek——否则会把本周标记为已检查，导致周调度跳过本周真正的检查。
    */
-  private persistReleaseRun(record: ReleaseRunRecord, settings: Settings, logFile: string): void {
+  private persistReleaseRun(record: ReleaseRunRecord, settings: Settings, logFile: string, opts: { advanceWeek?: boolean } = {}): void {
     const store = this.deps.store;
+    const advanceWeek = opts.advanceWeek !== false;
     const succeeded = record.status === 'ok' || record.status === 'skipped';
     let week: string | undefined;
-    if (succeeded) {
+    if (succeeded && advanceWeek) {
       try {
         week = isoWeekKey(new Date(record.finishedAt), settings.releases.schedule.timezone);
       } catch {

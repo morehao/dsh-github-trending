@@ -120,7 +120,15 @@ export function createRoutes(deps: RouteDeps) {
       const code = error instanceof IpcError ? error.code : 'INTERNAL';
       const message = redact(error instanceof Error ? error.message : String(error));
       deps.logger?.('route.error', { pathname, method, code, message });
-      const status = code === 'CONFIG_INVALID' ? 400 : code === 'NOT_FOUND' ? 404 : 500;
+      const status =
+        code === 'CONFIG_INVALID'
+          ? // 「已有一次运行在进行中」是并发冲突而非参数错误：用 409，前端据此禁用按钮并提示。
+            message.includes('运行在进行中')
+            ? 409
+            : 400
+          : code === 'NOT_FOUND'
+            ? 404
+            : 500;
       sendJson(response, status, { ok: false, code, message });
     }
   };
@@ -222,6 +230,21 @@ async function dispatch(
 
   if (method === 'POST' && pathname === '/run/cancel') {
     return { cancelled: deps.runner.cancel() };
+  }
+
+  // 发版订阅运行触发：全量（无 repo）或单仓（repo=owner/repo）。
+  // 复用 Runner.runReleases，与榜单 POST /run 共用同一把 active 锁（并发 → 409）。
+  if (method === 'POST' && pathname === '/releases/run') {
+    const body = await readBody(request);
+    let repo: string | undefined;
+    if (body.repo !== undefined) {
+      if (typeof body.repo !== 'string' || !isValidRepo(body.repo.trim())) {
+        throw new IpcError('CONFIG_INVALID', `repo 必须是 owner/repo 形态：${String(body.repo)}`);
+      }
+      repo = body.repo.trim();
+    }
+    const release = await deps.runner.runReleases({ trigger: 'manual', ...(repo === undefined ? {} : { repo }) });
+    return { release };
   }
 
   if (method === 'GET' && pathname === '/repo/branch') {

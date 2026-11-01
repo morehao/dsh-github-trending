@@ -603,3 +603,53 @@ test('runReleases：订阅列表读不到也照跑（repoCount 按 0），auto �
   assert.equal(record.coreVersion, '0.3.0-fake');
   assert.equal(store.readHistory().length, 0);
 });
+
+// ——— 单仓发版分析（run --stages releases --repo owner/repo） ———
+
+test('runReleases(repo)：核心支持 --repo 时透传，且单仓不推进 lastReleaseWeek', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_REQUIRE_STAGES: '1',
+      FAKE_REQUIRE_REPO: 'vercel/next.js',
+      FAKE_VERSION: '0.8.0', // >= REPO_MIN_CORE_VERSION，才会真正传 --repo
+      FAKE_RELEASES: '1,1,0',
+    },
+  });
+  const record = await runner.runReleases({ trigger: 'manual', repo: 'vercel/next.js' });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.scopeRepo, 'vercel/next.js');
+  const state = store.readState();
+  // 关键回归：单仓手动触发不能锁本周（否则周调度会跳过本周真正检查）。
+  assert.equal(state.lastReleaseWeek, undefined);
+  // 但仍更新 lastReleaseAt 并记一条 releaseRun。
+  assert.equal(state.lastReleaseAt, record.finishedAt);
+  assert.equal(store.readReleaseRuns().length, 1);
+  assert.equal(store.readReleaseRuns()[0].scopeRepo, 'vercel/next.js');
+  assert.equal(store.readHistory().length, 0);
+});
+
+test('runReleases(repo)：全量运行仍推进 lastReleaseWeek（不回归）', async () => {
+  const { runner, store } = makeRunner({ scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_RELEASES: '1,1,0' } });
+  const record = await runner.runReleases({ trigger: 'manual' });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.scopeRepo, undefined);
+  const state = store.readState();
+  assert.equal(state.lastReleaseWeek, scheduleModule.isoWeekKey(new Date(record.finishedAt), 'Asia/Shanghai'));
+});
+
+test('runReleases(repo)：核心低于 0.8.0 → 降级不传 --repo（仍跑全量），不锁本周', async () => {
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_REQUIRE_STAGES: '1',
+      // 核心版本过低：若真传了 --repo，FAKE_REQUIRE_REPO 会失败；这里不设它，改为断言降级。
+      FAKE_VERSION: '0.7.1',
+      FAKE_RELEASES: '1,1,0',
+    },
+  });
+  // 传了 repo，但核心 0.7.1 < 0.8.0 → 不传 --repo，降级为全量；scopeRepo 仍记录意图。
+  const record = await runner.runReleases({ trigger: 'manual', repo: 'vercel/next.js' });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.scopeRepo, 'vercel/next.js');
+  const state = store.readState();
+  assert.equal(state.lastReleaseWeek, undefined); // 单仓意图始终不锁本周
+});

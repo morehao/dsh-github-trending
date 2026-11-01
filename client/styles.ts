@@ -351,6 +351,24 @@ export const CSS = `
 
 /* ——— 订阅：命令栏 + 四列表格 + 选择条 + 发版记录抽屉 ——— */
 .dshgt-subs{gap:12px;padding-bottom:10px;}
+/* 工具条：搜索 + 添加 + 选择 + 生成变更分析；列表在上方操作区之下 */
+.dshgt-subs-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-subs-search{position:relative;flex:1;min-width:180px;max-width:340px;display:flex;align-items:center;}
+.dshgt-subs-search svg{position:absolute;left:9px;color:var(--gt-muted);pointer-events:none;}
+.dshgt-subs-search input{width:100%;height:32px;box-sizing:border-box;padding:0 10px 0 30px;border:1px solid var(--gt-border);border-radius:8px;background:var(--gt-bg);color:var(--gt-fg);font:inherit;font-size:13px;}
+.dshgt-subs-search input:focus{outline:2px solid color-mix(in srgb,var(--gt-accent) 30%,transparent);outline-offset:1px;border-color:color-mix(in srgb,var(--gt-accent) 45%,var(--gt-border));}
+.dshgt-subs-search input::placeholder{color:var(--gt-muted);}
+.dshgt-subs-toolbar-spacer{flex:1 1 auto;min-width:0;}
+.dshgt-subs-addform{display:flex;align-items:center;gap:6px;}
+.dshgt-subs-addform input{height:32px;box-sizing:border-box;width:200px;padding:0 9px;border:1px solid var(--gt-border);border-radius:8px;background:var(--gt-bg);color:var(--gt-fg);font:inherit;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.dshgt-subs-addform input:focus{outline:2px solid color-mix(in srgb,var(--gt-accent) 30%,transparent);outline-offset:1px;}
+.dshgt-subs-act.gen{color:var(--gt-muted);}
+.dshgt-subs-act.gen:hover{color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 10%,transparent);}
+.dshgt-subs-act.gen:disabled{opacity:.5;cursor:not-allowed;}
+.dshgt-subs-rowbusy{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--gt-accent);padding:3px 4px;white-space:nowrap;}
+.dshgt-spin{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--gt-accent) 30%,transparent);border-top-color:var(--gt-accent);animation:dshgt-spin .7s linear infinite;display:inline-block;flex:none;}
+@keyframes dshgt-spin{to{transform:rotate(360deg);}}
+.dshgt-subs-row.is-analyzing{background:color-mix(in srgb,var(--gt-accent) 6%,var(--gt-bg));}
 .dshgt-subs-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;}
 .dshgt-subs-head-main{min-width:0;}
 .dshgt-subs-head h2{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em;}

@@ -49,6 +49,8 @@ export interface RunCoreOptions {
    * `['releases']` 就是「只跑发版订阅」——不抓榜单、不渲染 digest、也不合并订阅 pending。
    */
   stages?: string[];
+  /** 单仓发版分析（核心 `run --stages releases --repo owner/repo`）：只处理该仓库；须与 stages=['releases'] 搭配。 */
+  repo?: string;
   /** 订阅仓库数：用于把配置里的 `auto` 并发/预算解析成数字（发版运行传入）。 */
   repoCount?: number;
   signal?: AbortSignal;
@@ -82,7 +84,7 @@ function errorFrom(stderr: string, exitCode: number | null): RunError {
 
 export function buildCoreArgs(
   channelPath: string,
-  options: { dryRun: boolean; date?: string; period?: Period; stages?: string[]; force?: boolean },
+  options: { dryRun: boolean; date?: string; period?: Period; stages?: string[]; force?: boolean; repo?: string },
 ): string[] {
   const args = ['run', '--config', channelPath, '--json'];
   if (options.dryRun) args.push('--dry-run');
@@ -92,6 +94,8 @@ export function buildCoreArgs(
   if (options.stages !== undefined && options.stages.length > 0) args.push('--stages', options.stages.join(','));
   // --force 只在显式请求时传；插件侧已按核心版本闸门（runner）判定过是否支持。
   if (options.force === true) args.push('--force');
+  // --repo 只在单仓发版分析时传；须与 --stages releases 搭配（runner 已按版本闸门判定核心支持）。
+  if (options.repo !== undefined && options.repo !== '') args.push('--repo', options.repo);
   return args;
 }
 
@@ -109,6 +113,7 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
     period: options.period,
     stages: options.stages,
     force: options.force,
+    ...(options.repo === undefined ? {} : { repo: options.repo }),
   });
 
   const child = spawn(options.core.path, args, {

@@ -1,35 +1,36 @@
 /**
- * 订阅页：命令栏 + 四列表格 + 批量选择 + 发版记录抽屉。
+ * 订阅页：一个列表 + 列表上方工具条（搜索 / 添加仓库 / 选择 / 生成变更分析）+ 发版记录抽屉。
  *
  * 列表本身**不落 settings.json**，也不由插件直接写仓：全部经核心 `subscribe` IPC 读改
  * （add/remove 只写 `.git/pending`，随下次运行落盘并随产物提交）。
+ *
+ * 「生成变更分析」走 `POST /releases/run`：不给 repo = 跑全部订阅；给了 repo = 单仓分析。
+ * 两者共用后端同一把运行锁，同一时刻最多一个发版运行（并发由后端拒绝）。
  *
  * 抽屉里的正文是数据仓 `releases/<owner>/<repo>-01.md` 的原文：面板只渲染、不改写、
  * 不二次总结——「看到的就是仓库里那份」是这一页的硬约束，所以这里既不做摘要也不
  * 重排段落，卷切换时按 `volume` 重新取一次，不缓存跨周内容。
  */
-import { Alert, Btn, h, shortTime, React } from './ui.js';
+import { Alert, Btn, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import {
   getSubscriptionDoc,
   getSubscriptions,
-  lastReleaseAtOf,
+  postReleasesRun,
   postSubscriptions,
-  releaseRunsOf,
   type SubscriptionDoc,
   type SubscriptionItem,
   type SubscriptionList,
   type SubscriptionStatus,
 } from './api.js';
 import { renderMarkdown } from './markdown.js';
-import { addDays, zonedDateString } from './digest-core.js';
 import type { StoreValue } from './store.js';
 
 export interface SubscriptionsProps {
   t: Translate;
   /** 跳转到设置页「发版订阅」分区。 */
   onOpenSettings: () => void;
-  /** `/state` 快照：meta 行要用调度与发版运行记录；缺省时只显示仓库数与「每周一次」。 */
+  /** `/state` 快照（当前仅用于空态提示，可缺省）。 */
   store?: StoreValue;
 }
 
@@ -51,13 +52,6 @@ interface RepoRow {
   item?: SubscriptionItem;
 }
 
-interface MetaInfo {
-  cadence: string;
-  next?: string;
-  lastWeek?: string;
-  lastCheck?: string;
-}
-
 function errorText(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure);
 }
@@ -66,15 +60,6 @@ function errorText(failure: unknown): string {
 function monthDay(value: string | undefined): string {
   if (value === undefined || value === '') return '—';
   return DATE_RE.test(value) ? value.slice(5) : value;
-}
-
-/** `08:00:00` → `08:00`。 */
-function clock(value: string): string {
-  return /^\d{2}:\d{2}/.test(value) ? value.slice(0, 5) : value;
-}
-
-function weekdayLabel(t: Translate, weekday: number): string {
-  return weekday >= 1 && weekday <= 7 ? t(`weekday.${weekday}`) : String(weekday);
 }
 
 function toneOf(status: SubscriptionStatus | undefined): 'ok' | 'warn' | 'err' | 'idle' {
@@ -143,75 +128,6 @@ function highlight(text: string, needle: string): any {
   if (index === 0) return text;
   if (index < text.length) parts.push(text.slice(index));
   return parts;
-}
-
-/** 某一日历日期所在 ISO 周的周一（纯 UTC 日历运算，避免 DST 把日期挪一天）。 */
-function weekStart(date: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (match === null) return date;
-  const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  const dayIndex = (value.getUTCDay() + 6) % 7;
-  value.setUTCDate(value.getUTCDate() - dayIndex);
-  return value.toISOString().slice(0, 10);
-}
-
-/**
- * meta 行要的数据：仓库数之外的节奏、下次运行、上次发版检查、上周变化。
- *
- * 发版调度字段是这次新增的，Host 可能还没提供：优先读 `state.schedule.release*`，
- * 缺了就退回 `settings.releases.schedule`，再缺只写「每周一次」。
- * 「上周」只在上一 ISO 周确实有发版运行记录时才写，避免把三周前的数字说成上周。
- */
-function metaOf(t: Translate, store: StoreValue | undefined): MetaInfo {
-  const state = store?.state ?? null;
-  const schedule = state?.schedule;
-  const releaseSchedule = state?.settings?.releases?.schedule;
-
-  const weekday = typeof schedule?.releaseWeekday === 'number' ? schedule.releaseWeekday : releaseSchedule?.weekday;
-  const time = typeof schedule?.releaseTime === 'string' && schedule.releaseTime !== '' ? schedule.releaseTime : releaseSchedule?.time;
-  const timezone =
-    (typeof schedule?.releaseTimezone === 'string' && schedule.releaseTimezone !== '' ? schedule.releaseTimezone : releaseSchedule?.timezone) ??
-    schedule?.timezone ??
-    'Asia/Shanghai';
-
-  const cadence =
-    weekday === undefined || time === undefined || time === ''
-      ? t('subs.meta.cadence')
-      : t('subs.meta.cadence.full', { weekday: weekdayLabel(t, weekday), time: clock(time) });
-
-  const nextAt = typeof schedule?.nextReleaseAt === 'string' && schedule.nextReleaseAt !== '' ? schedule.nextReleaseAt : undefined;
-  const next = nextAt === undefined ? undefined : shortTime(nextAt);
-
-  const runs = releaseRunsOf(state);
-  const newest =
-    runs.length === 0
-      ? undefined
-      : runs.reduce((a, b) => (Date.parse(b.finishedAt || b.startedAt) > Date.parse(a.finishedAt || a.startedAt) ? b : a));
-
-  const lastCheckAt = newest?.finishedAt ?? lastReleaseAtOf(state);
-  const lastCheck = typeof lastCheckAt === 'string' && lastCheckAt !== '' ? shortTime(lastCheckAt) : undefined;
-
-  let lastWeek: string | undefined;
-  if (newest !== undefined) {
-    const today = zonedDateString(new Date(), timezone);
-    const currentFrom = weekStart(today);
-    const lastFrom = addDays(currentFrom, -7);
-    const at = newest.finishedAt !== '' ? newest.finishedAt : newest.startedAt;
-    const runDate = zonedDateString(new Date(at), timezone);
-    // 只描述「上一次周检查真正覆盖到的那一周」：落在上周写「上周」，落在本周写「本周」，
-    // 更早就不写——把三周前的数字说成「上周」比不显示更糟。
-    if (runDate >= lastFrom && runDate <= addDays(lastFrom, 6)) {
-      lastWeek = t('subs.meta.lastWeek', { from: monthDay(lastFrom), to: monthDay(addDays(lastFrom, 6)), changed: newest.changed });
-    } else if (runDate >= currentFrom && runDate <= addDays(currentFrom, 6)) {
-      lastWeek = t('subs.meta.thisWeek', { from: monthDay(currentFrom), to: monthDay(addDays(currentFrom, 6)), changed: newest.changed });
-    }
-  }
-
-  const info: MetaInfo = { cadence };
-  if (next !== undefined) info.next = next;
-  if (lastWeek !== undefined) info.lastWeek = lastWeek;
-  if (lastCheck !== undefined) info.lastCheck = lastCheck;
-  return info;
 }
 
 /**
@@ -400,6 +316,15 @@ function DocDrawer(props: DocDrawerProps): any {
   );
 }
 
+/** 一次分析完成后的瞬时结果提示（顶部横幅或行内 flash）。 */
+interface AnalyzeResult {
+  scope: 'all' | 'one';
+  repo?: string;
+  ok: boolean;
+  changed: number;
+  message?: string;
+}
+
 export function SubscriptionsView(props: SubscriptionsProps): any {
   const { t } = props;
   const [list, setList] = React.useState<SubscriptionList | null>(null);
@@ -412,7 +337,11 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const [selected, setSelected] = React.useState<string[]>([]);
   const [confirming, setConfirming] = React.useState<string[] | null>(null);
   const [openRepo, setOpenRepo] = React.useState<string | null>(null);
-  const [focus, setFocus] = React.useState(-1);
+  const [addOpen, setAddOpen] = React.useState(false);
+  const [addValue, setAddValue] = React.useState('');
+  // 发版分析：全局或单仓，任一进行中时其余触发都禁用（后端同一把运行锁）。
+  const [analyzing, setAnalyzing] = React.useState<null | { scope: 'all' | 'one'; repo?: string }>(null);
+  const [result, setResult] = React.useState<AnalyzeResult | null>(null);
 
   const load = React.useCallback((signal?: AbortSignal): void => {
     getSubscriptions(signal)
@@ -434,26 +363,10 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     return () => controller.abort();
   }, [load]);
 
-  // 命令栏里写着 ⌘K，就真的给一个：否则这行提示只是装饰。
-  const inputRef = React.useRef<any>(null);
-  React.useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key.toLowerCase() !== 'k' || !(event.metaKey || event.ctrlKey)) return;
-      event.preventDefault();
-      inputRef.current?.focus?.();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
-
   const rows = mergeRows(list);
   const needle = query.trim().toLowerCase();
   const matched = needle === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(needle));
   const sorted = sortRows(matched, sort);
-
-  const candidate = needle !== '' && REPO_PATTERN.test(query.trim()) ? query.trim() : undefined;
-  const subscribed = candidate !== undefined && rows.some((row) => row.name.toLowerCase() === candidate.toLowerCase());
-  const activeFocus = focus >= 0 && focus < sorted.length ? focus : -1;
 
   const toggleSelect = (repo: string): void => {
     setSelected((current) => (current.includes(repo) ? current.filter((item) => item !== repo) : [...current, repo]));
@@ -466,8 +379,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     postSubscriptions('add', [repo])
       .then((next) => {
         setList(next);
-        setQuery('');
-        setFocus(-1);
+        setAddValue('');
+        setAddOpen(false);
         setNote(t('subs.add.queued', { repo }));
       })
       .catch((failure: unknown) => setError(errorText(failure)))
@@ -508,6 +421,27 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
       .finally(() => setBusy(null));
   };
 
+  // 生成变更分析：scope=all 跑全部；scope=one 只跑该仓库。完成后刷新列表并给出结果提示。
+  const runAnalyze = (repo?: string): void => {
+    if (analyzing !== null) return;
+    setAnalyzing(repo === undefined ? { scope: 'all' } : { scope: 'one', repo });
+    setError(null);
+    setResult(null);
+    postReleasesRun(repo)
+      .then((record) => {
+        setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: record.status !== 'failed', changed: record.changed });
+        if (record.status === 'failed' && record.errorMessage !== undefined) {
+          setError(t('subs.analyze.failed', { message: record.errorMessage }));
+        }
+        load();
+      })
+      .catch((failure: unknown) => {
+        setError(errorText(failure));
+        setResult({ scope: repo === undefined ? 'all' : 'one', ...(repo === undefined ? {} : { repo }), ok: false, changed: 0 });
+      })
+      .finally(() => setAnalyzing(null));
+  };
+
   const onSort = (key: SortKey): void => {
     setSort((current) => (current.key === key ? { key, dir: current.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
   };
@@ -530,54 +464,28 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     );
   };
 
-  const onCommandKey = (event: any): void => {
-    // 中文输入法组字时的 Enter / 方向键属于输入法，不该触发添加或移动。
-    if (event.isComposing === true) return;
-    if (event.key === 'Escape') {
-      setQuery('');
-      setFocus(-1);
-      if (selecting) {
-        setSelecting(false);
-        setSelected([]);
-      }
-      return;
-    }
-    if (event.key === 'Enter') {
-      if (candidate !== undefined && !subscribed) {
-        event.preventDefault();
-        addRepo(candidate);
-        return;
-      }
-      if (activeFocus >= 0) {
-        event.preventDefault();
-        setOpenRepo(sorted[activeFocus]?.name ?? null);
-      }
-      return;
-    }
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setFocus(Math.min(sorted.length - 1, focus + 1));
-      return;
-    }
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setFocus(Math.max(-1, focus - 1));
-    }
-  };
-
-  const meta = metaOf(t, props.store);
-  const metaRight =
-    needle !== ''
-      ? [t('subs.meta.match', { matched: sorted.length, total: rows.length })]
-      : [
-          meta.lastCheck === undefined ? undefined : t('subs.meta.lastCheck', { time: meta.lastCheck }),
-          meta.lastWeek,
-        ].filter((item): item is string => item !== undefined);
+  const canAdd = REPO_PATTERN.test(addValue.trim());
+  const alreadySubscribed = canAdd && rows.some((row) => row.name.toLowerCase() === addValue.trim().toLowerCase());
   const drawerRow = openRepo === null ? undefined : rows.find((row) => row.name === openRepo);
+  const globalBusy = analyzing !== null;
 
-  const rowNodes = sorted.map((row, index) => {
+  const banner =
+    result === null
+      ? null
+      : result.ok
+        ? h(
+            Alert,
+            { kind: 'ok' },
+            result.scope === 'all'
+              ? t('subs.analyze.done', { count: result.changed })
+              : t('subs.analyze.doneOne', { repo: result.repo ?? '' }),
+          )
+        : null;
+
+  const rowNodes = sorted.map((row) => {
     const item = row.item;
     const tone = toneOf(item?.status);
+    const rowAnalyzing = analyzing !== null && analyzing.scope === 'one' && analyzing.repo === row.name;
     const checkbox = selecting
       ? h(
           'span',
@@ -597,7 +505,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
       {
         key: row.name,
         role: 'row',
-        className: `dshgt-subs-row${index === activeFocus ? ' is-focus' : ''}`,
+        className: `dshgt-subs-row${rowAnalyzing ? ' is-analyzing' : ''}`,
         onClick: () => {
           if (selecting) toggleSelect(row.name);
           else setOpenRepo(row.name);
@@ -620,6 +528,23 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
       h(
         'span',
         { key: 'act', role: 'cell', className: 'dshgt-subs-actions' },
+        rowAnalyzing
+          ? h('span', { className: 'dshgt-subs-rowbusy' }, h('span', { className: 'dshgt-spin' }), t('subs.analyzing'))
+          : h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshgt-subs-act gen',
+                'aria-label': t('subs.row.triggerRepo', { repo: row.name }),
+                title: t('subs.row.triggerRepo', { repo: row.name }),
+                disabled: globalBusy || busy !== null,
+                onClick: (event: any) => {
+                  event.stopPropagation();
+                  runAnalyze(row.name);
+                },
+              },
+              t('subs.row.trigger'),
+            ),
         h(
           'button',
           {
@@ -662,16 +587,13 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
             h('span', null, t('subs.empty.hint')),
           )
         : sorted.length === 0
-          ? candidate !== undefined && !subscribed
-            ? // 输入完整 owner/repo 时上方已给出「+ 添加」建议，这里不再叠一句「没有匹配」。
-              null
-            : h(
-                'div',
-                { className: 'dshgt-subs-empty' },
-                h('b', null, t('subs.empty.match')),
-                h('span', null, t('subs.empty.match.hint')),
-                h(Btn, { small: true, onClick: () => setQuery('') }, t('subs.empty.clear')),
-              )
+          ? h(
+              'div',
+              { className: 'dshgt-subs-empty' },
+              h('b', null, t('subs.empty.match')),
+              h('span', null, t('subs.empty.match.hint')),
+              h(Btn, { small: true, onClick: () => setQuery('') }, t('subs.empty.clear')),
+            )
           : h(
               'div',
               { className: `dshgt-subs-table${selecting ? ' is-selecting' : ''}`, role: 'table', 'aria-label': t('subs.title') },
@@ -693,112 +615,98 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   return h(
     'div',
     { className: 'dshgt-view dshgt-subs' },
-    h(
-      'section',
-      { className: 'dshgt-subs-head' },
-      h(
-        'div',
-        { className: 'dshgt-subs-head-main' },
-        h('h2', null, t('subs.title')),
-        h('p', { className: 'dshgt-subs-dek' }, t('subs.desc')),
-      ),
-      h(
-        'div',
-        { className: 'dshgt-subs-head-actions' },
-        h(
-          Btn,
-          {
-            small: true,
-            onClick: () => {
-              if (selecting) setSelected([]);
-              setSelecting(!selecting);
-            },
-          },
-          selecting ? t('subs.select.done') : t('subs.select'),
-        ),
-      ),
-    ),
-
+    // 工具条：搜索 + 添加 + 选择 + 生成变更分析（主操作）
     h(
       'div',
-      { className: 'dshgt-subs-cmdwrap' },
+      { className: 'dshgt-subs-toolbar' },
       h(
         'div',
-        { className: 'dshgt-subs-cmd' },
+        { className: 'dshgt-subs-search' },
+        h(
+          'svg',
+          { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'aria-hidden': 'true' },
+          h('circle', { cx: 11, cy: 11, r: 7 }),
+          h('path', { d: 'm20 20-3.5-3.5' }),
+        ),
         h('input', {
           type: 'text',
-          ref: inputRef,
           value: query,
-          placeholder: t('subs.cmd.placeholder'),
-          'aria-label': t('subs.cmd.label'),
-          'aria-keyshortcuts': 'Meta+K Control+K',
+          placeholder: t('subs.search.placeholder'),
+          'aria-label': t('subs.search.label'),
           autoComplete: 'off',
           spellCheck: false,
-          onInput: (event: any) => {
-            setQuery(event.target.value);
-            setFocus(-1);
-          },
-          onKeyDown: onCommandKey,
+          onInput: (event: any) => setQuery(event.target.value),
         }),
-        h('kbd', { className: 'dshgt-subs-kbd' }, '⌘K'),
+      ),
+      h('div', { className: 'dshgt-subs-toolbar-spacer' }),
+      addOpen
+        ? h(
+            'div',
+            { className: 'dshgt-subs-addform' },
+            h('input', {
+              type: 'text',
+              value: addValue,
+              placeholder: t('subs.add.placeholder'),
+              'aria-label': t('subs.add.placeholder'),
+              autoComplete: 'off',
+              spellCheck: false,
+              autoFocus: true,
+              onInput: (event: any) => setAddValue(event.target.value),
+              onKeyDown: (event: any) => {
+                if (event.isComposing === true) return;
+                if (event.key === 'Enter' && canAdd && !alreadySubscribed) addRepo(addValue.trim());
+                if (event.key === 'Escape') {
+                  setAddOpen(false);
+                  setAddValue('');
+                }
+              },
+            }),
+            h(
+              Btn,
+              { small: true, variant: 'primary', disabled: busy !== null || !canAdd || alreadySubscribed, onClick: () => canAdd && !alreadySubscribed && addRepo(addValue.trim()) },
+              t('subs.add.confirm'),
+            ),
+          )
+        : h(
+            Btn,
+            {
+              small: true,
+              disabled: busy !== null,
+              onClick: () => {
+                setAddOpen(true);
+                setAddValue('');
+              },
+            },
+            t('subs.toolbar.add'),
+          ),
+      h(
+        Btn,
+        {
+          small: true,
+          onClick: () => {
+            if (selecting) setSelected([]);
+            setSelecting(!selecting);
+          },
+        },
+        selecting ? t('subs.select.done') : t('subs.select'),
       ),
       h(
-        'div',
-        { className: 'dshgt-subs-meta' },
-        h(
-          'span',
-          null,
-          t('subs.meta.count', { count: rows.length }),
-          ' · ',
-          h(
-            'button',
-            { type: 'button', className: 'dshgt-subs-linkbtn', title: t('subs.param.link'), onClick: () => props.onOpenSettings() },
-            meta.cadence,
-          ),
-          meta.next === undefined ? null : ` · ${t('subs.meta.next', { time: meta.next })}`,
-        ),
-        metaRight.length === 0
-          ? null
-          : h(
-              'span',
-              { className: 'dshgt-subs-meta-right' },
-              metaRight.flatMap((part, index) => (index === 0 ? [part] : [h('span', { key: `sep${index}`, className: 'dshgt-subs-meta-sep' }, '·'), part])),
-            ),
+        Btn,
+        {
+          small: true,
+          variant: 'primary',
+          disabled: globalBusy || busy !== null,
+          onClick: () => runAnalyze(),
+        },
+        analyzing !== null && analyzing.scope === 'all' ? t('subs.analyzing') : t('subs.toolbar.analyze'),
       ),
     ),
 
-    candidate === undefined
-      ? null
-      : h(
-          'div',
-          { className: 'dshgt-subs-suggest' },
-          subscribed
-            ? [
-                h('span', { key: 'pill', className: 'dshgt-tag' }, t('subs.cmd.subscribed')),
-                h('span', { key: 'repo', className: 'repo' }, candidate),
-                h('span', { key: 'hint', className: 'hint' }, t('subs.cmd.subscribed.hint')),
-              ]
-            : [
-                h('span', { key: 'plus', className: 'plus' }, '+'),
-                h('span', { key: 'add' }, t('subs.cmd.add')),
-                h('span', { key: 'repo', className: 'repo' }, candidate),
-                h('span', { key: 'hint', className: 'hint' }, t('subs.cmd.add.hint')),
-              ],
-        ),
-
+    banner,
     error === null ? null : h(Alert, { kind: 'err' }, error),
     note === null ? null : h(Alert, { kind: 'ok' }, note),
 
     tableBody,
-
-    h(
-      'div',
-      { className: 'dshgt-subs-keys' },
-      h('span', null, t('subs.keys.move')),
-      h('span', null, t('subs.keys.enter')),
-      h('span', null, t('subs.keys.esc')),
-      h('span', null, t('subs.keys.sort')),
-    ),
 
     selecting && rows.length > 0
       ? h(

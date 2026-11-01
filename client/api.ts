@@ -205,6 +205,7 @@ export interface ReleaseRunRecord {
   errorCode?: string;
   errorMessage?: string;
   coreVersion?: string;
+  scopeRepo?: string;
 }
 
 /** 插件侧每周发版节奏；与榜单调度（`schedule.*`）互相独立。 */
@@ -475,6 +476,52 @@ export async function getSubscriptions(signal?: AbortSignal): Promise<Subscripti
 export async function postSubscriptions(action: 'add' | 'remove', repos: string[]): Promise<SubscriptionList> {
   const payload = await apiCall<{ repos?: unknown; items?: unknown }>('POST', '/subscriptions', { action, repos });
   return normalizeSubscriptionList(payload);
+}
+
+/**
+ * 触发生成变更分析（发版订阅阶段）。不给 `repo` = 跑全部订阅；给了 = 只跑该仓库的单仓分析。
+ * 返回本次发版运行记录（含 scopeRepo、状态与计数），前端据此刷新列表/提示结果。
+ */
+export async function postReleasesRun(repo?: string): Promise<ReleaseRunRecord> {
+  const payload = await apiCall<{ release?: unknown }>('POST', '/releases/run', repo === undefined ? {} : { repo });
+  return normalizeReleaseRun(payload.release);
+}
+
+function normalizeReleaseRun(raw: unknown): ReleaseRunRecord {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const opt = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
+  const status: ReleaseRunRecord['status'] =
+    r.status === 'ok' || r.status === 'failed' || r.status === 'skipped' || r.status === 'cancelled' ? r.status : 'failed';
+  const record: ReleaseRunRecord = {
+    id: str(r.id),
+    startedAt: str(r.startedAt),
+    finishedAt: str(r.finishedAt),
+    status,
+    checked: num(r.checked),
+    changed: num(r.changed),
+    newTags: num(r.newTags),
+    summarized: num(r.summarized),
+    degraded: num(r.degraded),
+    failed: num(r.failed),
+    rateLimited: num(r.rateLimited),
+    durationMs: num(r.durationMs),
+  };
+  const maybe = {
+    tokens: typeof r.tokens === 'number' ? r.tokens : undefined,
+    commit: opt(r.commit),
+    prUrl: opt(r.prUrl),
+    branch: opt(r.branch),
+    errorCode: opt(r.errorCode),
+    errorMessage: opt(r.errorMessage),
+    coreVersion: opt(r.coreVersion),
+    scopeRepo: opt(r.scopeRepo),
+  };
+  for (const [k, v] of Object.entries(maybe)) {
+    if (v !== undefined) (record as unknown as Record<string, unknown>)[k] = v;
+  }
+  return record;
 }
 
 /**

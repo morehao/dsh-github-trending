@@ -182,6 +182,15 @@ if (command === 'run') {
       process.exit(1);
     }
   }
+  // 单仓发版：FAKE_REQUIRE_REPO=<owner/repo> 时，--repo 必须等于该值（否则参数不对直接失败）。
+  if (process.env.FAKE_REQUIRE_REPO !== undefined && process.env.FAKE_REQUIRE_REPO !== '') {
+    const index = argv.indexOf('--repo');
+    const value = index >= 0 ? argv[index + 1] : '';
+    if (value !== process.env.FAKE_REQUIRE_REPO) {
+      process.stderr.write(`error: CONFIG_INVALID: expected --repo ${process.env.FAKE_REQUIRE_REPO}, got ${value || '(none)'}\n`);
+      process.exit(1);
+    }
+  }
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
   const files = artifactsFor(config, skipped);
