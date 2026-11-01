@@ -24,6 +24,22 @@ export const GITHUB_RECORD_KEY = 'github/default';
 /** 本地回调路径（带集成前缀，避免多 provider 撞 webServer 的 `(kind,path)` 唯一约束）。 */
 export const CALLBACK_PATH = '/api/morehao/github-trending/oauth/github/callback';
 
+/**
+ * 内置的 GitHub OAuth App 公开 client_id（**非机密**：OAuth 的 client_id 设计上就是公开的，
+ * 会出现在授权 URL 里，与 `gh`/VS Code 内置自己的 client_id 同理）。
+ * 纯 PKCE public client，无需 client_secret。用户/部署可在 `apply(config.githubClientId)` 覆盖。
+ *
+ * OAuth App 侧登记的回调：`http://127.0.0.1/api/morehao/github-trending/oauth/github/callback`
+ * （loopback 按 RFC 8252 忽略端口，运行时随机端口可正常回跳）。
+ */
+export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23li7rhp0EKoqbkJKY';
+
+/** 解析生效的 client_id：显式 config 优先，否则用内置默认。 */
+export function resolveClientId(deps: GithubAuthDeps): string | undefined {
+  const fromConfig = deps.clientId;
+  return fromConfig !== undefined && fromConfig !== '' ? fromConfig : DEFAULT_GITHUB_CLIENT_ID;
+}
+
 const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const DEVICE_CODE_URL = 'https://github.com/login/device/code';
@@ -220,7 +236,7 @@ async function runBrowser(deps: GithubAuthDeps, session: AuthorizationSessionLik
   if (webServer === undefined || typeof webServer.register !== 'function') {
     throw new Error('webServer 服务不可用：浏览器登录需要它承载 OAuth 回调');
   }
-  const clientId = deps.clientId;
+  const clientId = resolveClientId(deps);
   if (clientId === undefined || clientId === '') throw new Error('缺少 GitHub OAuth client_id');
   const fetchImpl = deps.fetchImpl ?? fetch;
   const endpoints = normalizeEndpoints(deps.endpoints);
@@ -300,7 +316,7 @@ async function runBrowser(deps: GithubAuthDeps, session: AuthorizationSessionLik
 // ---------------------------------------------------------------------------
 
 async function runDevice(deps: GithubAuthDeps, session: AuthorizationSessionLike): Promise<void> {
-  const clientId = deps.clientId;
+  const clientId = resolveClientId(deps);
   if (clientId === undefined || clientId === '') throw new Error('缺少 GitHub OAuth client_id');
   const fetchImpl = deps.fetchImpl ?? fetch;
   const endpoints = normalizeEndpoints(deps.endpoints);

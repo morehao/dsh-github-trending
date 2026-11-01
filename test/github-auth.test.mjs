@@ -265,3 +265,11 @@ test('githubAuth device flow：access_denied → 抛错（核心结算 cancelled
   }
   assert.equal(githubAuth.attemptView().phase, 'error');
 });
+
+test('githubAuth.resolveClientId：无 config 时回退内置默认 client_id', () => {
+  assert.equal(githubAuth.resolveClientId({ get: () => undefined }), githubAuth.DEFAULT_GITHUB_CLIENT_ID);
+  assert.equal(githubAuth.resolveClientId({ get: () => undefined, clientId: 'override-id' }), 'override-id');
+  assert.equal(githubAuth.resolveClientId({ get: () => undefined, clientId: '' }), githubAuth.DEFAULT_GITHUB_CLIENT_ID);
+  // 内置默认是公开值（非空、非 secret 形态）
+  assert.match(githubAuth.DEFAULT_GITHUB_CLIENT_ID, /^Ov23li/);
+});

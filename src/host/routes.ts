@@ -42,6 +42,12 @@ export const ROUTE_PREFIX = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 const MAX_BODY = 512 * 1024;
 
+/** 核心是否提供 authorization 服务（有则浏览器登录可用；client_id 有内置默认）。 */
+function isAuthorizationAvailable(get: (name: string) => unknown): boolean {
+  const authorization = get('authorization') as { begin?: unknown } | undefined;
+  return authorization !== undefined && typeof authorization.begin === 'function';
+}
+
 /** 组装 GitHub 浏览器登录 adapter 的依赖（get/fetch/clientId/logger）。 */
 function githubAuthDeps(deps: RouteDeps): {
   get: (name: string) => unknown;
@@ -479,8 +485,8 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       source: github.source,
       /** 浏览器登录 attempt 视图（idle / waiting-browser / waiting-device / exchanging / done / error）。 */
       attempt: attemptView(),
-      /** 是否配置了 browser 模式的 client_id（未配置时前端禁用「用 GitHub 登录」并给提示）。 */
-      browserAvailable: deps.githubClientId !== undefined && deps.githubClientId !== '',
+      /** 浏览器登录是否可用：核心提供了 authorization 服务即可（client_id 有内置默认）。 */
+      browserAvailable: isAuthorizationAvailable(deps.get),
     },
   };
 }

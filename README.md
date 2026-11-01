@@ -55,6 +55,16 @@ GitHub 趋势榜的 **DeepSeek Harness 插件**：按日 / 周 / 月周期定时
 
 ![设置](docs/images/settings.png)
 
+### GitHub 认证
+
+认证分区支持三种方式（可随时切换）：
+
+- **浏览器登录（默认推荐）**：点「用 GitHub 登录」在浏览器完成授权，无需手工粘贴 token。走 OAuth PKCE + 本机回环回调（或设备码），token 由 DSH 凭据记录安全保存，不落 `settings.json`。插件内置了公开的 OAuth App client_id（client_id 属公开标识、非机密；纯 PKCE 不使用 client_secret），开箱即用。
+- **本机 gh**：复用你终端里 `gh auth login` 的登录态。
+- **PAT**：手工填 Personal Access Token（存到凭据引用 / 环境变量）。
+
+> 浏览器登录需要核心提供 `authorization` 服务；若当前核心版本不含该能力，「浏览器登录」会提示不可用并引导改用 gh / PAT。
+
 ### 订阅
 
 （可选）订阅一组仓库，每周把每个仓库当周新增的 Release 合成一段中文摘要，与榜单同分支、同 PR 一起提交；订阅列表随数据仓版本化，可审计、可复现。
