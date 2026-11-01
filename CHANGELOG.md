@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.7.5] - 2026-11-01
+
+> 升级核心 `dsh.core.version` 0.8.0 → 0.8.1：发版订阅在周期分支缺 `subscriptions.yaml` 时回退基准分支读取，「生成变更分析」不再因 0 订阅而 skipped。
+
+### 升级
+
+- **核心 0.8.1**：`dsh.core.version` 由 `scripts/set-core-version.mjs` 写入为 `0.8.1`。核心修复了
+  `ReadRepoWithFallback`——按周期分支（如 `trending/weekly/2026-W44`）读取 `subscriptions.yaml`
+  时，若该分支或文件不存在，回退到基准分支（`repo.baseBranch`，默认 `main`）再读一次，两者都缺才空。
+  此前周期分支缺文件会解析成 0 订阅，release-only 运行被 skipped，界面表现为「生成变更分析」跑不出内容。
+- 契约 wire 不变（`ipcSchema/digestSchema=2`），无需改动插件解析逻辑；`REPO_MIN_CORE_VERSION`
+  （0.8.0）已满足，单仓触发无需降级。
+
 ## [v0.7.4] - 2026-11-01
 
 > 修复「生成变更分析」一闪而过、却看不到发生了什么：解析兼容 + 跳过原因说明。
