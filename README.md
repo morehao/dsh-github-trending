@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  简体中文 | <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml"><img alt="check" src="https://github.com/morehao/dsh-github-trending/actions/workflows/check.yml/badge.svg"></a>
   <a href="https://www.npmjs.com/package/@morehao/dsh-github-trending"><img alt="npm version" src="https://img.shields.io/npm/v/@morehao/dsh-github-trending.svg"></a>
 </p>

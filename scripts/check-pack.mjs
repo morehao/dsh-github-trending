@@ -18,6 +18,7 @@ const run = promisify(execFile);
 const ALLOWED_EXACT = new Set([
   'package.json',
   'README.md',
+  'README.en.md',
   'CHANGELOG.md',
   'LICENSE',
   'cordis.patch.yml',
