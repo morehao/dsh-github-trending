@@ -40,6 +40,8 @@ export interface RunCoreOptions {
   dryRun: boolean;
   /** 谁触发的运行：核心用它在定时运行时尊重「人工关闭的 PR」。 */
   trigger?: 'manual' | 'schedule';
+  /** 忽略摘要缓存、强制重新生成（核心 `run --force`）；不影响 append-only 提交判断。 */
+  force?: boolean;
   /** 回环代理地址：覆盖配置里的 model.baseURL（代理模式专用）。 */
   baseURLOverride?: string;
   /**
@@ -80,7 +82,7 @@ function errorFrom(stderr: string, exitCode: number | null): RunError {
 
 export function buildCoreArgs(
   channelPath: string,
-  options: { dryRun: boolean; date?: string; period?: Period; stages?: string[] },
+  options: { dryRun: boolean; date?: string; period?: Period; stages?: string[]; force?: boolean },
 ): string[] {
   const args = ['run', '--config', channelPath, '--json'];
   if (options.dryRun) args.push('--dry-run');
@@ -88,6 +90,8 @@ export function buildCoreArgs(
   if (options.period !== undefined) args.push('--period', options.period);
   // 核心的 --stages 是逗号分隔；缺省时完全不传，旧核心不会因未知参数失败。
   if (options.stages !== undefined && options.stages.length > 0) args.push('--stages', options.stages.join(','));
+  // --force 只在显式请求时传；插件侧已按核心版本闸门（runner）判定过是否支持。
+  if (options.force === true) args.push('--force');
   return args;
 }
 
@@ -104,6 +108,7 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
     date: options.date,
     period: options.period,
     stages: options.stages,
+    force: options.force,
   });
 
   const child = spawn(options.core.path, args, {

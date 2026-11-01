@@ -32,6 +32,13 @@ import { resolveModelKey } from './quickfill.js';
 import { startProxy, type ProxyHandle } from './proxy.js';
 import { isoWeekKey, zonedDateString } from './schedule.js';
 import { runSubscribe } from './subscribe.js';
+import { versionAtLeast } from './version.js';
+
+/**
+ * 支持 `run --force`（忽略摘要缓存重新生成）的最低核心版本。
+ * 与 core patch 发版 `0.7.1` 对齐；`dsh.core.version` 应 >= 它，dev override 指向更旧核心时靠闸门降级。
+ */
+export const FORCE_MIN_CORE_VERSION = '0.7.1';
 
 export interface RunSummary {
   id: string;
@@ -51,6 +58,8 @@ export interface RunSummary {
   preview?: PreviewMeta;
   /** 核心给出的跳过原因（merged / pr-closed / unchanged）。 */
   skipReason?: string;
+  /** 本次是显式「强制重跑（忽略缓存）」；调度永不置位。 */
+  forced?: boolean;
   error?: {
     code: string;
     message: string;
@@ -79,6 +88,8 @@ export interface RunRequestOptions {
   date?: string;
   /** 标的周期；缺省取 settings.trending.since（手动/工具运行）。 */
   period?: Period;
+  /** 强制重跑：忽略摘要缓存、重新生成（核心 `run --force`）；仅手动/工具触发，调度永不设置。 */
+  force?: boolean;
   trigger: 'manual' | 'schedule' | 'tool';
 }
 
@@ -254,6 +265,18 @@ export class Runner {
         );
       }
 
+      // force 需要核心支持 `run --force`（0.7.1+）。dev override 可能指向旧核心，
+      // 这里按版本闸门降级为普通重跑并记一条 warning，不让用户看到一个裸的「未知参数」硬失败。
+      const forceRequested = options.force === true;
+      const forceSupported = versionAtLeast(handshakeResult.version.version, FORCE_MIN_CORE_VERSION);
+      const effectiveForce = forceRequested && forceSupported;
+      if (forceRequested && !forceSupported) {
+        store.appendLog(
+          logFile,
+          `[force] 核心 ${handshakeResult.version.version} 低于 ${FORCE_MIN_CORE_VERSION}，不支持 --force，已降级为普通重跑`,
+        );
+      }
+
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
       const apiKey = model.apiKey;
       proxy = model.proxy;
@@ -273,6 +296,7 @@ export class Runner {
         period,
         dryRun,
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
+        ...(effectiveForce ? { force: true } : {}),
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         secrets: [apiKey, github.token],
@@ -290,6 +314,7 @@ export class Runner {
         proxy: proxy !== undefined,
         coreSource: core.source,
         ...(core.tag === undefined ? {} : { coreTag: core.tag }),
+        ...(effectiveForce ? { forced: true } : {}),
       });
       const preview = this.capturePreview({
         id,
@@ -298,6 +323,7 @@ export class Runner {
         settings,
         outcome,
         secrets: [apiKey, github.token],
+        ...(effectiveForce ? { force: true } : {}),
       });
       if (preview !== undefined) summary.preview = preview;
       this.record(summary, settings);
@@ -631,6 +657,7 @@ export class Runner {
     proxy: boolean;
     coreSource?: RunSummary['coreSource'];
     coreTag?: string;
+    forced?: boolean;
   }): RunSummary {
     const { outcome } = input;
     const error =
@@ -672,6 +699,7 @@ export class Runner {
       proxy: input.proxy,
       ...(input.coreSource === undefined ? {} : { coreSource: input.coreSource }),
       ...(input.coreTag === undefined ? {} : { coreTag: input.coreTag }),
+      ...(input.forced === true ? { forced: true } : {}),
     };
   }
 
@@ -709,9 +737,14 @@ export class Runner {
     settings: Settings;
     outcome: RunOutcome;
     secrets: Array<string | undefined>;
+    /** 强制重跑：即使核心判定 skipped/unchanged 也尝试生成预览（文件在仓库里已存在且内容一致）。 */
+    force?: boolean;
   }): PreviewMeta | undefined {
     const { outcome, settings, date, period, id } = input;
-    if (!outcome.ok || outcome.dryRun || outcome.skipped || date === undefined) return undefined;
+    if (!outcome.ok || outcome.dryRun || date === undefined) return undefined;
+    // skipped（unchanged）默认不生成预览；但显式 force 时仍要刷新展示——文件在仓库里
+    // 已存在且内容与本次渲染一致，后续 sha/路径校验照样把关。
+    if (outcome.skipped && input.force !== true) return undefined;
     const skip = (reason: string, extra: Record<string, unknown> = {}): undefined => {
       this.deps.logger?.('preview.skip', { id, reason, ...extra });
       return undefined;
@@ -798,6 +831,7 @@ export class Runner {
             ...(summary.error.reason === undefined ? {} : { errorReason: summary.error.reason }),
           }),
       ...(summary.skipReason === undefined ? {} : { skipReason: summary.skipReason }),
+      ...(summary.forced === true ? { forced: true } : {}),
       durationMs: summary.durationMs,
       files: summary.files,
       ...(summary.date === undefined ? {} : { date: summary.date }),
@@ -825,7 +859,9 @@ export class Runner {
       ...(summary.ok && summary.prUrl !== undefined
         ? { pendingPr: { url: summary.prUrl, createdAt: record.at, ...(summary.date === undefined ? {} : { date: summary.date }) } }
         : {}),
-      ...(summary.ok && !summary.skipped && summary.contentHash !== undefined
+      // 幂等：内容未变（skipped）通常不刷新 lastDigest；但显式 force 时即便 core 判定
+      // unchanged，也要把本次作为最新展示（contentHash 仍是真实 hash，不伪造）。
+      ...(summary.ok && summary.contentHash !== undefined && (!summary.skipped || summary.forced === true)
         ? {
             lastDigest: {
               date: summary.date ?? new Date().toISOString().slice(0, 10),

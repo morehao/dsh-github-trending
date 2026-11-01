@@ -42,7 +42,11 @@ function recordSummary(t: Translate, record: RunRecord): string {
   if (!record.ok) {
     return [record.errorCode, record.errorMessage].filter((item) => item !== undefined && item !== '').join(' · ') || t('state.failed');
   }
-  if (record.skipped) return skipHint(t, record.skipReason, t('runs.noChange'));
+  if (record.skipped) {
+    // force 重跑且内容无变化：明确「未新增提交」，避免用户以为没生效。
+    if (record.forced === true && record.skipReason === 'unchanged') return t('run.force.noChange');
+    return skipHint(t, record.skipReason, t('runs.noChange'));
+  }
   if (record.kind === 'dry-run') return t('runs.dryHint');
   if (record.branch !== undefined) return record.branch;
   if (record.commit !== undefined) return record.commit;
@@ -202,6 +206,7 @@ export function RunsView(props: RunsProps): any {
           record.kind === 'dry-run' ? t('state.dry') : record.skipped ? t('state.skipped') : record.ok ? t('state.ok') : t('state.failed'),
           h('span', { className: 'dshgt-run-muted' }, recordSummary(t, record)),
           record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
+          record.forced === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('run.forced.tag')) : null,
         ),
         h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
         record.tokens === undefined

@@ -13,6 +13,10 @@
  *   FAKE_STDERR          非 0 退出时打印的 stderr 文本
  *   FAKE_SLEEP           运行前睡多少毫秒（用于取消测试）
  *   FAKE_SKIPPED         输出 skipped: true（幂等）
+ *   FAKE_SKIPPED_WITH_ARTIFACTS  '1' 时即使 skipped 也输出 artifacts + contentHash
+ *                        （模拟 force 重跑但内容 unchanged：仍要能生成预览）
+ *   FAKE_FORCE_ECHO      '1' 时把「是否收到 --force」回显到 warnings（断言 argv 透传）
+ *   FAKE_VERSION         覆盖 version 输出的核心版本（force 版本闸门测试用）
  *   FAKE_GARBAGE         输出非 JSON（IPC_INVALID）
  *
  * 预览用例还要让「核心」真的在 temp repo 里写文件。默认行为不变（固定 artifact、不写盘）：
@@ -96,7 +100,8 @@ function artifactFromSpec(spec, repoPath) {
 
 /** 本用例要输出的 artifact 列表；默认保持「固定路径 + 固定 hash、不写盘」。 */
 function artifactsFor(config, skipped) {
-  if (skipped) return [];
+  // 幂等 skipped 默认无产物；但 force 重跑「内容未变」时需要产物去生成预览。
+  if (skipped && process.env.FAKE_SKIPPED_WITH_ARTIFACTS !== '1') return [];
   if (typeof process.env.FAKE_ARTIFACTS === 'string' && process.env.FAKE_ARTIFACTS !== '') {
     const specs = JSON.parse(process.env.FAKE_ARTIFACTS);
     if (!Array.isArray(specs)) throw new Error('FAKE_ARTIFACTS must be a JSON array');
@@ -129,7 +134,7 @@ function artifactsFor(config, skipped) {
 if (command === 'version') {
   process.stdout.write(
     JSON.stringify({
-      version: '0.3.0-fake',
+      version: process.env.FAKE_VERSION ?? '0.3.0-fake',
       commit: 'test',
       ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '2'),
       digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '2'),
@@ -228,7 +233,9 @@ if (command === 'run') {
       ...(skipped && process.env.FAKE_SKIP_REASON ? { skipReason: process.env.FAKE_SKIP_REASON } : {}),
       files,
       ...(skipped
-        ? {}
+        ? process.env.FAKE_SKIPPED_WITH_ARTIFACTS === '1'
+          ? { contentHash: hasKey ? HASH_WITH_KEY : HASH_NO_KEY }
+          : {}
         : {
             branch: 'trending/2026-10-30',
             commit: 'deadbeef',
@@ -237,7 +244,10 @@ if (command === 'run') {
           }),
       ...(usage === undefined ? {} : { usage }),
       ...(releases === undefined ? {} : { releases }),
-      warnings: process.env.FAKE_ECHO_TRIGGER === '1' ? [`trigger=${process.env.TRENDRADAR_TRIGGER ?? ''}`] : [],
+      warnings: [
+        ...(process.env.FAKE_ECHO_TRIGGER === '1' ? [`trigger=${process.env.TRENDRADAR_TRIGGER ?? ''}`] : []),
+        ...(process.env.FAKE_FORCE_ECHO === '1' ? [`force=${argv.includes('--force') ? '1' : '0'}`] : []),
+      ],
     }) + '\n',
   );
   process.exit(0);

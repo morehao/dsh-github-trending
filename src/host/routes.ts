@@ -208,6 +208,7 @@ async function dispatch(
     const base = {
       dryRun: body.dryRun === true,
       ...(typeof body.date === 'string' && body.date !== '' ? { date: body.date } : {}),
+      ...(body.force === true ? { force: true } : {}),
       trigger: 'manual' as const,
     };
     // 显式指定单周期 → 只跑该周期；省略 → 手动运行默认产出日/周/月三榜。

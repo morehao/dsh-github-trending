@@ -6,8 +6,17 @@
  * 有一小段窗口，不能让按钮在这段时间里可重复点击。
  */
 import { React } from './ui.js';
-import { apiCall, type RunSummary } from './api.js';
+import { apiCall, type Period, type RunSummary } from './api.js';
 import type { StoreValue } from './store.js';
+
+export interface RunOptions {
+  /** 强制重跑：忽略摘要缓存、重新生成。仅手动入口使用。 */
+  force?: boolean;
+  /** 指定日期（YYYY-MM-DD）；省略则用调度时区的今天。 */
+  date?: string;
+  /** 只跑指定周期；省略则跑日/周/月三榜。 */
+  period?: Period;
+}
 
 export interface RunController {
   running: boolean;
@@ -17,7 +26,7 @@ export interface RunController {
   startedAt: string | null;
   dryRun: boolean;
   setDryRun: (next: boolean) => void;
-  run: (dryRun?: boolean) => Promise<void>;
+  run: (dryRun?: boolean, options?: RunOptions) => Promise<void>;
   cancel: () => Promise<void>;
   clearError: () => void;
 }
@@ -31,14 +40,18 @@ export function useRunController(store: StoreValue): RunController {
   const [localStartedAt, setLocalStartedAt] = React.useState<string | null>(null);
 
   const run = React.useCallback(
-    async (overrideDry?: boolean): Promise<void> => {
+    async (overrideDry?: boolean, options?: RunOptions): Promise<void> => {
       const dry = overrideDry ?? dryRun;
       setBusy(true);
       setError(null);
       setSummary(null);
       setLocalStartedAt(new Date().toISOString());
       try {
-        const result = await apiCall<{ summary: RunSummary }>('POST', '/run', { dryRun: dry });
+        const body: Record<string, unknown> = { dryRun: dry };
+        if (options?.force === true) body.force = true;
+        if (options?.date !== undefined && options.date !== '') body.date = options.date;
+        if (options?.period !== undefined) body.period = options.period;
+        const result = await apiCall<{ summary: RunSummary }>('POST', '/run', body);
         setSummary(result.summary);
         await refresh({ quiet: true });
       } catch (failure) {

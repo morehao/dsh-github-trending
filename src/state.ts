@@ -61,6 +61,8 @@ export interface RunRecord {
   errorReason?: string;
   /** 跳过原因：merged / pr-closed / unchanged。 */
   skipReason?: string;
+  /** 本次是显式「强制重跑（忽略缓存）」；调度永不置位。仅用于展示与区分幂等。 */
+  forced?: boolean;
   durationMs: number;
   files: number;
   /** 运行所属的调度时区日期（YYYY-MM-DD）；旧记录可能没有。 */

@@ -175,7 +175,7 @@ export function apply(ctx: any): void {
           state.github.configured,
         ].filter(Boolean).length;
     const digestTail = state?.status.lastResult?.date ?? state?.status.history[0]?.date;
-    const showActions = view === 'overview' || view === 'runs';
+    const showActions = view === 'overview' || view === 'runs' || view === 'digest';
     const nextRun = schedule === undefined || !schedule.enabled
       ? t('shell.scheduleOff')
       : schedule.nextRunAt === undefined
@@ -199,6 +199,7 @@ export function apply(ctx: any): void {
               t,
               lang,
               store: value,
+              controller,
               ...(digestTarget === undefined ? {} : { selected: digestTarget }),
               onSelect: setDigestTarget,
               onOpenRuns: openRuns,
@@ -285,6 +286,15 @@ export function apply(ctx: any): void {
                         disabled: controller.running || controller.busy,
                       },
                       t('run.dryRunShort'),
+                    ),
+                    h(
+                      Btn,
+                      {
+                        key: 'force',
+                        onClick: () => void controller.run(false, { force: true }),
+                        disabled: controller.running || controller.busy,
+                      },
+                      t('run.force'),
                     ),
                     h(
                       Btn,

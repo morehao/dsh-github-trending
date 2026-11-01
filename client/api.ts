@@ -91,6 +91,8 @@ export interface RunSummary {
   prUrl?: string;
   preview?: PreviewMeta;
   skipReason?: string;
+  /** 本次是显式「强制重跑（忽略缓存）」。 */
+  forced?: boolean;
   /** 本次任务 token 总量（榜单 + 订阅阶段，含订阅）；缺省表示无数据。 */
   tokens?: number;
   /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
@@ -120,6 +122,8 @@ export interface RunRecord {
   errorMessage?: string;
   errorReason?: string;
   skipReason?: string;
+  /** 本次是显式「强制重跑（忽略缓存）」。 */
+  forced?: boolean;
   durationMs: number;
   files: number;
   date?: string;

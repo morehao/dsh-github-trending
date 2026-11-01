@@ -10,10 +10,12 @@ import { Btn, copyText, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import { getPreview, type DigestTarget, type Period, type PreviewPayload } from './api.js';
 import type { StoreValue } from './store.js';
+import type { RunController } from './run-controller.js';
 import {
   buildPeriodGroups,
   formatBucketLabel,
   formatBytes,
+  regenTarget,
   type DigestStatus,
   type PeriodDay,
 } from './digest-core.js';
@@ -23,6 +25,7 @@ export interface DigestProps {
   t: Translate;
   lang: 'zh' | 'en';
   store: StoreValue;
+  controller: RunController;
   selected?: DigestTarget;
   onSelect: (target: DigestTarget) => void;
   onOpenRuns: () => void;
@@ -65,6 +68,8 @@ function EmptyDigest(props: {
   error?: string;
   onOpenRuns: () => void;
   onSelect: (target: DigestTarget) => void;
+  onRegenerate?: () => void;
+  regenDisabled?: boolean;
 }): any {
   const { t, lang, day, nearest } = props;
   const status: DigestStatus = props.error === undefined ? day.status : 'missing';
@@ -91,6 +96,9 @@ function EmptyDigest(props: {
       'div',
       { className: 'dshgt-actions' },
       h(Btn, { small: true, onClick: props.onOpenRuns }, t('digest.empty.viewRuns')),
+      props.onRegenerate === undefined
+        ? null
+        : h(Btn, { small: true, onClick: props.onRegenerate, disabled: props.regenDisabled === true }, t('digest.regenerate')),
       nearest === undefined
         ? null
         : h(
@@ -103,7 +111,7 @@ function EmptyDigest(props: {
 }
 
 export function DigestView(props: DigestProps): any {
-  const { t, lang, store, selected } = props;
+  const { t, lang, store, selected, controller } = props;
   const [mode, setMode] = React.useState<'render' | 'raw'>('render');
   const [payload, setPayload] = React.useState<PreviewPayload | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -293,6 +301,13 @@ export function DigestView(props: DigestProps): any {
 
   const showEmpty = day.status !== 'preview' || error !== null;
   const record = day.record;
+  // 「重新生成这一期」：按该期代表日期 + 周期 force 重跑，跑完刷新后停留在同一期。
+  const regenerate = (): void => {
+    const target = regenTarget(day);
+    props.onSelect({ period: target.period, bucket: day.bucket });
+    void controller.run(false, { force: true, date: target.date, period: target.period });
+  };
+  const regenerateDisabled = controller.running || controller.busy;
 
   return h(
     'div',
@@ -311,6 +326,8 @@ export function DigestView(props: DigestProps): any {
             ...(error === null ? {} : { error }),
             onOpenRuns: props.onOpenRuns,
             onSelect: props.onSelect,
+            onRegenerate: regenerate,
+            regenDisabled: regenerateDisabled,
           })
         : h(
             'div',
@@ -327,6 +344,7 @@ export function DigestView(props: DigestProps): any {
               h('span', { className: 'dshgt-dim' }, record.preview === undefined ? '—' : formatBytes(record.preview.bytes)),
               payload?.preview.truncated === true ? h('span', { className: 'dshgt-tag' }, t('digest.truncated')) : null,
               h('span', { className: 'dshgt-grow' }),
+              h(Btn, { small: true, onClick: regenerate, disabled: regenerateDisabled }, t('digest.regenerate')),
               h(
                 'div',
                 { className: 'dshgt-seg', role: 'group', 'aria-label': t('digest.mode') },

@@ -41,6 +41,8 @@ export interface DigestRecord {
   commit?: string;
   prUrl?: string;
   preview?: DigestPreviewMeta;
+  /** 本次是显式「强制重跑（忽略缓存）」。 */
+  forced?: boolean;
   coreVersion: string;
   model: { provider: string; model: string };
   languages: string[];
@@ -183,6 +185,15 @@ export function digestTarget(record: DigestRecord, timeZone: string): { period: 
   if (info === undefined) return undefined;
   const period = recordPeriod(record);
   return { period, bucket: periodBucket(period, info.date) };
+}
+
+/**
+ * 某一期「重新生成」要发给 `POST /run` 的定位参数：`date` 用该期代表日期
+ * （PeriodDay.date，已是 YYYY-MM-DD），`period` 用其周期。core 的 `NameOf(period, date)`
+ * 会把同一天映射到同一 ISO 周 / 同一月，因此重跑落在正确的期数桶上。
+ */
+export function regenTarget(day: PeriodDay): { period: Period; date: string } {
+  return { period: day.period, date: day.date };
 }
 
 /** 最近 30 天内有记录的日期，每天一条，倒序（仅日榜；概览「最近 7 天」用）。 */

@@ -31,6 +31,8 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 2. **填模型**：点「沿用 DSH 配置」从宿主 provider 目录里挑 provider 与模型；可导出密钥的直接传给核心，OAuth 类凭据走本机回环代理。
 3. **试跑一次**：「试跑（不提交）」只抓取与渲染，不写文件、不提交。
 
+> **重新生成（忽略缓存）**：手动「重新生成」会忽略核心持久化的摘要缓存，强制重新抓取与总结，并让榜单页以本次结果为准。若重新生成后内容与分支上已有产物逐字节相同，核心仍按 append-only 语义**不新增提交**（面板提示「内容无变化，未新增提交」）；内容有变化才追加一个提交。定时运行永不强制重跑。
+
 > 设置页分「内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度」六个 tab；**除「内容来源」（只有状态与核心操作，没有可保存字段）外，每个 tab 独立保存与校验**；某个 tab 有未保存改动时，左侧对应 tab 会显示黄点。
 
 ## 榜单预览与按周期回看
@@ -133,7 +135,7 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `trending_run` | `{ dryRun?: boolean, date?: string, period?: 'daily'\|'weekly'\|'monthly' }` | 结构化摘要：文件数、commit/分支、PR、内容哈希、错误码与下一步 |
+| `trending_run` | `{ dryRun?: boolean, date?: string, period?: 'daily'\|'weekly'\|'monthly', force?: boolean }` | 结构化摘要：文件数、commit/分支、PR、内容哈希、错误码与下一步 |
 | `trending_history` | `{ limit?: number }` | 上次/下次运行、最近 N 条记录、核心版本、模型、未合并 PR |
 
 工具名是稳定对外接口：**只新增不改名**。

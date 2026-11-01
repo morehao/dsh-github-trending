@@ -17,6 +17,7 @@ const RUN_OUTPUT_SCHEMA = {
     ok: { type: 'boolean' },
     skipped: { type: 'boolean' },
     dryRun: { type: 'boolean' },
+    forced: { type: 'boolean' },
     durationMs: { type: 'number' },
     coreVersion: { type: 'string' },
     files: { type: 'number' },
@@ -84,21 +85,25 @@ export function createTrendingRunTool(runner: Runner) {
     description:
       '执行 GitHub 趋势榜单：定位并握手本地核心，spawn 核心 run，返回结构化摘要（文件数、commit、PR、错误码）。' +
       '省略 period 时默认产出日/周/月三榜（依次运行三次，返回 summaries）。' +
-      'dryRun=true 只抓取与渲染、不写文件也不提交。同日同内容重跑会返回 skipped=true（零新增 commit）。',
+      'dryRun=true 只抓取与渲染、不写文件也不提交。' +
+      'force=true 忽略摘要缓存、强制重新生成（内容无变化时不新增提交，但会刷新预览）。' +
+      '同日同内容重跑会返回 skipped=true（零新增 commit）。',
     parameters: {
       dryRun: { type: 'boolean', description: '只试跑：不写文件、不提交、不开 PR' },
       date: { type: 'string', description: '指定日期（YYYY-MM-DD）；省略则用调度时区的今天' },
       period: { type: 'string', enum: ['daily', 'weekly', 'monthly'], description: '只跑指定周期；省略则默认产出日/周/月三榜' },
+      force: { type: 'boolean', description: '忽略摘要缓存、强制重新生成（内容无变化时不新增提交，但会刷新预览）' },
     },
     output: {
       schema: RUN_OUTPUT_SCHEMA,
       render: (_args: unknown, value: { markdown?: string }) => [{ type: 'text', text: typeof value?.markdown === 'string' ? value.markdown : '' }],
     },
-    async execute(args: { dryRun?: boolean; date?: string; period?: string } = {}, exec: { signal?: AbortSignal } = {}) {
+    async execute(args: { dryRun?: boolean; date?: string; period?: string; force?: boolean } = {}, exec: { signal?: AbortSignal } = {}) {
       void exec;
       const base = {
         dryRun: args.dryRun === true,
         ...(typeof args.date === 'string' && args.date !== '' ? { date: args.date } : {}),
+        ...(args.force === true ? { force: true } : {}),
         trigger: 'tool' as const,
       };
       // 显式指定单周期 → 只跑该周期；省略 → 手动运行默认产出日/周/月三榜。
@@ -108,7 +113,7 @@ export function createTrendingRunTool(runner: Runner) {
       const lines: string[] = [];
       for (const summary of summaries) {
         const periodLabel = summary.period ?? '—';
-        const head = summary.ok ? (summary.skipped ? '无变更（skipped）' : summary.dryRun ? '试跑完成' : '运行成功') : `运行失败：${summary.error?.code ?? 'INTERNAL'}`;
+        const head = summary.ok ? (summary.skipped ? (summary.forced ? '无变化（强制重跑，未新增提交）' : '无变更（skipped）') : summary.dryRun ? '试跑完成' : '运行成功') : `运行失败：${summary.error?.code ?? 'INTERNAL'}`;
         lines.push(`${summary.ok ? '✓' : '✗'} [${periodLabel}] ${head}`);
         lines.push(`· 核心 ${summary.coreVersion || '(未知)'} · ${formatDuration(summary.durationMs)} · ${summary.files} 个文件`);
         if (summary.tokens !== undefined) {
@@ -138,6 +143,7 @@ export function createTrendingRunTool(runner: Runner) {
           ok: summary.ok,
           skipped: summary.skipped,
           dryRun: summary.dryRun,
+          ...(summary.forced === true ? { forced: true } : {}),
           durationMs: summary.durationMs,
           files: summary.files,
           ...(summary.tokens === undefined ? {} : { tokens: summary.tokens }),
@@ -149,6 +155,7 @@ export function createTrendingRunTool(runner: Runner) {
         id: primary?.id,
         skipped: summaries.every((summary) => summary.skipped),
         dryRun: base.dryRun,
+        ...(base.force === true ? { forced: true } : {}),
         durationMs: summaries.reduce((sum, summary) => sum + summary.durationMs, 0),
         files: summaries.reduce((sum, summary) => sum + summary.files, 0),
         ...(() => {
