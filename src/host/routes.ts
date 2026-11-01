@@ -283,10 +283,10 @@ async function dispatch(
     );
     if (!result.ok) {
       // 「没有文档 / 卷号不存在」是核心的业务错误：原样回错，绝不回一份空文档冒充成功。
-      throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? `读取 ${repo} 的发版文档失败`);
+      throw new IpcError('SUBSCRIBE_FAILED', result.error?.message ?? `读取 ${repo} 的变更文档失败`);
     }
     if (result.doc === undefined) {
-      throw new IpcError('SUBSCRIBE_FAILED', `核心没有返回 ${repo} 的发版文档`);
+      throw new IpcError('SUBSCRIBE_FAILED', `核心没有返回 ${repo} 的变更文档`);
     }
     return { ...result.doc };
   }

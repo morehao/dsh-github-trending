@@ -47,20 +47,20 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 ## 用量（token）
 
 - **每次运行的 token 总量**与**历史累计总量**都会记录。**只展示总用量，不拆** prompt / completion / cached 等维度。
-- 「本次任务总量」= 榜单摘要阶段（`usage.totalTokens`）+ 发版订阅阶段（`releases.usage.totalTokens`），**订阅消耗计入总量**。
+- 「本次任务总量」= 榜单摘要阶段（`usage.totalTokens`）+ 订阅阶段（`releases.usage.totalTokens`），**订阅消耗计入总量**。
 - 累计 = 历史里全部运行 `tokens` 之和，**读时求和、不落盘**（`history.json` 只存每次的 `tokens`）。
 - 插件**不做费用估算、不内置定价表**（价格随 provider / 区域变动，易过期）：只展示核心回报的 token 真值。
-- 展示位置：概览速览块（本次 / 累计 / 新发版 / 订阅仓库数）、运行记录（每行本次 tokens、展开明细、页脚累计）、历史。数据来自契约 `Usage`。旧核心无 `usage` / `releases` 时对应速览块整体隐藏（不铺「—」、不伪造 0）。
+- 展示位置：概览速览块（本次 / 累计 / 新版本 / 订阅仓库数）、运行记录（每行本次 tokens、展开明细、页脚累计）、历史。数据来自契约 `Usage`。旧核心无 `usage` / `releases` 时对应速览块整体隐藏（不铺「—」、不伪造 0）。
 
-## 发版订阅
+## 订阅（`releases` 阶段）
 
-- 订阅一组仓库，之后**每周一次**把每个仓库这一周「**新增的 Release**（无 Release 时回退 Tag）」合成一段中文总结，写到 `<output.dir>/releases/<owner>/<repo>-01.md`（每册都带两位序号，超出行数预算后下一次写入开 `-02.md`，最新一周在最上面），与榜单**同分支、同 PR** 一起提交。发版阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。跨仓的周汇总（`releases/_weekly/<年>/<ISO周>.{md,json}`）继续生成，供外部 Web 服务的 `GET /api/v2/releases*` 消费。
+- 订阅一组仓库，之后**每周一次**把每个仓库这一周「**新增的 Release**（无 Release 时回退 Tag）」合成一段中文总结，写到 `<output.dir>/releases/<owner>/<repo>-01.md`（每册都带两位序号，超出行数预算后下一次写入开 `-02.md`，最新一周在最上面），与榜单**同分支、同 PR** 一起提交。订阅阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。跨仓的周汇总（`releases/_weekly/<年>/<ISO周>.{md,json}`）继续生成，供外部 Web 服务的 `GET /api/v2/releases*` 消费。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
 - **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, volume?, configPath}`；核心把 payload 放进结果信封（`subscriptions` / `subscriptionDoc`），旧核心把 `list` 结果逐行打到信封前，插件两种都认。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
-- 界面：「订阅」页管理列表（增删 + 逐仓库状态），可展开某仓库的发版文档（`GET /subscriptions/releases?repo=&volume=`）；「设置 → 发版订阅」分区放行为参数与每周触发节奏。
+- 界面：「订阅」页管理列表（增删 + 逐仓库状态），可展开某仓库的变更文档（`GET /subscriptions/releases?repo=&volume=`）；「设置 → 订阅」分区放行为参数与每周触发节奏。
 - 周期：0.7.0 起只支持**每周**（`releases.period=weekly`）——每个 ISO 周、每仓库一条中文摘要，文档按周累积并按行数预算自动分卷；填 `daily`/`monthly` 会被校验拦下并说明原因。
-- 每周发版行程与榜单调度**互相独立**：`releases.schedule`（`enabled` / `weekday`（ISO 1=周一…7=周日）/ `time` / `timezone`）驱动 `run --stages releases`——只跑发版阶段，不抓榜单、不渲染 digest、不合并订阅 pending；成功后按 ISO 周（如 `2026-W44`）去重。
-- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新发版 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
+- 每周订阅行程与榜单调度**互相独立**：`releases.schedule`（`enabled` / `weekday`（ISO 1=周一…7=周日）/ `time` / `timezone`）驱动 `run --stages releases`——只跑订阅阶段，不抓榜单、不渲染 digest、不合并订阅 pending；成功后按 ISO 周（如 `2026-W44`）去重。
+- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新版本 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
 
 
 
@@ -118,13 +118,13 @@ dsh plugin --profile <profile> add @morehao/dsh-github-trending
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量与失败重试（映射核心 `summarize.*`） |
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`：是否抓取 GitHub topics / README 作为增强上下文；`repo`/`readme` 建议配只读 `GITHUB_READ_TOKEN` |
 | `summarize.readmeChars` | `800` | README 摘录长度（enrich=readme 时） |
-| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿（发版阶段常开，不提供 `enabled` 开关） |
+| `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿（订阅阶段常开，不提供 `enabled` 开关） |
 | `releases.fallbackToTags` / `baselineOnFirstRun` | `true` / `true` | 无 Release 时回退 Tag / 首次只记基线 |
 | `releases.perRepoLimit` / `maxNotesChars` | `10` / `4000` | 文档列出的版本条数（1–20）/ notes 截断（500–20000） |
 | `releases.summaryMaxChars` / `docMaxLines` | `1200` / `600` | 每仓每周摘要字数（500–2000）/ 文档行数预算（100–2000，超了开新卷） |
 | `releases.concurrency` / `budgetSeconds` | `auto` / `auto` | 订阅并发（`auto` 或 1–8）/ 模型预算秒（`auto` 或 1–300）；`auto` 由插件按订阅数解析 |
 | `releases.period` | `weekly` | 只支持 `weekly`（每个 ISO 周一条摘要） |
-| `releases.schedule.enabled` / `weekday` / `time` / `timezone` | `true` / `1` / `08:00:00` / `Asia/Shanghai` | 每周发版行程（插件自己的 tick；`weekday` 为 ISO 1=周一…7=周日）；**不写进核心 YAML** |
+| `releases.schedule.enabled` / `weekday` / `time` / `timezone` | `true` / `1` / `08:00:00` / `Asia/Shanghai` | 每周订阅行程（插件自己的 tick；`weekday` 为 ISO 1=周一…7=周日）；**不写进核心 YAML** |
 | `output.dir` | `trending` | 仓库内相对目录 |
 | `schedule.enabled` / `time` / `timezone` | `true` / `08:30:00` / `Asia/Shanghai` | 插件自己的 60 s tick 驱动 |
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末触发；旧配置自动升级为三周期 |

@@ -527,7 +527,7 @@ export function validateSettings(settings: Settings, providers: readonly string[
     problems.push({
       field: 'releases.period',
       code: 'CONFIG_INVALID',
-      message: '本版本只支持每周（weekly）发版摘要，请把 releases.period 改为 weekly',
+      message: '本版本只支持每周（weekly）订阅摘要，请把 releases.period 改为 weekly',
     });
   }
   if (!Number.isInteger(releases.perRepoLimit) || releases.perRepoLimit < 1 || releases.perRepoLimit > 20) {
@@ -550,7 +550,7 @@ export function validateSettings(settings: Settings, providers: readonly string[
   }
   // releases.schedule.* 是插件自己的每周节奏（不进核心 YAML），字段路径仍归 releases 分区。
   if (!Number.isInteger(releases.schedule.weekday) || releases.schedule.weekday < 1 || releases.schedule.weekday > 7) {
-    problems.push({ field: 'releases.schedule.weekday', code: 'CONFIG_INVALID', message: '发版日必须是 ISO 星期 1–7（1=周一）' });
+    problems.push({ field: 'releases.schedule.weekday', code: 'CONFIG_INVALID', message: '订阅检查日必须是 ISO 星期 1–7（1=周一）' });
   }
   if (!TIME_RE.test(releases.schedule.time)) {
     problems.push({ field: 'releases.schedule.time', code: 'CONFIG_INVALID', message: '时间格式必须是 HH:MM 或 HH:MM:SS' });

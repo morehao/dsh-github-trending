@@ -265,9 +265,13 @@ export const CSS = `
 
 /* ——— 周期标签 / 分段 ——— */
 .dshgt-pchip{display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap;border:1px solid var(--gt-border);color:var(--gt-muted);background:var(--gt-bg);}
-.dshgt-pchip.daily{color:#2563eb;border-color:#dbeafe;background:#eff6ff;}
-.dshgt-pchip.weekly{color:#7c3aed;border-color:#ddd6fe;background:#f5f3ff;}
-.dshgt-pchip.monthly{color:#0f766e;border-color:#99f6e4;background:#f0fdfa;}
+/* 周期 / 订阅同族：同一套尺寸与「填充 + 同色描边 + 同色文字」，只差色相。
+   色值从 --tone 派生到宿主 token，深色主题下不会变成刺眼的浅色贴纸。 */
+.dshgt-pchip.daily{--tone:#2563eb;}
+.dshgt-pchip.weekly{--tone:#7c3aed;}
+.dshgt-pchip.monthly{--tone:#0f766e;}
+.dshgt-pchip.release{--tone:#b45309;}
+.dshgt-pchip.daily,.dshgt-pchip.weekly,.dshgt-pchip.monthly,.dshgt-pchip.release{color:color-mix(in srgb,var(--tone) 82%,var(--gt-fg));border-color:color-mix(in srgb,var(--tone) 30%,var(--gt-bg));background:color-mix(in srgb,var(--tone) 12%,var(--gt-bg));}
 .dshgt-period-seg{display:inline-flex;border:1px solid var(--gt-border);border-radius:9px;padding:3px;background:var(--gt-card);gap:3px;}
 .dshgt-period-seg button{display:inline-flex;align-items:center;gap:7px;border:0;background:none;height:30px;padding:0 12px;border-radius:7px;font:inherit;font-size:13px;color:var(--gt-muted);cursor:pointer;}
 .dshgt-period-seg button:hover{color:var(--gt-fg);}

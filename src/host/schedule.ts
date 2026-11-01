@@ -188,7 +188,7 @@ export function nextReleaseOccurrence(now: Date, cfg: ReleaseScheduleConfig): Da
     if (candidate.getTime() > now.getTime()) return candidate;
   }
   // 理论不可达（weekday 合法时 7 天内必有一命中）；宁可报错也不返回一个错的时间。
-  throw new Error(`无法计算下一次发版运行时刻（weekday=${String(cfg.weekday)}）`);
+  throw new Error(`无法计算下一次订阅运行时刻（weekday=${String(cfg.weekday)}）`);
 }
 
 /**

@@ -13,7 +13,7 @@ import { LiveRun } from './live-run.js';
 import { reasonHint, skipHint } from './error-copy.js';
 import { digestTarget } from './digest-core.js';
 
-/** 记录类型：日报（榜单运行）与发版（每周订阅检查）是两个来源。 */
+/** 记录类型：日报（榜单运行）与订阅（每周 Release 检查）是两个来源。 */
 type KindFilter = 'all' | 'digest' | 'release';
 const KINDS: Array<{ id: KindFilter; key: string }> = [
   { id: 'all', key: 'runs.type.all' },
@@ -61,6 +61,16 @@ function prStatus(t: Translate, state: StatePayload, record: RunRecord): { label
     return { label: state.status.pendingPrState === 'unknown' ? t('runs.prUnknown') : t('runs.pendingPr'), kind: 'warn' };
   }
   return { label: t('runs.prCreated'), kind: 'ok' };
+}
+
+/**
+ * 记录类型胶囊：日报按周期（daily / weekly / monthly），订阅固定 release。
+ *
+ * 三种周期与订阅共用 `.dshgt-pchip` 一套尺寸与填充规则，只是色相不同；
+ * 统一从这里出，避免再出现「订阅只带 base 类、看着像按钮」的漂移。
+ */
+function kindChip(text: string, tone: string): any {
+  return h('span', { className: `dshgt-pchip ${tone}` }, text);
 }
 
 function LogDrawer(props: { t: Translate; runId: string; onClose: () => void }): any {
@@ -158,7 +168,7 @@ export function RunsView(props: RunsProps): any {
     if (filter === 'daily' || filter === 'weekly' || filter === 'monthly') return (record.period ?? 'daily') === filter;
     return true;
   };
-  // 发版运行没有周期、也不是 dry-run：只认「失败」，其余筛选项一律不命中，
+  // 订阅运行没有周期、也不是 dry-run：只认「失败」，其余筛选项一律不命中，
   // 免得把「周期 / 试跑」这类日报属性硬套到它身上。
   const releaseMatches = (run: ReleaseRunRecord): boolean => {
     if (filter === 'failed') return run.status === 'failed';
@@ -169,7 +179,7 @@ export function RunsView(props: RunsProps): any {
     | { kind: 'digest'; key: string; at: string; record: RunRecord }
     | { kind: 'release'; key: string; at: string; run: ReleaseRunRecord };
 
-  // 两个来源合并成一条时间线：日报按 `at`、发版按 `finishedAt`（缺失时退回 `startedAt`）。
+  // 两个来源合并成一条时间线：日报按 `at`、订阅按 `finishedAt`（缺失时退回 `startedAt`）。
   const entries: Entry[] = [
     ...(kind === 'release'
       ? []
@@ -199,7 +209,7 @@ export function RunsView(props: RunsProps): any {
         },
         h('span', { className: `dshgt-lamp ${record.ok ? (record.skipped || record.kind === 'dry-run' ? 'warn' : 'ok') : 'err'}` }),
         h('span', { className: 'dshgt-run-date' }, shortTime(record.at)),
-        h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`)),
+        kindChip(t(`period.${record.period ?? 'daily'}`), record.period ?? 'daily'),
         h(
           'span',
           { className: 'dshgt-run-what' },
@@ -237,7 +247,7 @@ export function RunsView(props: RunsProps): any {
               detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
               detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
               detailItem(t, 'runs.detail.date', record.date ?? '—'),
-              detailItem(t, 'runs.detail.period', h('span', { className: `dshgt-pchip ${record.period ?? 'daily'}` }, t(`period.${record.period ?? 'daily'}`))),
+              detailItem(t, 'runs.detail.period', kindChip(t(`period.${record.period ?? 'daily'}`), record.period ?? 'daily')),
               detailItem(
                 t,
                 'run.usage.pr',
@@ -302,7 +312,7 @@ export function RunsView(props: RunsProps): any {
               'aria-pressed': kind === item.id ? 'true' : 'false',
               onClick: () => {
                 setKind(item.id);
-                // 周期 / 试跑筛选只对日报有意义，切到发版时先归零，避免筛出空列表。
+                // 周期 / 试跑筛选只对日报有意义，切到订阅时先归零，避免筛出空列表。
                 if (item.id === 'release') setFilter('all');
               },
             },
@@ -360,7 +370,7 @@ const RELEASE_LAMP: Record<ReleaseRunRecord['status'], 'ok' | 'warn' | 'err'> = 
 };
 
 /**
- * 发版运行的一行。
+ * 订阅运行的一行。
  *
  * 它没有日报的 date / period / files / preview：这些字段在这里一律不出现，
  * 只用 ReleaseRunRecord 真正带的 checked / changed / newTags / failed / tokens / duration。
@@ -386,7 +396,7 @@ function ReleaseRunItem(props: { t: Translate; run: ReleaseRunRecord; open: bool
       },
       h('span', { className: `dshgt-lamp ${lamp}` }),
       h('span', { className: 'dshgt-run-date' }, shortTime(run.startedAt)),
-      h('span', { className: 'dshgt-pchip' }, t('runs.type.release')),
+      kindChip(t('runs.type.release'), 'release'),
       h(
         'span',
         { className: 'dshgt-run-what' },
@@ -441,7 +451,7 @@ function ReleaseRunItem(props: { t: Translate; run: ReleaseRunRecord; open: bool
   );
 }
 
-/** 发版订阅阶段明细（历史记录展开时展示；只读 summary 字段）。 */
+/** 订阅阶段明细（历史记录展开时展示；只读 summary 字段）。 */
 function ReleasesDetail(props: { t: Translate; record: RunRecord }): any {
   const { t, record } = props;
   const r = record.releases;

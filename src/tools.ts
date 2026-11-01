@@ -119,7 +119,7 @@ export function createTrendingRunTool(runner: Runner) {
         if (summary.tokens !== undefined) {
           const parts = [`本次 tokens ${summary.tokens.toLocaleString('en-US')}`];
           if (summary.releases !== undefined && summary.releases.enabled) {
-            parts.push(`发版 ${summary.releases.newReleases} 个新版本 / ${summary.releases.repos} 个仓库`);
+            parts.push(`订阅 ${summary.releases.newReleases} 个新版本 / ${summary.releases.repos} 个仓库`);
           }
           lines.push(`· ${parts.join(' · ')}`);
         }
