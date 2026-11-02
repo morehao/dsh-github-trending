@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.5] - 2026-11-02
+
+### Fixes
+
+- **auth**: show device code with one-click copy
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.4...v0.8.5
+
 ## [v0.8.4] - 2026-11-02
 
 ### Features
