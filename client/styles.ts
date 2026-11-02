@@ -84,6 +84,14 @@ export const CSS = `
 .dshgt-modal-mask{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.38));display:flex;align-items:center;justify-content:center;z-index:2147483000;}
 .dshgt-modal{background:var(--gt-bg);border-radius:12px;border:1px solid var(--gt-border);max-width:640px;width:calc(100% - 32px);max-height:80vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 50px rgba(15,23,42,.25);}
 
+/* ——— 自更新后的恢复提示（右下角，约 6 秒后自动消失） ——— */
+.dshgt-restore{position:fixed;right:20px;bottom:20px;z-index:2147483000;max-width:360px;display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px;border:1px solid var(--gt-border);background:var(--gt-bg);box-shadow:0 16px 40px rgba(15,23,42,.28);animation:dshgt-restore-in .18s ease-out;}
+.dshgt-restore-text{display:flex;flex-direction:column;gap:4px;}
+.dshgt-restore-title{font-size:13px;font-weight:600;color:var(--gt-fg);}
+.dshgt-restore-body{font-size:12px;line-height:1.5;color:var(--gt-muted);}
+.dshgt-restore-actions{display:flex;justify-content:flex-end;gap:8px;}
+@keyframes dshgt-restore-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
 /* ——— GitHub 设备码登录弹窗 ——— */
 .dshgt-authmodal{max-width:420px;gap:14px;}
 .dshgt-authmodal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}

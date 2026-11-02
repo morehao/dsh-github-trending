@@ -20,6 +20,8 @@ import { DigestView } from './digest.js';
 import { SubscriptionsView } from './subscriptions.js';
 import { AboutDialog } from './about.js';
 import { IdentityBar } from './identity-bar.js';
+import { RestoreNotice } from './restore-notice.js';
+import { clearPendingUpdate, readPendingUpdate, type PendingUpdate } from './update-store.js';
 import { SidebarPanelIcon } from './panel-icon.js';
 import { useRunController } from './run-controller.js';
 import { credentialView } from './credential.js';
@@ -153,6 +155,12 @@ export function apply(ctx: any): void {
     const [view, setView] = React.useState<ViewId>('overview');
     const [digestTarget, setDigestTarget] = React.useState<DigestTarget | undefined>(undefined);
     const [aboutOpen, setAboutOpen] = React.useState(false);
+    // 自更新恢复提示：进入面板时读一次「刚点过更新」的记号（重开的新进程读得到）。
+    // 它是 fixed 定位的浮层，不随视图切换 / 面板显隐而消失；约 6 秒后自行收起。
+    const [pendingUpdate, setPendingUpdate] = React.useState<PendingUpdate | null>(null);
+    React.useEffect(() => {
+      setPendingUpdate(readPendingUpdate());
+    }, []);
 
     const openDigest = React.useCallback((target?: DigestTarget): void => {
       if (target !== undefined) setDigestTarget(target);
@@ -317,6 +325,13 @@ export function apply(ctx: any): void {
         ),
       ),
       aboutOpen && state !== null ? h(AboutDialog, { t, state, onClose: () => setAboutOpen(false) }) : null,
+      pendingUpdate
+        ? h(RestoreNotice, {
+            t,
+            version: pendingUpdate.to,
+            onDismiss: () => { clearPendingUpdate(); setPendingUpdate(null); },
+          })
+        : null,
     );
   }
 

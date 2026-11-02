@@ -6,9 +6,10 @@
  * 更新状态复用 update-panel 的共享 controller，与「关于」弹层、概览页是同一份，
  * 不会重复打网络。
  */
-import { Btn, copyText, h, React } from './ui.js';
+import { Btn, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import { usePluginUpdate } from './update-panel.js';
+import { writePendingUpdate } from './update-store.js';
 
 export interface IdentityBarProps {
   t: Translate;
@@ -35,7 +36,6 @@ function githubIcon(): any {
 export function IdentityBar(props: IdentityBarProps): any {
   const { t, plugin } = props;
   const [confirming, setConfirming] = React.useState(false);
-  const [cmdCopied, setCmdCopied] = React.useState(false);
   const [updateState, controller] = usePluginUpdate();
   const view = updateState.view;
   const status = updateState.status;
@@ -49,17 +49,7 @@ export function IdentityBar(props: IdentityBarProps): any {
   const latestVersion = view === null ? '' : view.latestVersion ?? '';
   const updateAvailable = view !== null && view.updateAvailable;
   const actionable = updateAvailable && view !== null && view.canApply && !settled && !busy;
-  const manual = view !== null && (!view.canApply || view.checkFailed) ? view.manualCommand ?? null : null;
   const currentVersion = view === null ? plugin.version : view.currentVersion ?? plugin.version;
-
-  const copyCmd = (): void => {
-    if (manual === undefined || manual === null) return;
-    void copyText(manual).then((ok) => {
-      if (!ok) return;
-      setCmdCopied(true);
-      setTimeout(() => setCmdCopied(false), 1400);
-    });
-  };
 
   function statusLine(): { text: string; kind: string } {
     if (status === 'checking' || view === null) return { text: t('shell.update.checking'), kind: 'muted' };
@@ -76,13 +66,12 @@ export function IdentityBar(props: IdentityBarProps): any {
     if (actionable) {
       if (confirming) {
         return [
-          h(Btn, { key: 'yes', small: true, variant: 'danger', onClick: () => { setConfirming(false); void controller.apply(); } }, t('shell.update.confirmYes')),
+          h(Btn, { key: 'yes', small: true, variant: 'danger', onClick: () => { setConfirming(false); writePendingUpdate(currentVersion, latestVersion); void controller.apply(); } }, t('shell.update.confirmYes')),
           h(Btn, { key: 'no', small: true, onClick: () => setConfirming(false) }, t('shell.update.cancel')),
         ];
       }
       return h(Btn, { small: true, variant: 'primary', onClick: () => setConfirming(true) }, t('shell.update.apply', { version: latestVersion }));
     }
-    if (manual !== null) return h(Btn, { small: true, onClick: copyCmd }, cmdCopied ? t('shell.update.copied') : t('shell.update.copyCmd'));
     return h(Btn, { small: true, disabled: busy, onClick: () => void controller.check({ fresh: true }) }, t('shell.update.check'));
   }
 
