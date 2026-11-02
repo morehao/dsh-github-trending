@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.7] - 2026-11-02
+
+### Features
+
+- **ui**: polish identity bar tabs and about dialog (#84)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.6...v0.8.7
+
 ## [v0.8.6] - 2026-11-02
 
 ### Features
