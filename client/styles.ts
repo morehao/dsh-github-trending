@@ -83,6 +83,20 @@ export const CSS = `
 .dshgt-modal-mask{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.38));display:flex;align-items:center;justify-content:center;z-index:2147483000;}
 .dshgt-modal{background:var(--gt-bg);border-radius:12px;border:1px solid var(--gt-border);max-width:640px;width:calc(100% - 32px);max-height:80vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 50px rgba(15,23,42,.25);}
 
+/* ——— GitHub 设备码登录弹窗 ——— */
+.dshgt-authmodal{max-width:420px;gap:14px;}
+.dshgt-authmodal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.dshgt-authmodal-x{border:0;background:transparent;color:var(--gt-muted);font-size:14px;line-height:1;cursor:pointer;padding:4px 6px;border-radius:6px;}
+.dshgt-authmodal-x:hover{background:color-mix(in srgb,var(--gt-fg) 8%,transparent);color:var(--gt-fg);}
+.dshgt-authmodal-body{display:flex;flex-direction:column;gap:12px;}
+.dshgt-authcode{display:flex;align-items:center;justify-content:center;padding:16px 12px;border:1px dashed color-mix(in srgb,var(--gt-accent) 45%,var(--gt-border));border-radius:12px;background:color-mix(in srgb,var(--gt-accent) 6%,var(--gt-bg));}
+.dshgt-authcode-value{font-family:var(--gt-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:30px;font-weight:700;letter-spacing:6px;line-height:1.1;color:var(--gt-fg);user-select:all;}
+.dshgt-authcode-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+.dshgt-authwait{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gt-muted);}
+.dshgt-authwait-dot{width:8px;height:8px;border-radius:50%;background:var(--gt-accent);animation:dshgt-pulse 1.1s ease-in-out infinite;}
+@keyframes dshgt-pulse{0%,100%{opacity:.25;transform:scale(.8);}50%{opacity:1;transform:scale(1);}}
+.dshgt-authmodal-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--gt-border);padding-top:10px;}
+
 /* ——— 01 工作台外壳 ——— */
 .dshgt-shell{gap:0;height:100%;min-height:0;overflow:hidden;}
 .dshgt-app{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--gt-bg);}

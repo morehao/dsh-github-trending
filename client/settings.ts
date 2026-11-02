@@ -98,6 +98,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [testing, setTesting] = React.useState(false);
   const [githubTest, setGithubTest] = React.useState<GithubProbeResult | null>(null);
   const [signIn, setSignIn] = React.useState<GithubAttemptView>({ phase: 'idle' });
+  const [signInModal, setSignInModal] = React.useState(false);
 
   const anyDirty = SECTIONS.some((id) => dirtySections[id]);
   // 「内容来源」只有状态与核心操作（重新检查 / 下载），没有可保存的字段。
@@ -248,35 +249,44 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
+  const openVerifyPage = (url: string | undefined): void => {
+    if (url === undefined) return;
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      /* 被拦截不是错误：弹窗里仍可点「打开验证页」兜底 */
+    }
+  };
+
   const startSignIn = async (): Promise<void> => {
+    setSignInModal(true);
+    setSignIn({ phase: 'idle' });
     try {
       let view = await beginGithubSignIn();
       // 兜底：Host 理论上不再返回 idle（已修），但真拿到 idle 时要再问一次状态，
       // 否则界面会停在「什么都没发生」。
       if (view.phase === 'idle') view = await getGithubSignInStatus();
       setSignIn(view);
-      if (view.phase === 'error') {
-        notify('err', t('auth.browser.failed.detail', { message: view.error ?? '' }));
-        return;
-      }
-      // 打开 GitHub 的验证页（验证码仍需手动输入，下方状态行提供一键复制）。
-      if (view.phase === 'waiting-device' && view.verificationUri !== undefined) {
-        try {
-          window.open(view.verificationUri, '_blank', 'noopener,noreferrer');
-        } catch {
-          /* 拦截不是错误：下方「打开验证页」仍可用 */
-        }
-      }
+      // 拿到验证码即自动打开 GitHub 验证页；验证码仍需手输，弹窗里提供一键复制。
+      if (view.phase === 'waiting-device') openVerifyPage(view.verificationUri);
     } catch (error) {
-      notify('err', error instanceof Error ? error.message : String(error));
+      setSignIn({ phase: 'error', error: error instanceof Error ? error.message : String(error) });
     }
   };
+
+  // attempt 进行中时重开弹窗（不重复 begin）。
+  const openSignInModal = (): void => setSignInModal(true);
+
+  // 关闭弹窗：只关窗，不取消后台 attempt（下次可再看）。
+  const closeSignInModal = (): void => setSignInModal(false);
 
   const cancelSignIn = async (): Promise<void> => {
     try {
       setSignIn(await cancelGithubSignIn());
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error));
+    } finally {
+      setSignInModal(false);
     }
   };
 
@@ -575,17 +585,15 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                   {
                     small: true,
                     variant: 'primary',
-                    onClick: () => void startSignIn(),
-                    disabled: signInActive,
+                    onClick: () => void (signInActive ? openSignInModal() : startSignIn()),
                   },
-                  signIn.phase === 'done' && signIn.login !== undefined
-                    ? `${t('auth.browser.done')} · @${signIn.login}`
-                    : signInActive
-                      ? t('auth.browser.waiting')
+                  signInActive
+                    ? t('auth.modal.viewCode')
+                    : signIn.phase === 'done' && signIn.login !== undefined
+                      ? `${t('auth.browser.done')} · @${signIn.login}`
                       : t('auth.browser.signin'),
                 )
               : h('span', { className: 'dshgt-hint' }, t('auth.browser.unavailable')),
-            signInActive ? h(Btn, { small: true, variant: 'ghost', onClick: () => void cancelSignIn() }, t('auth.browser.cancel')) : null,
           )
         : h(
             Row,
@@ -593,39 +601,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
             h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
             h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
           ),
-    // 登录失败：必须显式说出来，否则「点了没反应」又回来了。
-    isBrowser && signIn.phase === 'error'
-      ? h(Alert, { kind: 'err', title: t('auth.browser.failed') }, signIn.error ?? t('auth.browser.failed.hint'))
-      : null,
-    // 登录进行中的状态行：验证页链接 + 一键复制验证码。
-    isBrowser && (signIn.phase === 'waiting-device' || signIn.phase === 'exchanging')
-      ? h(
-          'div',
-          { className: 'dshgt-hint' },
-          signIn.verificationUri !== undefined
-            ? h(
-                'div',
-                { className: 'dshgt-desc' },
-                h('span', null, t('auth.browser.openHint')),
-                ' ',
-                h(
-                  'a',
-                  { className: 'dshgt-link', href: signIn.verificationUri, target: '_blank', rel: 'noreferrer' },
-                  t('auth.browser.open'),
-                ),
-              )
-            : null,
-          signIn.userCode !== undefined
-            ? h(
-                'div',
-                { className: 'dshgt-desc', style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
-                h('span', null, t('auth.browser.code')),
-                h('span', { className: 'dshgt-mono', style: { fontSize: '1.1em', fontWeight: 'bold', letterSpacing: '1px' } }, signIn.userCode),
-                h(Btn, { small: true, variant: 'ghost', onClick: () => copyDeviceCode() }, t('auth.browser.copyCode')),
-              )
-            : null,
-        )
-      : null,
     h(
       Row,
       { label: t('auth.test') },
@@ -894,6 +869,117 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     quickOpen
       ? h(QuickFillModal, { t, onClose: () => setQuickOpen(false), onApplied: (settings: SettingsShape) => { setDraft(settings); setDirtySections({ ...EMPTY_DIRTY }); setSavedSection(null); void store.refresh({ quiet: true }); } })
       : null,
+    signInModal
+      ? h(AuthSignInModal, {
+          t,
+          view: signIn,
+          onClose: closeSignInModal,
+          onCancel: () => void cancelSignIn(),
+          onRetry: () => void startSignIn(),
+          onCopyCode: copyDeviceCode,
+          onOpenPage: () => openVerifyPage(signIn.verificationUri),
+        })
+      : null,
+  );
+}
+
+function AuthSignInModal(props: {
+  t: Translate;
+  view: GithubAttemptView;
+  onClose: () => void;
+  onCancel: () => void;
+  onRetry: () => void;
+  onCopyCode: () => void;
+  onOpenPage: () => void;
+}): any {
+  const { t, view } = props;
+  const active = view.phase === 'waiting-device' || view.phase === 'exchanging';
+
+  const body =
+    view.phase === 'waiting-device' || view.phase === 'exchanging'
+      ? h(
+          'div',
+          { className: 'dshgt-authmodal-body' },
+          h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('auth.modal.lead')),
+          view.userCode !== undefined
+            ? h(
+                'div',
+                { className: 'dshgt-authcode' },
+                h('span', { className: 'dshgt-authcode-value' }, view.userCode),
+              )
+            : null,
+          view.userCode !== undefined
+            ? h(
+                'div',
+                { className: 'dshgt-authcode-actions' },
+                h(Btn, { small: true, variant: 'ghost', onClick: props.onCopyCode }, t('auth.browser.copyCode')),
+                view.verificationUri !== undefined
+                  ? h(Btn, { small: true, variant: 'primary', onClick: props.onOpenPage }, `${t('auth.modal.openPage')} ↗`)
+                  : null,
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dshgt-authwait' },
+            h('span', { className: 'dshgt-authwait-dot' }),
+            h('span', null, view.phase === 'exchanging' ? t('auth.modal.exchanging') : t('auth.modal.waiting')),
+          ),
+        )
+      : view.phase === 'done'
+        ? h(
+            'div',
+            { className: 'dshgt-authmodal-body' },
+            h(Alert, { kind: 'ok' }, view.login === undefined ? t('auth.browser.done') : `${t('auth.browser.done')} · @${view.login}`),
+          )
+        : view.phase === 'error'
+          ? h(
+              'div',
+              { className: 'dshgt-authmodal-body' },
+              h(Alert, { kind: 'err', title: t('auth.browser.failed') }, view.error ?? t('auth.browser.failed.hint')),
+            )
+          : h(
+              'div',
+              { className: 'dshgt-authmodal-body dshgt-authwait' },
+              h('span', { className: 'dshgt-authwait-dot' }),
+              h('span', null, t('auth.modal.requesting')),
+            );
+
+  const footer =
+    view.phase === 'error'
+      ? h(
+          'div',
+          { className: 'dshgt-authmodal-footer' },
+          h(Btn, { small: true, variant: 'primary', onClick: props.onRetry }, t('auth.modal.retry')),
+          h(Btn, { small: true, variant: 'ghost', onClick: props.onClose }, t('auth.modal.close')),
+        )
+      : view.phase === 'done'
+        ? h(
+            'div',
+            { className: 'dshgt-authmodal-footer' },
+            h(Btn, { small: true, variant: 'primary', onClick: props.onClose }, t('auth.modal.close')),
+          )
+        : h(
+            'div',
+            { className: 'dshgt-authmodal-footer' },
+            h('span', { className: 'dshgt-hint' }, t('auth.modal.closeHint')),
+            h(Btn, { small: true, variant: 'ghost', onClick: props.onCancel, disabled: !active }, t('auth.browser.cancel')),
+          );
+
+  return h(
+    'div',
+    { className: 'dshgt-modal-mask', onClick: (event: any) => { if (event.target === event.currentTarget) props.onClose(); } },
+    h(
+      'div',
+      { className: 'dshgt-modal dshgt-authmodal', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('auth.modal.title') },
+      h(
+        'div',
+        { className: 'dshgt-authmodal-head' },
+        h('h3', { style: { margin: 0, fontSize: 14 } }, t('auth.modal.title')),
+        h('button', { type: 'button', className: 'dshgt-authmodal-x', 'aria-label': t('auth.modal.close'), onClick: props.onClose }, '✕'),
+      ),
+      body,
+      footer,
+    ),
   );
 }
 
