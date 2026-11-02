@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.2] - 2026-11-02
+
+### Fixes
+
+- **auth**: register github flow after service is ready (#72)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.1...v0.8.2
+
 ## [v0.7.11] - 2026-11-01
 
 ### Refactors
