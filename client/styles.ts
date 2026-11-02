@@ -146,8 +146,11 @@ export const CSS = `
 .dshgt-head-actions{margin-left:auto;display:flex;align-items:center;gap:8px;padding-top:2px;flex:none;}
 .dshgt-main-body{flex:1;min-height:0;display:flex;min-width:0;}
 .dshgt-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;}
-.dshgt-main-body > .dshgt-settings{flex:1;min-height:0;padding:16px 24px 20px;}
-.dshgt-view{padding:22px 30px 38px;max-width:1180px;width:100%;display:flex;flex-direction:column;gap:18px;}
+.dshgt-main-body > .dshgt-settings{flex:1;min-height:0;padding:16px 24px 20px;width:100%;max-width:1240px;margin-inline:auto;}
+/* 视图区随可用宽度自适应：不再硬卡 1180，避免超宽屏右侧留大片空白。
+   结构化内容（卡片 / 网格 / 表格 / 列表）铺满；只有长文阅读块（日报正文、空态说明）
+   单独限制行宽并居中，保证可读性。与 .dshgt-page-head 的左/右内边距保持一致。 */
+.dshgt-view{padding:22px 30px 38px;width:100%;display:flex;flex-direction:column;gap:18px;}
 .dshgt-grow{flex:1;min-width:0;}
 .dshgt-dim{font-size:12px;color:var(--gt-muted);}
 .dshgt-empty{padding:48px 0;text-align:center;color:var(--gt-muted);font-size:13px;}
@@ -247,14 +250,17 @@ export const CSS = `
 @keyframes dshgt-spin{to{transform:rotate(360deg);}}
 
 /* ——— 日报 ——— */
+/* 日报是阅读页：整列（工具栏 + 纸面）统一限宽并居中，避免超宽屏下工具栏与正文两段式错位。 */
 .dshgt-digest{padding-top:20px;gap:12px;}
+.dshgt-digest > *{width:100%;max-width:920px;margin-inline:auto;}
 .dshgt-digest-subbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .dshgt-datenav{display:flex;align-items:center;gap:2px;border:1px solid var(--gt-border);border-radius:8px;background:var(--gt-card);padding:2px;}
 .dshgt-icon-btn{width:28px;height:28px;display:grid;place-items:center;border:1px solid transparent;background:var(--gt-bg);border-radius:6px;color:var(--gt-fg);font-family:inherit;font-size:18px;line-height:1;cursor:pointer;flex:none;}
 .dshgt-icon-btn:hover:not(:disabled){background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));border-color:var(--gt-border);}
 .dshgt-icon-btn:disabled{opacity:.3;cursor:not-allowed;}
 .dshgt-dateselect{appearance:none;height:28px;border:0;background:transparent;font-family:inherit;font-size:13px;color:var(--gt-fg);padding:0 8px;min-width:210px;max-width:320px;cursor:pointer;}
-.dshgt-digest-sheet{max-width:900px;width:100%;border:1px solid var(--gt-border);border-radius:12px;background:var(--gt-card);overflow:hidden;}
+/* 日报预览纸面：阅读类长文，限制行宽。整体列宽由 .dshgt-digest 视图统一居中约束。 */
+.dshgt-digest-sheet{max-width:920px;width:100%;border:1px solid var(--gt-border);border-radius:12px;background:var(--gt-card);overflow:hidden;}
 .dshgt-digest-body{display:flex;flex-direction:column;min-width:0;}
 .dshgt-digest-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);background:color-mix(in srgb,var(--gt-fg) 2.5%,var(--gt-card));}
 .dshgt-seg{display:inline-flex;border:1px solid var(--gt-border);border-radius:8px;padding:2px;background:var(--gt-bg);gap:2px;}
