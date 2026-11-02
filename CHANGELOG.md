@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.10] - 2026-11-02
+
+### Features
+
+- **about**: redesign dialog with compact gradient hero header (#93)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.9...v0.8.10
+
 ## [v0.8.9] - 2026-11-02
 
 ### Fixes
