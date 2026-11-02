@@ -28,7 +28,7 @@ import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
 import { probeGithubAuth } from './github.js';
-import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow, isLoopbackSignInAvailable } from './github-auth.js';
+import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow } from './github-auth.js';
 import { importFirstAvailable } from './import-cli.js';
 import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
@@ -59,19 +59,17 @@ function browserSignInAvailable(deps: RouteDeps): boolean {
   return ensureGithubFlow(githubAuthDeps(deps));
 }
 
-/** 组装 GitHub 浏览器登录 adapter 的依赖（get/fetch/clientId/logger）。 */
+/** 组装 GitHub 登录 adapter 的依赖（get/fetch/clientId/logger）。 */
 function githubAuthDeps(deps: RouteDeps): {
   get: (name: string) => unknown;
   fetchImpl?: typeof fetch;
   clientId?: string;
-  clientSecret?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 } {
   return {
     get: deps.get,
     ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
     ...(deps.githubClientId === undefined ? {} : { clientId: deps.githubClientId }),
-    ...(deps.githubClientSecret === undefined ? {} : { clientSecret: deps.githubClientSecret }),
     ...(deps.logger === undefined ? {} : { logger: deps.logger }),
   };
 }
@@ -90,10 +88,8 @@ export interface RouteDeps {
   /** 包名与仓库地址都来自 package.json，由 src/index.ts 传入。 */
   pluginName?: string;
   repository?: string;
-  /** 浏览器 GitHub 登录用的 public client_id（由 apply 的 config 传入；缺省时用内置默认）。 */
+  /** GitHub 登录用的 public client_id（由 apply 的 config 传入；缺省时用内置默认）。 */
   githubClientId?: string;
-  /** 自带 OAuth App 时的 client_secret（只用于回环 web flow；缺省时该 method 自动降级为设备码）。 */
-  githubClientSecret?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -334,12 +330,11 @@ async function dispatch(
     return { github: probe };
   }
 
-  // 浏览器 GitHub 登录：begin 启动一次 attempt（进程内 authorization.begin，不阻塞），
-  // 返回 attempt 视图（含 authorizeUrl / userCode）；status 供前端轮询；cancel 取消。
+  // GitHub 登录（设备码）：begin 启动一次 attempt（进程内 authorization.begin，不阻塞），
+  // 返回 attempt 视图（含 verificationUri / userCode）；status 供前端轮询；cancel 取消。
   if (method === 'POST' && pathname === '/github/browser/begin') {
-    const method = body.method === 'device' ? 'device' : 'browser';
     try {
-      const view = await beginGithubSignIn(githubAuthDeps(deps), method);
+      const view = await beginGithubSignIn(githubAuthDeps(deps));
       // attempt 落成 error 时必须变成 HTTP 错误：客户端只在 catch 里提示，
       // 返回 200 + phase:error 会被 UI 当成「什么都没发生」（旧版的症状）。
       if (view.phase === 'error') throw new IpcError('GITHUB_AUTH_UNAVAILABLE', redact(view.error ?? 'GitHub 登录失败'));
@@ -502,15 +497,10 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       authMode: settings.github.authMode,
       configured: github.token !== undefined,
       source: github.source,
-      /** 浏览器登录 attempt 视图（idle / waiting-browser / waiting-device / exchanging / done / error）。 */
+      /** GitHub 登录 attempt 视图（idle / waiting-device / exchanging / done / error）。 */
       attempt: attemptView(),
-      /** 浏览器登录是否可用：authorization 服务在、且 GitHub flow 真的注册上了（client_id 有内置默认）。 */
+      /** 登录是否可用：authorization 服务在、且 GitHub flow 真的注册上了（client_id 有内置默认）。 */
       browserAvailable: browserSignInAvailable(deps),
-      /**
-       * 回环 web flow 是否可用：GitHub 换 token 必须有 client_secret，内置 client_id 没有 → 只能设备码。
-       * 前端据此决定主按钮启动哪个 method（false 时直接用 device，避免点了必然失败的 web flow）。
-       */
-      loopbackAvailable: isLoopbackSignInAvailable(githubAuthDeps(deps)),
     },
   };
 }

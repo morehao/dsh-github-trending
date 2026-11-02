@@ -86,7 +86,7 @@
 |---|---|---|
 | `stateDir` | `$DSH_HOME/github-trending` | 状态目录（等价于 `TRENDING_DIGEST_HOME`） |
 | `corePath` | 空 | 本地核心可执行文件（等价于 `TRENDING_DIGEST_CORE`） |
-| `githubClientId` / `githubClientSecret` | 内置 client_id / 空 | 自带 OAuth App 时成对提供；有 secret 才启用回环 web flow，否则 GitHub 登录走设备码。secret 也可用环境变量 `DSH_GITHUB_CLIENT_SECRET` 提供（config 优先），不进 `settings.json`、不进日志 |
+| `githubClientId` | 内置 client_id | GitHub OAuth App 的公开 client_id（device flow 用）；缺省用内置默认，一般无需配置 |
 
 ## 两个工具
 

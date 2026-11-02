@@ -59,7 +59,7 @@ GitHub 趋势榜的 **DeepSeek Harness 插件**：按日 / 周 / 月周期定时
 
 认证分区支持三种方式（可随时切换）：
 
-- **浏览器登录（默认推荐）**：点「用 GitHub 登录」在浏览器完成授权，无需手工粘贴 token，token 由 DSH 凭据记录安全保存、不落 `settings.json`。插件内置了公开的 OAuth App client_id，开箱即用；GitHub 的 web flow 换 token 仍然**必须带 client_secret**（PKCE 只是叠加保护），而客户端不能内置机密，所以默认走**设备码**：点一下后在打开的 GitHub 页面输入验证码即可。若你自带 OAuth App，可在插件配置里同时给 `githubClientId` + `githubClientSecret`，就会改用本机回环回调（不用手输验证码）。
+- **浏览器登录（推荐）**：点「用 GitHub 登录」在浏览器完成授权，无需手工粘贴 token，token 由 DSH 凭据记录安全保存、不落 `settings.json`。插件内置了公开的 OAuth App client_id，开箱即用。GitHub 的 web flow 换 token 必须带 client_secret（客户端不能内置机密），所以走**设备码**：点一下打开 GitHub 验证页，把页面上的验证码（设置页可一键复制）输入并确认即可。
 - **本机 gh**：复用你终端里 `gh auth login` 的登录态。
 - **PAT**：手工填 Personal Access Token（存到凭据引用 / 环境变量）。
 

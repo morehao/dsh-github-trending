@@ -248,9 +248,9 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
-  const startSignIn = async (method: 'browser' | 'device'): Promise<void> => {
+  const startSignIn = async (): Promise<void> => {
     try {
-      let view = await beginGithubSignIn(method);
+      let view = await beginGithubSignIn();
       // 兜底：Host 理论上不再返回 idle（已修），但真拿到 idle 时要再问一次状态，
       // 否则界面会停在「什么都没发生」。
       if (view.phase === 'idle') view = await getGithubSignInStatus();
@@ -259,22 +259,12 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         notify('err', t('auth.browser.failed.detail', { message: view.error ?? '' }));
         return;
       }
-      // browser 方法：顺手开一个标签页；被弹窗拦截也没关系——状态行里有可点的授权链接。
-      if (view.phase === 'waiting-browser' && view.authorizeUrl !== undefined) {
+      // 打开 GitHub 的验证页（验证码仍需手动输入，下方状态行提供一键复制）。
+      if (view.phase === 'waiting-device' && view.verificationUri !== undefined) {
         try {
-          window.open(view.authorizeUrl, '_blank', 'noopener,noreferrer');
+          window.open(view.verificationUri, '_blank', 'noopener,noreferrer');
         } catch {
-          /* 拦截不是错误：下方「打开授权页」仍可用 */
-        }
-      }
-      // device 方法：打开 GitHub 的验证页。若 provider 返回了预填码的 complete 地址就用它，
-      // 否则（GitHub 实测不返回）回退到裸验证页——验证码仍需手动输入，下方状态行提供一键复制。
-      const deviceUrl = view.verificationUriComplete ?? view.verificationUri;
-      if (view.phase === 'waiting-device' && deviceUrl !== undefined) {
-        try {
-          window.open(deviceUrl, '_blank', 'noopener,noreferrer');
-        } catch {
-          /* 同上 */
+          /* 拦截不是错误：下方「打开验证页」仍可用 */
         }
       }
     } catch (error) {
@@ -290,12 +280,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
-  const copyAuthorizeLink = (): void => {
-    if (signIn.authorizeUrl === undefined) return;
-    void navigator.clipboard?.writeText(signIn.authorizeUrl).then(() => notify('ok', t('auth.browser.copied')));
-  };
-
-  // GitHub 不返回 verification_uri_complete：验证码必须手输，故提供一键复制码，减少抄错导致的「找不到」。
+  // 验证码必须手输，提供一键复制码，减少抄错导致的「找不到」。
   const copyDeviceCode = (): void => {
     if (signIn.userCode === undefined) return;
     void copyText(signIn.userCode).then((ok) =>
@@ -304,7 +289,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   };
 
   // 登录进行中时轮询状态；终态（done/error/idle）后停止。
-  const signInActive = signIn.phase === 'waiting-browser' || signIn.phase === 'waiting-device' || signIn.phase === 'exchanging';
+  const signInActive = signIn.phase === 'waiting-device' || signIn.phase === 'exchanging';
   React.useEffect(() => {
     if (!signInActive) return undefined;
     let alive = true;
@@ -387,8 +372,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const isGh = draft.github.authMode === 'gh';
   const isBrowser = draft.github.authMode === 'browser';
   const browserAvailable = state.github.browserAvailable === true;
-  // 回环 web flow 要 client_secret（内置公开 client_id 没有）→ false 时主按钮直接用设备码。
-  const loopbackAvailable = state.github.loopbackAvailable === true;
 
   const sections: Array<{ id: SectionId; label: string }> = [
     { id: 'source', label: t('st.source') },
@@ -592,7 +575,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                   {
                     small: true,
                     variant: 'primary',
-                    onClick: () => void startSignIn(loopbackAvailable ? 'browser' : 'device'),
+                    onClick: () => void startSignIn(),
                     disabled: signInActive,
                   },
                   signIn.phase === 'done' && signIn.login !== undefined
@@ -602,9 +585,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                       : t('auth.browser.signin'),
                 )
               : h('span', { className: 'dshgt-hint' }, t('auth.browser.unavailable')),
-            browserAvailable && loopbackAvailable
-              ? h(Btn, { small: true, variant: 'ghost', onClick: () => void startSignIn('device'), disabled: signInActive }, t('auth.browser.device'))
-              : null,
             signInActive ? h(Btn, { small: true, variant: 'ghost', onClick: () => void cancelSignIn() }, t('auth.browser.cancel')) : null,
           )
         : h(
@@ -613,16 +593,16 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
             h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
             h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
           ),
-    // 浏览器登录失败：必须显式说出来，否则「点了没反应」又回来了。
+    // 登录失败：必须显式说出来，否则「点了没反应」又回来了。
     isBrowser && signIn.phase === 'error'
       ? h(Alert, { kind: 'err', title: t('auth.browser.failed') }, signIn.error ?? t('auth.browser.failed.hint'))
       : null,
-    // 浏览器登录进行中的状态行：可点的授权页链接 + 复制兜底 + 设备码。
-    isBrowser && (signIn.phase === 'waiting-browser' || signIn.phase === 'waiting-device' || signIn.phase === 'exchanging')
+    // 登录进行中的状态行：验证页链接 + 一键复制验证码。
+    isBrowser && (signIn.phase === 'waiting-device' || signIn.phase === 'exchanging')
       ? h(
           'div',
           { className: 'dshgt-hint' },
-          signIn.authorizeUrl !== undefined
+          signIn.verificationUri !== undefined
             ? h(
                 'div',
                 { className: 'dshgt-desc' },
@@ -630,25 +610,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                 ' ',
                 h(
                   'a',
-                  { className: 'dshgt-link', href: signIn.authorizeUrl, target: '_blank', rel: 'noreferrer' },
-                  t('auth.browser.open'),
-                ),
-                ' ',
-                h(Btn, { small: true, variant: 'ghost', onClick: () => copyAuthorizeLink() }, t('auth.browser.copy')),
-              )
-            : null,
-          signIn.verificationUriComplete !== undefined || signIn.verificationUri !== undefined
-            ? h(
-                'div',
-                { className: 'dshgt-desc' },
-                h(
-                  'a',
-                  {
-                    className: 'dshgt-link',
-                    href: signIn.verificationUriComplete ?? signIn.verificationUri,
-                    target: '_blank',
-                    rel: 'noreferrer',
-                  },
+                  { className: 'dshgt-link', href: signIn.verificationUri, target: '_blank', rel: 'noreferrer' },
                   t('auth.browser.open'),
                 ),
               )

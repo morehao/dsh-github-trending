@@ -310,36 +310,31 @@ export interface StatePayload {
     authMode: string;
     configured: boolean;
     source: string;
-    /** 浏览器登录 attempt 视图。 */
+    /** GitHub 登录 attempt 视图。 */
     attempt?: GithubAttemptView;
     /** authorization 服务可用且 GitHub 授权流程注册成功（登录按钮是否可点）。 */
     browserAvailable?: boolean;
-    /** 回环 web flow 是否可用：false 时 GitHub 只能走设备码（内置 client_id 无 client_secret）。 */
-    loopbackAvailable?: boolean;
   };
   /** 发版运行记录的另一种挂载位置；与 `status.releaseRuns` 二者读其一即可。 */
   releaseRuns?: ReleaseRunRecord[];
   lastReleaseAt?: string | null;
 }
 
-/** 浏览器 GitHub 登录 attempt 视图（与 Host `github-auth.attemptView` 同构）。 */
-export type GithubAttemptPhase = 'idle' | 'waiting-browser' | 'waiting-device' | 'exchanging' | 'done' | 'error';
+/** GitHub 登录 attempt 视图（与 Host `github-auth.attemptView` 同构）。 */
+export type GithubAttemptPhase = 'idle' | 'waiting-device' | 'exchanging' | 'done' | 'error';
 
 export interface GithubAttemptView {
   phase: GithubAttemptPhase;
-  authorizeUrl?: string;
   verificationUri?: string;
-  /** device flow 预填验证码的地址：打开只需点授权。 */
-  verificationUriComplete?: string;
   userCode?: string;
   expiresAt?: number;
   login?: string;
   error?: string;
 }
 
-/** 启动浏览器 GitHub 登录（method 默认 browser，可传 device）。 */
-export async function beginGithubSignIn(method: 'browser' | 'device' = 'browser'): Promise<GithubAttemptView> {
-  const payload = await apiCall<{ attempt: GithubAttemptView }>('POST', '/github/browser/begin', { method });
+/** 启动 GitHub 登录（设备码）。 */
+export async function beginGithubSignIn(): Promise<GithubAttemptView> {
+  const payload = await apiCall<{ attempt: GithubAttemptView }>('POST', '/github/browser/begin', {});
   return payload.attempt;
 }
 
