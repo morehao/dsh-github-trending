@@ -156,7 +156,7 @@ export function apply(ctx: any): void {
     const [digestTarget, setDigestTarget] = React.useState<DigestTarget | undefined>(undefined);
     const [aboutOpen, setAboutOpen] = React.useState(false);
     // 自更新恢复提示：进入面板时读一次「刚点过更新」的记号（重开的新进程读得到）。
-    // 渲染在面板正文顶部（醒目、不随视图切换消失），点「知道了」才收起并清记号。
+    // 渲染成居中弹层（不随视图切换消失），点「关闭」才收起并清记号。
     const [pendingUpdate, setPendingUpdate] = React.useState<PendingUpdate | null>(null);
     React.useEffect(() => {
       setPendingUpdate(readPendingUpdate());
@@ -229,13 +229,7 @@ export function apply(ctx: any): void {
           : h(RestoreNotice, {
               t,
               version: pendingUpdate.to,
-              onRestart: () => {
-                // 宿主提供一键重启时就地重启；没有该能力则退回「知道了」。
-                const reloader = (ctx as { restart?: () => void }).restart;
-                if (typeof reloader === 'function') reloader();
-                clearPendingUpdate();
-                setPendingUpdate(null);
-              },
+              from: pendingUpdate.from,
               onDismiss: () => { clearPendingUpdate(); setPendingUpdate(null); },
             }),
         plugin === undefined ? null : h(IdentityBar, { t, plugin, onOpenAbout: openAbout }),

@@ -85,15 +85,15 @@ test('update-store：无 localStorage（SSR/测试 vm）全程 fail-open', async
   assert.doesNotThrow(() => mod.clearPendingUpdate());
 });
 
-test('RestoreNotice：顶部横条渲染标题/正文/按钮，且不再自动消失', async () => {
-  // 捕获 React 的 effect，确认组件不再注册任何自动收起的定时器。
+test('RestoreNotice：居中弹层渲染版本跨栏/标题/正文/唯一「关闭」按钮，且不自动消失', async () => {
+  // 捕获 React 的 effect，确认组件不注册任何自动收起的定时器。
   let effectFn = null;
   const realSetTimeout = globalThis.setTimeout;
   let scheduled = 0;
   globalThis.setTimeout = () => { scheduled += 1; return 1; };
   globalThis.clearTimeout = () => {};
 
-  const elements = [];
+  let elements = [];
   const reactStub = {
     createElement: (type, props, ...children) => {
       const node = { type, props: props || {}, children };
@@ -107,47 +107,52 @@ test('RestoreNotice：顶部横条渲染标题/正文/按钮，且不再自动�
   try {
     const mod = await loadModuleWithReact('client/restore-notice.ts', reactStub);
     const t = (key, params) => (params && params.version !== undefined ? `${key}:${params.version}` : key);
-    let dismissed = false;
-    let restarted = false;
-    mod.RestoreNotice({
-      t,
-      version: '0.8.8',
-      onRestart: () => { restarted = true; },
-      onDismiss: () => { dismissed = true; },
-    });
 
-    // 标题
+    // ① 有旧版本：版本跨栏 + 结论式标题
+    let dismissed = 0;
+    mod.RestoreNotice({ t, version: '0.8.11', from: '0.8.10', onDismiss: () => { dismissed += 1; } });
+
+    const mask = elements.find((e) => e.props.className === 'dshgt-restore-mask');
+    assert.ok(mask, '应渲染遮罩 .dshgt-restore-mask（铺满窗口、弹层居中）');
+    const dialog = elements.find((e) => e.props.className === 'dshgt-restore');
+    assert.ok(dialog, '应渲染对话框 .dshgt-restore');
+    assert.equal(dialog.props.role, 'dialog');
+    assert.equal(dialog.props['aria-modal'], 'true');
+    assert.equal(dialog.props['aria-labelledby'], 'dshgt-restore-title');
+
+    const fromChip = elements.find((e) => e.props.className === 'dshgt-restore-version');
+    const toChip = elements.find((e) => e.props.className === 'dshgt-restore-version is-new');
+    assert.ok(fromChip && toChip, '应渲染 from → to 两枚版本号');
+    assert.equal(fromChip.children[0], 'v0.8.10', '旧版本统一补 v 前缀');
+    assert.equal(toChip.children[0], 'v0.8.11');
+
     const titleNode = elements.find((e) => e.props.className === 'dshgt-restore-title');
     assert.ok(titleNode, '应渲染 .dshgt-restore-title');
-    assert.equal(titleNode.children[0], 'restoreNotice.title:0.8.8');
-    // 正文使用 restoreNotice.body
+    assert.equal(titleNode.props.id, 'dshgt-restore-title');
+    assert.equal(titleNode.children[0], 'restoreNotice.titleInstalled', '有版本跨栏时标题只说结论');
     const bodyNode = elements.find((e) => e.props.className === 'dshgt-restore-body');
     assert.ok(bodyNode, '应渲染 .dshgt-restore-body');
     assert.equal(bodyNode.children[0], 'restoreNotice.body');
-    // 根节点是「恢复提示」横条，不是右下角浮层（类名仍为 dshgt-restore，靠 styles 改成顶部横条）
-    const rootNode = elements.find((e) => e.props.className === 'dshgt-restore');
-    assert.ok(rootNode, '应渲染 .dshgt-restore 根节点');
 
-    // 关键回归：不再有 effect 自动定时收起
+    // 唯一动作：「关闭」一个按钮，点了才收起
+    const buttons = elements.filter((e) => e.type === 'button');
+    assert.equal(buttons.length, 1, '弹层里只应有一个按钮');
+    assert.equal(buttons[0].children[0], 'restoreNotice.dismiss');
+    assert.equal(buttons[0].props.className, 'dshgt-restore-close');
+    assert.equal(buttons[0].props.autoFocus, true, '焦点应落在唯一按钮上');
+    buttons[0].props.onClick();
+    assert.equal(dismissed, 1);
+
+    // 关键回归：没有任何自动收起的定时器
     if (typeof effectFn === 'function') effectFn();
-    assert.equal(scheduled, 0, '不应注册任何自动收起的定时器（改为常驻，点知道了才收起）');
+    assert.equal(scheduled, 0, '不应注册任何自动收起的定时器');
 
-    // 两个按钮：重启 + 知道了，点击各自回调
-    const btnByText = (label) => elements.find((e) => e.type && e.props && (e.props.onClick === undefined ? false : true) && e.children && e.children[0] === label);
-    // Btn 在 ui.js 里是函数组件，这里被 stub 成 createElement('Btn'?) —— 直接查找按钮文本节点
-    const texts = elements.filter((e) => typeof e.children?.[0] === 'string').map((e) => e.children[0]);
-    assert.ok(texts.includes('restoreNotice.restart'), '应有「退出并重启」按钮文案');
-    assert.ok(texts.includes('restoreNotice.dismiss'), '应有「知道了」按钮文案');
-    // 直接调用传入的按钮 onClick
-    const buttonNodes = elements.filter((e) => typeof e.props?.onClick === 'function');
-    const restartBtn = buttonNodes.find((e) => e.children?.includes('restoreNotice.restart'));
-    const dismissBtn = buttonNodes.find((e) => e.children?.includes('restoreNotice.dismiss'));
-    assert.ok(restartBtn, '重启按钮应有 onClick');
-    assert.ok(dismissBtn, '知道了按钮应有 onClick');
-    restartBtn.props.onClick();
-    assert.equal(restarted, true);
-    dismissBtn.props.onClick();
-    assert.equal(dismissed, true);
+    // ② 没有旧版本（首次安装）：不显示版本跨栏，标题退回带版本号的写法
+    elements = [];
+    mod.RestoreNotice({ t, version: '0.8.11', onDismiss: () => undefined });
+    assert.equal(elements.filter((e) => e.props.className === 'dshgt-restore-versions').length, 0, '无旧版本时不应渲染跨栏');
+    const bareTitle = elements.find((e) => e.props.className === 'dshgt-restore-title');
+    assert.equal(bareTitle.children[0], 'restoreNotice.title:0.8.11', '标题带版本号、且去掉重复的 v');
   } finally {
     globalThis.setTimeout = realSetTimeout;
   }

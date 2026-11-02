@@ -17,7 +17,7 @@ export const CSS = `
 .dshgt-tab[aria-selected="true"]{color:var(--gt-fg);border-bottom-color:var(--gt-accent);font-weight:600;white-space:nowrap;}
 .dshgt-shell{height:100%;min-height:0;overflow:hidden;}
 .dshgt-content{flex:1;min-height:0;display:flex;}
-.dshgt-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:4px;}
+.dshgt-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;}
 .dshgt-settings{flex:1;min-height:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;}
 .dshgt-vtabs{display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--gt-border);padding-right:8px;overflow-y:auto;}
 .dshgt-vtab{appearance:none;border:none;background:none;text-align:left;padding:7px 10px;border-radius:7px;color:var(--gt-muted);cursor:pointer;font:inherit;font-size:12px;display:flex;align-items:center;gap:6px;}
@@ -85,14 +85,22 @@ export const CSS = `
 .dshgt-modal-mask{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.38));display:flex;align-items:center;justify-content:center;z-index:2147483000;}
 .dshgt-modal{background:var(--gt-bg);border-radius:12px;border:1px solid var(--gt-border);max-width:640px;width:calc(100% - 32px);max-height:80vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 50px rgba(15,23,42,.25);}
 
-/* ——— 自更新后的恢复提示（正文顶部醒目横条，点「知道了」才收起） ——— */
-.dshgt-restore{flex:none;display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-radius:10px;border:1px solid color-mix(in srgb,var(--gt-accent) 45%,var(--gt-border));border-left:4px solid var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));animation:dshgt-restore-in .18s ease-out;}
-.dshgt-restore-icon{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:14px;line-height:1;color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 16%,transparent);}
-.dshgt-restore-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
-.dshgt-restore-title{font-size:13.5px;font-weight:600;color:var(--gt-fg);}
-.dshgt-restore-body{font-size:12.5px;line-height:1.5;color:var(--gt-muted);}
-.dshgt-restore-actions{flex:none;display:flex;align-items:center;gap:8px;align-self:center;}
-@keyframes dshgt-restore-in{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
+/* ——— 自更新后的恢复提示：居中弹层，唯一动作「关闭」，版本跨栏当主角 ——— */
+.dshgt-restore-mask{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.38));animation:dshgt-restore-mask-in .14s ease-out;}
+.dshgt-restore{width:100%;max-width:448px;padding:18px 20px 12px;border-radius:10px;border:1px solid var(--gt-border);background:var(--gt-bg);box-shadow:0 24px 60px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.08);animation:dshgt-restore-in .16s cubic-bezier(.2,.8,.3,1);}
+.dshgt-restore-versions{display:flex;align-items:center;gap:8px;}
+.dshgt-restore-version{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:500;line-height:24px;color:var(--gt-muted);}
+.dshgt-restore-version.is-new{font-weight:650;padding:0 8px;border-radius:6px;color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));}
+.dshgt-restore-arrow{display:inline-flex;align-items:center;justify-content:center;color:var(--gt-muted);}
+.dshgt-restore-title{font-size:15px;font-weight:600;letter-spacing:-.008em;color:var(--gt-fg);}
+.dshgt-restore-versions + .dshgt-restore-title{margin-top:12px;}
+.dshgt-restore-body{margin:5px 0 0;font-size:13px;line-height:1.6;color:var(--gt-muted);}
+.dshgt-restore-foot{display:flex;justify-content:flex-end;margin-top:14px;}
+.dshgt-restore-close{appearance:none;font:inherit;font-size:13px;cursor:pointer;padding:5px 10px;border-radius:7px;border:1px solid transparent;background:none;color:var(--gt-accent);}
+.dshgt-restore-close:hover{background:color-mix(in srgb,var(--gt-accent) 10%,transparent);}
+@keyframes dshgt-restore-in{from{opacity:0;transform:translateY(6px) scale(.985);}to{opacity:1;transform:none;}}
+@keyframes dshgt-restore-mask-in{from{opacity:0;}to{opacity:1;}}
+@media (prefers-reduced-motion:reduce){.dshgt-restore-mask,.dshgt-restore{animation:none;}}
 
 /* ——— GitHub 设备码登录弹窗 ——— */
 .dshgt-authmodal{max-width:420px;gap:14px;}
@@ -111,7 +119,11 @@ export const CSS = `
 
 /* ——— 01 工作台外壳 ——— */
 .dshgt-shell{gap:0;height:100%;min-height:0;overflow:hidden;}
-.dshgt-app{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--gt-bg);}
+/* 全页统一内容框：五个 tab 的身份条 / tab 条 / 页头 / 正文共用同一条
+   「内容宽度 + 左右留白」规则，宽屏居中、窄屏退化为最小 gutter。
+   页面内不要再给单个视图加 max-width / margin-inline:auto，否则又会出现
+   一半居中一半靠左。 */
+.dshgt-app{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--gt-bg);--dshgt-frame:1100px;--dshgt-gutter:30px;--dshgt-inset:max(var(--dshgt-gutter),calc((100% - var(--dshgt-frame)) / 2));}
 .dshgt-rail{background:color-mix(in srgb,var(--gt-fg) 3%,var(--gt-bg));border-right:1px solid var(--gt-border);display:flex;flex-direction:column;padding:14px 10px 12px;min-height:0;overflow:hidden;}
 .dshgt-brand{display:flex;align-items:center;gap:9px;padding:2px 6px 16px;}
 .dshgt-brand svg{flex:none;border-radius:8px;}
@@ -141,18 +153,18 @@ export const CSS = `
 .dshgt-pkg-copy:hover{background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));color:var(--gt-fg);}
 .dshgt-pkg-copy:disabled{opacity:.4;cursor:not-allowed;}
 .dshgt-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--gt-bg);}
-.dshgt-page-head{display:flex;align-items:flex-start;gap:16px;padding:20px 30px 14px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);flex:none;}
+.dshgt-page-head{display:flex;align-items:flex-start;gap:16px;padding:20px var(--dshgt-inset) 14px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);flex:none;}
 .dshgt-page-heading{min-width:0;}
 .dshgt-page-head h1{margin:0;font-size:21px;line-height:1.25;font-weight:650;letter-spacing:-.012em;}
 .dshgt-dek{margin:4px 0 0;font-size:13px;color:var(--gt-muted);max-width:580px;line-height:1.5;}
 .dshgt-head-actions{margin-left:auto;display:flex;align-items:center;gap:8px;padding-top:2px;flex:none;}
 .dshgt-main-body{flex:1;min-height:0;display:flex;min-width:0;}
-.dshgt-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;}
-.dshgt-main-body > .dshgt-settings{flex:1;min-height:0;padding:16px 24px 20px;width:100%;max-width:1240px;margin-inline:auto;}
-/* 视图区随可用宽度自适应：不再硬卡 1180，避免超宽屏右侧留大片空白。
-   结构化内容（卡片 / 网格 / 表格 / 列表）铺满；只有长文阅读块（日报正文、空态说明）
-   单独限制行宽并居中，保证可读性。与 .dshgt-page-head 的左/右内边距保持一致。 */
-.dshgt-view{padding:22px 30px 38px;width:100%;display:flex;flex-direction:column;gap:18px;}
+.dshgt-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges;}
+/* 设置页不在 .dshgt-scroll 里（自己管理左右分栏滚动），但内容框必须与其它四页完全一致。 */
+.dshgt-main-body > .dshgt-settings{flex:1;min-height:0;padding:22px var(--dshgt-inset) 30px;width:100%;}
+/* 五个 tab 共用同一个内容框：宽屏居中、窄屏贴最小 gutter；内容本身铺满框内宽度。
+   只有空态文案这类「短句」用 text-align / 自身 max-width 控制，不再靠外层居中。 */
+.dshgt-view{padding:22px var(--dshgt-inset) 38px;width:100%;display:flex;flex-direction:column;gap:18px;}
 .dshgt-grow{flex:1;min-width:0;}
 .dshgt-dim{font-size:12px;color:var(--gt-muted);}
 .dshgt-empty{padding:48px 0;text-align:center;color:var(--gt-muted);font-size:13px;}
@@ -160,7 +172,7 @@ export const CSS = `
 .dshgt-inline-tag{margin-left:6px;vertical-align:1px;}
 
 /* ——— 顶部身份条（第一行）：名称 / 版本 / 完整包名 / GitHub / 检查更新 ——— */
-.dshgt-idbar{display:flex;align-items:center;gap:9px;height:48px;padding:0 18px;border-bottom:1px solid var(--gt-border);flex:none;background:var(--gt-bg);min-width:0;}
+.dshgt-idbar{display:flex;align-items:center;gap:9px;height:48px;padding:0 var(--dshgt-inset);border-bottom:1px solid var(--gt-border);flex:none;background:var(--gt-bg);min-width:0;}
 .dshgt-idbar .dshgt-brand{display:flex;align-items:center;gap:9px;padding:0;flex:none;min-width:0;}
 .dshgt-idbar .dshgt-brand svg{width:22px;height:22px;flex:none;border-radius:6px;}
 .dshgt-brand-name{font-size:13.5px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;line-height:1.3;}
@@ -179,7 +191,7 @@ export const CSS = `
 .dshgt-id-actions{display:flex;align-items:center;gap:8px;flex:none;}
 
 /* ——— 横向 tab（第二行）+ 右侧状态 ——— */
-.dshgt-tabsbar{display:flex;align-items:stretch;gap:12px;height:46px;padding:0 18px;border-bottom:1px solid var(--gt-border);flex:none;background:var(--gt-bg);min-width:0;}
+.dshgt-tabsbar{display:flex;align-items:stretch;gap:12px;height:46px;padding:0 var(--dshgt-inset);border-bottom:1px solid var(--gt-border);flex:none;background:var(--gt-bg);min-width:0;}
 .dshgt-tabnav{display:flex;align-items:stretch;gap:2px;height:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;}
 .dshgt-tabnav::-webkit-scrollbar{display:none;}
 .dshgt-tab{display:flex;align-items:center;gap:7px;padding:0 12px;border:0;background:none;color:var(--gt-muted);cursor:pointer;font:inherit;font-size:13.5px;position:relative;border-bottom:2px solid transparent;margin-bottom:-1px;flex:none;white-space:nowrap;}
@@ -252,17 +264,17 @@ export const CSS = `
 @keyframes dshgt-spin{to{transform:rotate(360deg);}}
 
 /* ——— 日报 ——— */
-/* 日报是阅读页：整列（工具栏 + 纸面）统一限宽并居中，避免超宽屏下工具栏与正文两段式错位。 */
-.dshgt-digest{padding-top:20px;gap:12px;}
-.dshgt-digest > *{width:100%;max-width:920px;margin-inline:auto;}
+/* 日报不再自己限宽 / 居中：整页与其它四个 tab 共用 .dshgt-view 的内容框，
+   工具栏和纸面左右边缘和页头、正文完全对齐。 */
+.dshgt-digest{gap:12px;}
 .dshgt-digest-subbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .dshgt-datenav{display:flex;align-items:center;gap:2px;border:1px solid var(--gt-border);border-radius:8px;background:var(--gt-card);padding:2px;}
 .dshgt-icon-btn{width:28px;height:28px;display:grid;place-items:center;border:1px solid transparent;background:var(--gt-bg);border-radius:6px;color:var(--gt-fg);font-family:inherit;font-size:18px;line-height:1;cursor:pointer;flex:none;}
 .dshgt-icon-btn:hover:not(:disabled){background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));border-color:var(--gt-border);}
 .dshgt-icon-btn:disabled{opacity:.3;cursor:not-allowed;}
 .dshgt-dateselect{appearance:none;height:28px;border:0;background:transparent;font-family:inherit;font-size:13px;color:var(--gt-fg);padding:0 8px;min-width:210px;max-width:320px;cursor:pointer;}
-/* 日报预览纸面：阅读类长文，限制行宽。整体列宽由 .dshgt-digest 视图统一居中约束。 */
-.dshgt-digest-sheet{max-width:920px;width:100%;border:1px solid var(--gt-border);border-radius:12px;background:var(--gt-card);overflow:hidden;}
+/* 日报预览纸面：铺满统一内容框；阅读行宽由内边距与字号控制。 */
+.dshgt-digest-sheet{width:100%;border:1px solid var(--gt-border);border-radius:12px;background:var(--gt-card);overflow:hidden;}
 .dshgt-digest-body{display:flex;flex-direction:column;min-width:0;}
 .dshgt-digest-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);background:color-mix(in srgb,var(--gt-fg) 2.5%,var(--gt-card));}
 .dshgt-seg{display:inline-flex;border:1px solid var(--gt-border);border-radius:8px;padding:2px;background:var(--gt-bg);gap:2px;}
@@ -272,7 +284,7 @@ export const CSS = `
 .dshgt-doc-meta{display:flex;gap:12px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--gt-muted);padding-bottom:12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
 .dshgt-digest-raw{margin:0;padding:22px 28px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.75;white-space:pre-wrap;word-break:break-word;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 2.5%,var(--gt-card));max-height:640px;overflow:auto;}
 .dshgt-digest-loading{padding:40px 28px;color:var(--gt-muted);font-size:13px;}
-.dshgt-digest-empty{padding:42px 36px 46px;max-width:720px;}
+.dshgt-digest-empty{padding:42px 36px 46px;}
 .dshgt-status-line{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gt-muted);}
 .dshgt-status-line b{color:var(--gt-fg);font-weight:600;white-space:nowrap;}
 .dshgt-digest-empty h2{margin:14px 0 6px;font-size:20px;font-weight:650;letter-spacing:-.012em;}
@@ -396,7 +408,7 @@ export const CSS = `
 .dshgt-gh{width:15px;height:15px;display:block;fill:currentColor;}
 
 /* ——— 订阅：命令栏 + 四列表格 + 选择条 + 发版记录抽屉 ——— */
-.dshgt-subs{gap:12px;padding-bottom:10px;}
+.dshgt-subs{gap:12px;}
 /* 工具条：搜索 + 添加 + 选择 + 生成变更分析；列表在上方操作区之下 */
 .dshgt-subs-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
 .dshgt-subs-search{position:relative;flex:1;min-width:180px;max-width:340px;display:flex;align-items:center;}
@@ -526,8 +538,10 @@ export const CSS = `
 }
 
 @media (max-width:1100px){
-  .dshgt-page-head{padding:18px 22px 12px;}
-  .dshgt-view{padding:18px 22px 30px;}
+  .dshgt-app{--dshgt-gutter:22px;}
+  .dshgt-page-head{padding-block:18px 12px;}
+  .dshgt-view{padding-block:18px 30px;}
+  .dshgt-main-body > .dshgt-settings{padding-block:18px 22px;}
   .dshgt-facts{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px;}
   .dshgt-fact:nth-child(3){padding-left:0;border-left:0;}
   .dshgt-week{flex-wrap:wrap;}
@@ -541,20 +555,19 @@ export const CSS = `
 @media (max-width:980px){
   .dshgt-page-head h1{font-size:19px;}
   .dshgt-dek{font-size:12.5px;}
-  .dshgt-main-body > .dshgt-settings{padding:14px 18px 18px;}
-}
-@media (max-width:900px){
-  .dshgt-main-body > .dshgt-settings{padding:14px 16px 18px;}
+  .dshgt-main-body > .dshgt-settings{padding-block:16px 18px;}
 }
 @media (max-width:760px){
-  .dshgt-idbar{padding:0 14px;gap:8px;}
+  .dshgt-app{--dshgt-gutter:18px;}
+  .dshgt-idbar{gap:8px;}
   .dshgt-id-pkg{max-width:26vw;}
   .dshgt-id-status{display:none;}
-  .dshgt-tabsbar{padding:0 14px;gap:8px;}
+  .dshgt-tabsbar{gap:8px;}
   .dshgt-tabsbar-status{display:none;}
-  .dshgt-page-head{flex-wrap:wrap;padding:16px 18px 12px;gap:10px 16px;}
+  .dshgt-page-head{flex-wrap:wrap;padding-block:16px 12px;gap:10px 16px;}
   .dshgt-head-actions{margin-left:0;width:100%;justify-content:flex-start;padding-top:0;flex-wrap:wrap;}
-  .dshgt-view{padding:16px 18px 28px;}
+  .dshgt-view{padding-block:16px 28px;}
+  .dshgt-main-body > .dshgt-settings{padding-block:14px 18px;}
   .dshgt-runs-filter{margin-left:0;width:100%;flex-wrap:wrap;}
   .dshgt-run-row{grid-template-columns:14px 92px 46px minmax(0,1fr) 20px;gap:8px;padding:0 2px;}
   .dshgt-run-item.has-tokens .dshgt-run-row{grid-template-columns:14px 92px 46px minmax(0,1fr) 64px 20px;}
