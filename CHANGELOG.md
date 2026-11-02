@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.3] - 2026-11-02
+
+### Fixes
+
+- **auth**: fall back to device flow when client_secret is missing (#75)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.2...v0.8.3
+
 ## [v0.8.2] - 2026-11-02
 
 ### Fixes
