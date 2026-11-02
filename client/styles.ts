@@ -85,13 +85,14 @@ export const CSS = `
 .dshgt-modal-mask{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(15,23,42,.38));display:flex;align-items:center;justify-content:center;z-index:2147483000;}
 .dshgt-modal{background:var(--gt-bg);border-radius:12px;border:1px solid var(--gt-border);max-width:640px;width:calc(100% - 32px);max-height:80vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 50px rgba(15,23,42,.25);}
 
-/* ——— 自更新后的恢复提示（右下角，约 6 秒后自动消失） ——— */
-.dshgt-restore{position:fixed;right:20px;bottom:20px;z-index:2147483000;max-width:360px;display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px;border:1px solid var(--gt-border);background:var(--gt-bg);box-shadow:0 16px 40px rgba(15,23,42,.28);animation:dshgt-restore-in .18s ease-out;}
-.dshgt-restore-text{display:flex;flex-direction:column;gap:4px;}
-.dshgt-restore-title{font-size:13px;font-weight:600;color:var(--gt-fg);}
-.dshgt-restore-body{font-size:12px;line-height:1.5;color:var(--gt-muted);}
-.dshgt-restore-actions{display:flex;justify-content:flex-end;gap:8px;}
-@keyframes dshgt-restore-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+/* ——— 自更新后的恢复提示（正文顶部醒目横条，点「知道了」才收起） ——— */
+.dshgt-restore{flex:none;display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-radius:10px;border:1px solid color-mix(in srgb,var(--gt-accent) 45%,var(--gt-border));border-left:4px solid var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 9%,var(--gt-bg));animation:dshgt-restore-in .18s ease-out;}
+.dshgt-restore-icon{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:14px;line-height:1;color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 16%,transparent);}
+.dshgt-restore-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.dshgt-restore-title{font-size:13.5px;font-weight:600;color:var(--gt-fg);}
+.dshgt-restore-body{font-size:12.5px;line-height:1.5;color:var(--gt-muted);}
+.dshgt-restore-actions{flex:none;display:flex;align-items:center;gap:8px;align-self:center;}
+@keyframes dshgt-restore-in{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
 
 /* ——— GitHub 设备码登录弹窗 ——— */
 .dshgt-authmodal{max-width:420px;gap:14px;}
@@ -375,13 +376,13 @@ export const CSS = `
 .dshgt-about-close{margin-left:auto;flex:none;display:grid;place-items:center;width:28px;height:28px;padding:0;appearance:none;font:inherit;cursor:pointer;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--gt-muted);}
 .dshgt-about-close:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));border-color:var(--gt-border);}
 .dshgt-about-close:focus-visible{outline:2px solid color-mix(in srgb,var(--gt-accent) 45%,transparent);outline-offset:1px;}
-/* 应用身份：顶部渐变横幅（Hero），logo / 名称 / 版本胶囊居中；用背景替代纯留白，收窄整体高度 */
-.dshgt-about-identity{position:relative;margin:-16px -16px 0;padding:16px;border-radius:12px 12px 0 0;display:flex;flex-direction:column;align-items:center;gap:7px;border-bottom:1px solid var(--gt-border);background:radial-gradient(120% 150% at 50% 0%,color-mix(in srgb,var(--gt-accent) 15%,var(--gt-bg)),var(--gt-bg));}
-.dshgt-about-logo svg{width:32px;height:32px;border-radius:12px;display:block;box-shadow:0 3px 10px rgba(0,0,0,.16);}
+/* 应用身份：logo / 名称 / 版本胶囊居中；与信息表整卡同色（不再用渐变、无分隔边、无图标阴影） */
+.dshgt-about-identity{position:relative;margin:-16px -16px 0;padding:16px;border-radius:12px 12px 0 0;display:flex;flex-direction:column;align-items:center;gap:7px;background:var(--gt-bg);}
+.dshgt-about-logo svg{width:32px;height:32px;border-radius:12px;display:block;}
 .dshgt-about-name{font-size:13.5px;font-weight:680;letter-spacing:-.01em;line-height:1.2;}
 .dshgt-about-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:var(--gt-fg);background:var(--gt-card);border:1px solid var(--gt-border);border-radius:999px;padding:0 8px;line-height:16px;}
-/* 信息表：上方一条分割线，左对齐 label/value */
-.dshgt-about .dshgt-kv{grid-template-columns:88px minmax(0,1fr);border-top:1px solid var(--gt-border);padding-top:2px;}
+/* 信息表：无上方分割线，左对齐 label/value */
+.dshgt-about .dshgt-kv{grid-template-columns:88px minmax(0,1fr);padding-top:2px;}
 .dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;}
 .dshgt-about .dshgt-kv a:hover{text-decoration:underline;}
 .dshgt-about .dshgt-kv dd{min-width:0;overflow-wrap:anywhere;}

@@ -85,18 +85,14 @@ test('update-store：无 localStorage（SSR/测试 vm）全程 fail-open', async
   assert.doesNotThrow(() => mod.clearPendingUpdate());
 });
 
-test('RestoreNotice：渲染带版本的标题，并在约 6 秒后自动 onDismiss', async () => {
-  // 捕获 React 的 effect，手动触发，并用假 setTimeout 驱动自动收起。
+test('RestoreNotice：顶部横条渲染标题/正文/按钮，且不再自动消失', async () => {
+  // 捕获 React 的 effect，确认组件不再注册任何自动收起的定时器。
   let effectFn = null;
-  let cleared = 0;
   const realSetTimeout = globalThis.setTimeout;
-  const realClearTimeout = globalThis.clearTimeout;
-  let scheduledDelay = null;
-  let scheduledFn = null;
-  globalThis.setTimeout = (fn, delay) => { scheduledFn = fn; scheduledDelay = delay; return 1; };
-  globalThis.clearTimeout = () => { cleared += 1; };
+  let scheduled = 0;
+  globalThis.setTimeout = () => { scheduled += 1; return 1; };
+  globalThis.clearTimeout = () => {};
 
-  // 用 CJS 风格桩：ui.js 里 `import React from 'react'` + `h = React.createElement`
   const elements = [];
   const reactStub = {
     createElement: (type, props, ...children) => {
@@ -105,33 +101,55 @@ test('RestoreNotice：渲染带版本的标题，并在约 6 秒后自动 onDism
       return node;
     },
     useState: (v) => [typeof v === 'function' ? v() : v, () => undefined],
-    useEffect: (fn) => { effectFn = fn; return () => undefined; },  };
+    useEffect: (fn) => { effectFn = fn; return () => undefined; },
+  };
 
   try {
     const mod = await loadModuleWithReact('client/restore-notice.ts', reactStub);
     const t = (key, params) => (params && params.version !== undefined ? `${key}:${params.version}` : key);
     let dismissed = false;
-    mod.RestoreNotice({ t, version: '0.8.8', onDismiss: () => { dismissed = true; } });
+    let restarted = false;
+    mod.RestoreNotice({
+      t,
+      version: '0.8.8',
+      onRestart: () => { restarted = true; },
+      onDismiss: () => { dismissed = true; },
+    });
 
-    // 找到标题节点内容
+    // 标题
     const titleNode = elements.find((e) => e.props.className === 'dshgt-restore-title');
     assert.ok(titleNode, '应渲染 .dshgt-restore-title');
     assert.equal(titleNode.children[0], 'restoreNotice.title:0.8.8');
+    // 正文使用 restoreNotice.body
+    const bodyNode = elements.find((e) => e.props.className === 'dshgt-restore-body');
+    assert.ok(bodyNode, '应渲染 .dshgt-restore-body');
+    assert.equal(bodyNode.children[0], 'restoreNotice.body');
+    // 根节点是「恢复提示」横条，不是右下角浮层（类名仍为 dshgt-restore，靠 styles 改成顶部横条）
+    const rootNode = elements.find((e) => e.props.className === 'dshgt-restore');
+    assert.ok(rootNode, '应渲染 .dshgt-restore 根节点');
 
-    assert.equal(typeof effectFn, 'function', '应注册 useEffect');
-    // 触发 effect（React 在提交后调用），其中才会 setTimeout
-    const cleanup = effectFn();
-    assert.equal(scheduledDelay, 6000, '自动收起延时应为 6000ms');
-    assert.equal(typeof scheduledFn, 'function');
-    scheduledFn();
-    assert.equal(dismissed, true, '6 秒后应调用 onDismiss');
-    // 卸载时清理定时器
-    assert.equal(typeof cleanup, 'function');
-    cleanup();
-    assert.equal(cleared, 1, 'effect 清理应 clearTimeout');
+    // 关键回归：不再有 effect 自动定时收起
+    if (typeof effectFn === 'function') effectFn();
+    assert.equal(scheduled, 0, '不应注册任何自动收起的定时器（改为常驻，点知道了才收起）');
+
+    // 两个按钮：重启 + 知道了，点击各自回调
+    const btnByText = (label) => elements.find((e) => e.type && e.props && (e.props.onClick === undefined ? false : true) && e.children && e.children[0] === label);
+    // Btn 在 ui.js 里是函数组件，这里被 stub 成 createElement('Btn'?) —— 直接查找按钮文本节点
+    const texts = elements.filter((e) => typeof e.children?.[0] === 'string').map((e) => e.children[0]);
+    assert.ok(texts.includes('restoreNotice.restart'), '应有「退出并重启」按钮文案');
+    assert.ok(texts.includes('restoreNotice.dismiss'), '应有「知道了」按钮文案');
+    // 直接调用传入的按钮 onClick
+    const buttonNodes = elements.filter((e) => typeof e.props?.onClick === 'function');
+    const restartBtn = buttonNodes.find((e) => e.children?.includes('restoreNotice.restart'));
+    const dismissBtn = buttonNodes.find((e) => e.children?.includes('restoreNotice.dismiss'));
+    assert.ok(restartBtn, '重启按钮应有 onClick');
+    assert.ok(dismissBtn, '知道了按钮应有 onClick');
+    restartBtn.props.onClick();
+    assert.equal(restarted, true);
+    dismissBtn.props.onClick();
+    assert.equal(dismissed, true);
   } finally {
     globalThis.setTimeout = realSetTimeout;
-    globalThis.clearTimeout = realClearTimeout;
   }
 });
 
