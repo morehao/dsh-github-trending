@@ -1,18 +1,15 @@
 /**
- * 关于弹层：包名、版本、GitHub 仓库、许可、核心与运行环境，以及**插件自更新**。
+ * 关于弹层：包名@版本、GitHub 仓库、许可、核心仓库与运行环境。
  *
- * 数据全部来自 `/state.plugin` / `/state.core` / `/update`，不从客户端猜版本；仓库缺失时
+ * 数据全部来自 `/state.plugin` / `/state.core`，不从客户端猜版本；仓库缺失时
  * 隐藏外链，不拼一个可能 404 的地址。外链一律 `target=_blank rel=noreferrer`。
  *
- * 更新区不再有标题与说明句，压缩成与右上角身份条同构的一行（状态 + 按钮）；状态的判定与
- * 更新控制器来自 `update-panel.ts` 的 `usePluginUpdate`（模块级单例），所以关于弹层、
- * 概览页与身份条读的是同一份状态，不会重复打网络。
+ * 这里不再承载「检查更新」：更新入口只在顶部身份条，避免关于弹层既当信息页
+ * 又当更新操作页。包名行没有独立复制按钮，整行点击即复制 `包名@版本`。
  */
 import type { StatePayload } from './api.js';
 import type { Translate } from './i18n.js';
-import type { UpdateClientState, UpdateController } from '@morehao/dsh-plugin-kit/update/client';
 import { Btn, KV, copyText, h, React } from './ui.js';
-import { usePluginUpdate } from './update-panel.js';
 
 /** GitHub 图标（16×16，`currentColor`），与身份条用同一个 path。 */
 function githubIcon(): any {
@@ -27,85 +24,17 @@ function githubIcon(): any {
   });
 }
 
-/** 更新行的一行文案 + 状态色，文案与身份条（`identity-bar.ts`）保持一致。 */
-function updateLine(t: Translate, state: UpdateClientState, fallbackVersion: string): { text: string; kind: 'muted' | 'ok' | 'new' | 'err' } {
-  const { status, view, error } = state;
-  if (status === 'checking' || view === null) return { text: t('shell.update.checking'), kind: 'muted' };
-  if (status === 'applying') return { text: t('shell.update.applying', { version: view.latestVersion ?? '' }), kind: 'muted' };
-  if (status === 'restart-required' || status === 'applied') return { text: t('shell.update.done', { version: view.latestVersion ?? '' }), kind: 'ok' };
-  if (status === 'failed') return { text: error?.code === 'CHECK_FAILED' ? t('shell.update.checkFailed') : t('shell.update.failed'), kind: 'err' };
-  if (view.checkFailed) return { text: t('shell.update.checkFailed'), kind: 'err' };
-  if (view.updateAvailable) return { text: t('shell.update.available', { latest: view.latestVersion ?? '' }), kind: 'new' };
-  return { text: t('shell.update.latest', { version: view.currentVersion ?? fallbackVersion }), kind: 'ok' };
-}
-
-/** 更新行右侧的单个按钮：状态机与身份条一致（更新/确认/复制命令/检查）。 */
-function UpdateRow(props: { t: Translate; update: UpdateClientState; controller: UpdateController; fallbackVersion: string }): any {
-  const { t, update, controller, fallbackVersion } = props;
-  const [confirming, setConfirming] = React.useState(false);
-  const [cmdCopied, setCmdCopied] = React.useState(false);
-
-  React.useEffect(() => {
-    if (update.status === 'applying' || update.status === 'restart-required' || update.status === 'applied') setConfirming(false);
-  }, [update.status]);
-
-  const view = update.view;
-  const status = update.status;
-  const busy = status === 'checking' || status === 'applying';
-  const settled = status === 'restart-required' || status === 'applied';
-  const latestVersion = view === null ? '' : view.latestVersion ?? '';
-  const actionable = view !== null && view.updateAvailable && view.canApply && !settled && !busy;
-  const manual = view !== null && (!view.canApply || view.checkFailed) ? view.manualCommand ?? null : null;
-  const line = updateLine(t, update, fallbackVersion);
-
-  const copyCmd = (): void => {
-    if (manual === null) return;
-    void copyText(manual).then((ok) => {
-      if (!ok) return;
-      setCmdCopied(true);
-      setTimeout(() => setCmdCopied(false), 1400);
-    });
-  };
-
-  function action(): any {
-    if (status === 'applying') return h(Btn, { small: true, disabled: true }, t('shell.update.applyingShort'));
-    if (actionable) {
-      if (confirming) {
-        return [
-          h(Btn, { key: 'yes', small: true, variant: 'danger', onClick: () => { setConfirming(false); void controller.apply(); } }, t('shell.update.confirmYes')),
-          h(Btn, { key: 'no', small: true, onClick: () => setConfirming(false) }, t('shell.update.cancel')),
-        ];
-      }
-      return h(Btn, { small: true, variant: 'primary', onClick: () => setConfirming(true) }, t('shell.update.apply', { version: latestVersion }));
-    }
-    if (manual !== null) return h(Btn, { small: true, onClick: copyCmd }, cmdCopied ? t('shell.update.copied') : t('shell.update.copyCmd'));
-    return h(Btn, { small: true, disabled: busy, onClick: () => void controller.check({ fresh: true }) }, t('shell.update.check'));
-  }
-
-  return h(
-    'div',
-    { className: 'dshgt-about-upd' },
-    h(
-      'span',
-      { className: `dshgt-about-status ${confirming ? 'new' : line.kind}` },
-      confirming ? t('shell.update.confirmHint') : line.text,
-    ),
-    h('span', { className: 'dshgt-about-actions' }, action()),
-  );
-}
-
 export function AboutDialog(props: { t: Translate; state: StatePayload; onClose: () => void }): any {
   const { t, state } = props;
   const [copied, setCopied] = React.useState(false);
-  const [updateState, updateController] = usePluginUpdate();
   const plugin = state.plugin;
-  const fullName = `${plugin.name}@v${plugin.version}`;
+  const fullName = `${plugin.name}@${plugin.version}`;
   const repository = plugin.repository;
   const ownerRepo = repository === undefined ? undefined : repository.replace(/^https?:\/\/github\.com\//, '');
-  const repoVersion = ownerRepo === undefined ? undefined : `${ownerRepo}@v${plugin.version}`;
   const core = state.core;
   const coreVersion = core.version === undefined ? '' : `trendradar ${core.version}`;
   const coreRepo = core.repository;
+  const coreOwnerRepo = coreRepo === undefined ? undefined : coreRepo.replace(/^https?:\/\/github\.com\//, '');
 
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -115,7 +44,8 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
     return () => document.removeEventListener('keydown', onKey);
   }, [props]);
 
-  // 没有「可复制」文字提示：整行点击即复制；复制成功后整行边框短暂转绿示意。
+  // 没有独立的复制按钮：整行点击即复制「包名@版本」（与身份条的包名点击行为一致），
+  // 复制成功后整行边框短暂转绿并出现「已复制」字样。
   const copy = (): void => {
     void copyText(fullName).then((ok) => {
       if (!ok) return;
@@ -124,21 +54,23 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
     });
   };
 
-  // 核心值的展示：有仓库地址时版本号可点 + 尾部 GitHub 图标，两个都是外链；
-  // 没地址、也没版本号时给占位符。
+  // 核心仓库：与插件仓库同一风格，展示 owner/repo + 版本；没有仓库地址时
+  // 退回版本号（或占位符），不拼可能 404 的链接。
   const coreValue = (): any => {
-    if (coreVersion === '') return '—';
-    if (coreRepo === undefined) return coreVersion;
-    return h(
-      'span',
-      { className: 'dshgt-about-core' },
-      h('a', { href: coreRepo, target: '_blank', rel: 'noreferrer' }, coreVersion),
-      h(
-        'a',
-        { className: 'dshgt-about-gh', href: coreRepo, target: '_blank', rel: 'noreferrer', title: t('about.core.repo'), 'aria-label': t('about.core.repo') },
-        githubIcon(),
-      ),
-    );
+    if (coreRepo !== undefined && coreOwnerRepo !== undefined) {
+      const label = core.version === undefined ? coreOwnerRepo : `${coreOwnerRepo}@${core.version}`;
+      return h(
+        'span',
+        { className: 'dshgt-about-core' },
+        h('a', { href: coreRepo, target: '_blank', rel: 'noreferrer' }, label),
+        h(
+          'a',
+          { className: 'dshgt-about-gh', href: coreRepo, target: '_blank', rel: 'noreferrer', title: t('about.core.repo'), 'aria-label': t('about.core.repo') },
+          githubIcon(),
+        ),
+      );
+    }
+    return coreVersion === '' ? '—' : coreVersion;
   };
 
   const dialog = h(
@@ -155,23 +87,29 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
       ),
       h(
         'button',
-        { type: 'button', className: `dshgt-about-pkg${copied ? ' is-copied' : ''}`, onClick: copy },
-        h('span', { className: 'dshgt-mono' }, fullName),
+        {
+          type: 'button',
+          className: `dshgt-about-pkg${copied ? ' is-copied' : ''}`,
+          title: copied ? t('about.copied') : t('about.copy'),
+          'aria-label': `${t('about.copy')}: ${fullName}`,
+          onClick: copy,
+        },
+        h('span', { className: 'dshgt-about-pkg-name dshgt-mono' }, fullName),
+        copied ? h('span', { className: 'dshgt-about-pkg-done' }, t('about.copied')) : null,
       ),
       h(KV, {
         items: [
           [
             t('about.repo'),
-            repository === undefined || repoVersion === undefined
+            repository === undefined || ownerRepo === undefined
               ? h('span', { className: 'dshgt-hint' }, t('about.repo.missing'))
-              : h('a', { href: repository, target: '_blank', rel: 'noreferrer' }, repoVersion),
+              : h('a', { href: repository, target: '_blank', rel: 'noreferrer' }, ownerRepo),
           ],
           [t('about.license'), 'MIT'],
           [t('about.core'), coreValue()],
           [t('about.env'), t('about.env.value')],
         ],
       }),
-      h(UpdateRow, { t, update: updateState, controller: updateController, fallbackVersion: plugin.version }),
     ),
   );
   return h('div', { className: 'dshgt-root' }, dialog);

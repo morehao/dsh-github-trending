@@ -3,10 +3,10 @@
  *
  * 结构（A 方案定稿）：
  *   1. 第一行 `.dshgt-idbar`：插件名称 / 版本 / 完整包名 / GitHub / 检查更新（IdentityBar）；
- *   2. 第二行 `.dshgt-tabsbar`：横向 tab（概览 / 日报 / 运行记录 / 设置）+ 右侧状态；
+ *   2. 第二行 `.dshgt-tabsbar`：横向 tab（概览 / 榜单 / 订阅 / 运行记录 / 设置）+ 右侧状态；
  *   3. 主区 `.dshgt-main`：页面标题（含试跑/立即运行）+ 视图内容。
  *
- * 四个视图：概览 / 日报 / 运行记录 / 设置。数据只来自 Host 的
+ * 五个视图：概览 / 榜单 / 订阅 / 运行记录 / 设置。数据只来自 Host 的
  * `/api/morehao/github-trending/*`；这里不碰文件、不碰核心。视图切换用 React state，
  * 不读写 `location.hash`。
  */
@@ -40,8 +40,8 @@ type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'settings';
 const NAV: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: 'overview', label: 'nav.overview', icon: 'grid' },
   { id: 'digest', label: 'nav.digest', icon: 'doc' },
-  { id: 'runs', label: 'nav.runs', icon: 'list' },
   { id: 'subscriptions', label: 'nav.subscriptions', icon: 'rss' },
+  { id: 'runs', label: 'nav.runs', icon: 'list' },
   { id: 'settings', label: 'nav.settings', icon: 'sliders' },
 ];
 
@@ -146,7 +146,7 @@ export function apply(ctx: any): void {
     return useStore();
   }
 
-  /** 面板页：顶部身份条 + 横向 tab + 四视图。 */
+  /** 面板页：顶部身份条 + 横向 tab + 五视图。 */
   function PanelView(): any {
     const value = store();
     const controller = useRunController(value);

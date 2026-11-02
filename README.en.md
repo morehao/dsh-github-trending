@@ -33,7 +33,7 @@ Open the workbench from the sidebar **GitHub Trending** or `Settings → GitHub 
 
 ### Overview
 
-Answers "when will it run next, are the four readiness checks all green, what was delivered last time" at a glance. The top shows the plugin identity bar (version / package name / check for updates); the right side keeps the next run and readiness N/4 always visible.
+Answers "when will it run next, are the four readiness checks all green, what was delivered last time" at a glance. The top shows the plugin identity bar (version / package name / GitHub / check for updates); click the package name to open About. The right side keeps the next run and readiness N/4 always visible.
 
 ![Overview](docs/images/overview.png)
 

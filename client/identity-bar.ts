@@ -1,10 +1,10 @@
 /**
  * 顶部身份条（A 方案定稿）：插件名称 / 版本 / 完整包名 / GitHub / 检查更新。
  *
- * 替换旧左侧 rail 底部的「包名 + 版本 + GitHub + 关于」块：把元信息抬到第一行，
- * 主 tab 落到第二行（见 index.ts 的 `.dshgt-tabsbar`）。点击版本号仍可打开「关于」
- * 弹层（许可 / 核心 / 运行环境 + 完整更新区）。更新状态复用 update-panel 的共享
- * controller，与「关于」弹层、概览页是同一份，不会重复打网络。
+ * 包名后面紧跟 GitHub 图标，二者之间用一条竖杠分隔；点包名打开「关于」弹层
+ * （许可 / 核心 / 运行环境 + 完整更新区），版本号只是静态信息，不再承担入口。
+ * 更新状态复用 update-panel 的共享 controller，与「关于」弹层、概览页是同一份，
+ * 不会重复打网络。
  */
 import { Btn, copyText, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
@@ -34,7 +34,6 @@ function githubIcon(): any {
 
 export function IdentityBar(props: IdentityBarProps): any {
   const { t, plugin } = props;
-  const [copied, setCopied] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [cmdCopied, setCmdCopied] = React.useState(false);
   const [updateState, controller] = usePluginUpdate();
@@ -44,14 +43,6 @@ export function IdentityBar(props: IdentityBarProps): any {
   React.useEffect(() => {
     if (status === 'applying' || status === 'restart-required' || status === 'applied') setConfirming(false);
   }, [status]);
-
-  const copyPkg = (): void => {
-    void copyText(plugin.name).then((ok) => {
-      if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    });
-  };
 
   const busy = status === 'checking' || status === 'applying';
   const settled = status === 'restart-required' || status === 'applied';
@@ -101,19 +92,22 @@ export function IdentityBar(props: IdentityBarProps): any {
     'div',
     { className: 'dshgt-idbar' },
     h('div', { className: 'dshgt-brand' }, logo(), h('span', { className: 'dshgt-brand-name' }, t('section.title'))),
-    h('button', { type: 'button', className: 'dshgt-id-ver', title: t('about.title'), onClick: () => props.onOpenAbout() }, `v${plugin.version}`),
-    h('span', { className: 'dshgt-id-sep' }),
+    h('span', { className: 'dshgt-id-ver dshgt-mono' }, `v${plugin.version}`),
+    h('span', { className: 'dshgt-id-sep dshgt-id-sep-pkg' }),
     h(
       'button',
-      { type: 'button', className: 'dshgt-id-pkg dshgt-mono', title: updatedCopyTitle(t, copied), onClick: copyPkg },
-      copied ? t('about.copied') : plugin.name,
+      { type: 'button', className: 'dshgt-id-pkg dshgt-mono', title: t('about.title'), onClick: () => props.onOpenAbout() },
+      plugin.name,
     ),
+    plugin.repository === undefined
+      ? null
+      : [
+          h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
+          h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
+        ],
     h(
       'div',
       { className: 'dshgt-idbar-right' },
-      plugin.repository === undefined
-        ? null
-        : h('a', { className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
       h(
         'span',
         { className: 'dshgt-id-upd' },
@@ -122,8 +116,4 @@ export function IdentityBar(props: IdentityBarProps): any {
       ),
     ),
   );
-}
-
-function updatedCopyTitle(t: Translate, copied: boolean): string {
-  return copied ? t('about.copied') : t('about.copy');
 }
