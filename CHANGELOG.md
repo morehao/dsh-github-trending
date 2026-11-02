@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.8.6] - 2026-11-02
+
+### Features
+
+- **auth**: device-code sign-in modal with prominent code (#82)
+
+### Refactors
+
+- **auth**: drop loopback web flow, keep device flow only (#81)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.5...v0.8.6
+
 ## [v0.8.5] - 2026-11-02
 
 ### Fixes
