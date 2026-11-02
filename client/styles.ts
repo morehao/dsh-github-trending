@@ -74,6 +74,7 @@ export const CSS = `
 .dshgt-period{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gt-fg);}
 .dshgt-period-check{color:var(--gt-ok);font-size:12px;line-height:1;}
 .dshgt-chip{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--gt-border);background:var(--gt-bg);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--gt-muted);}
+.dshgt-chip:disabled{cursor:not-allowed;opacity:.4;}
 .dshgt-chip[aria-pressed="true"]{background:color-mix(in srgb,var(--gt-accent) 14%,var(--gt-bg));border-color:var(--gt-accent);color:var(--gt-fg);}
 .dshgt-switch{appearance:none;cursor:pointer;width:36px;height:20px;border-radius:999px;border:1px solid var(--gt-border);background:var(--gt-muted);position:relative;transition:background .15s;}
 .dshgt-switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .15s;}
@@ -332,7 +333,10 @@ export const CSS = `
 
 /* ——— 运行记录 ——— */
 .dshgt-runs-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.dshgt-runs-filter{display:flex;gap:4px;margin-left:auto;}
+.dshgt-runs-filter{display:flex;align-items:center;gap:4px;margin-left:auto;flex-wrap:wrap;}
+/* 两个筛选维度：记录类型 与 周期/状态，用竖线隔开，避免同名胶囊混淆。 */
+.dshgt-chipgroup{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.dshgt-chipgroup-sep{width:1px;align-self:stretch;min-height:14px;background:var(--gt-border);margin:0 4px;}
 .dshgt-run-list{border-top:1px solid var(--gt-border);}
 .dshgt-run-item{border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
 .dshgt-run-row{display:grid;grid-template-columns:18px 120px 56px minmax(0,1fr) 78px 74px 20px;align-items:center;gap:12px;min-height:52px;width:100%;padding:0 6px;border:0;background:none;text-align:left;font-family:inherit;color:var(--gt-fg);cursor:pointer;border-radius:6px;}

@@ -302,40 +302,51 @@ export function RunsView(props: RunsProps): any {
       h(
         'div',
         { className: 'dshgt-runs-filter' },
-        KINDS.map((item) =>
-          h(
-            'button',
-            {
-              key: item.id,
-              type: 'button',
-              className: 'dshgt-chip',
-              'aria-pressed': kind === item.id ? 'true' : 'false',
-              onClick: () => {
-                setKind(item.id);
-                // 周期 / 试跑筛选只对日报有意义，切到订阅时先归零，避免筛出空列表。
-                if (item.id === 'release') setFilter('all');
+        // 记录类型：全部 / 日报 / 订阅，始终可选。
+        h(
+          'div',
+          { key: 'kind', className: 'dshgt-chipgroup' },
+          KINDS.map((item) =>
+            h(
+              'button',
+              {
+                key: item.id,
+                type: 'button',
+                className: 'dshgt-chip',
+                'aria-pressed': kind === item.id ? 'true' : 'false',
+                onClick: () => {
+                  setKind(item.id);
+                  // 周期 / 试跑筛选只对日报有意义，切到订阅时先归零，避免筛出空列表。
+                  if (item.id === 'release') setFilter('all');
+                },
               },
-            },
-            t(item.key),
+              t(item.key),
+            ),
           ),
         ),
-        kind === 'release' ? null : h('span', { key: 'sep', className: 'dshgt-hint' }, '·'),
-        kind === 'release'
-          ? null
-          : FILTERS.filter((item) => item.id !== 'all').map((item) =>
-              // 再点一次当前项 = 取消该筛选，这样不必再摆一个和「全部」重名的胶囊。
-              h(
-                'button',
-                {
-                  key: item.id,
-                  type: 'button',
-                  className: 'dshgt-chip',
-                  'aria-pressed': filter === item.id ? 'true' : 'false',
-                  onClick: () => setFilter(filter === item.id ? 'all' : item.id),
-                },
-                t(item.key),
-              ),
+        // 周期 / 状态：只对日报有意义。切到订阅时不清空标签，而是置灰禁用，
+        // 让筛选维度保持可见、只是不适用，避免出现「选项突然变少」的错觉。
+        h('span', { key: 'sep', className: 'dshgt-chipgroup-sep', 'aria-hidden': 'true' }),
+        h(
+          'div',
+          { key: 'filter', className: 'dshgt-chipgroup' },
+          FILTERS.filter((item) => item.id !== 'all').map((item) =>
+            // 再点一次当前项 = 取消该筛选，这样不必再摆一个和「全部」重名的胶囊。
+            h(
+              'button',
+              {
+                key: item.id,
+                type: 'button',
+                className: 'dshgt-chip',
+                'aria-pressed': filter === item.id ? 'true' : 'false',
+                disabled: kind === 'release',
+                title: kind === 'release' ? t('runs.filterHintSubs') : undefined,
+                onClick: () => setFilter(filter === item.id ? 'all' : item.id),
+              },
+              t(item.key),
             ),
+          ),
+        ),
       ),
     ),
     entries.length === 0
