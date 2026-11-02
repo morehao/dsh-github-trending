@@ -1,27 +1,36 @@
 /**
- * 关于弹层：包名@版本、GitHub 仓库、许可、核心仓库与运行环境。
+ * 关于弹层（居中定稿）：上方居中的应用身份（logo / 名称 / 版本），一条分割线后是
+ * 左对齐的信息表（包名 / GitHub 仓库 / 核心 / 许可）。
  *
  * 数据全部来自 `/state.plugin` / `/state.core`，不从客户端猜版本；仓库缺失时
  * 隐藏外链，不拼一个可能 404 的地址。外链一律 `target=_blank rel=noreferrer`。
  *
- * 这里不再承载「检查更新」：更新入口只在顶部身份条，避免关于弹层既当信息页
- * 又当更新操作页。包名行没有独立复制按钮，整行点击即复制 `包名@版本`。
+ * 交互约定（经用户逐版确认）：
+ *   - 不承载「检查更新」：更新入口只在顶部身份条；
+ *   - 包名行整行点击即复制「包名@版本」，不放独立复制按钮，复制后行尾短暂显示「已复制」；
+ *   - 核心只展示 owner/repo 并可点开仓库，不带版本号、不单列 GitHub 图标（避免和仓库行抢图标）；
+ *   - 不展示「运行环境」——原「DSH Web · Node 插件」不足以描述双 half 形态，直接省略。
  */
 import type { StatePayload } from './api.js';
 import type { Translate } from './i18n.js';
-import { Btn, KV, copyText, h, React } from './ui.js';
+import { copyText, h, React } from './ui.js';
 
-/** GitHub 图标（16×16，`currentColor`），与身份条用同一个 path。 */
-function githubIcon(): any {
-  return h('svg', {
-    className: 'dshgt-gh',
-    viewBox: '0 0 16 16',
-    'aria-hidden': 'true',
-    dangerouslySetInnerHTML: {
-      __html:
-        '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>',
-    },
-  });
+/** 应用标识：与身份条（identity-bar）同一个 logo，保证「关于」和顶部是同一种身份感。 */
+function logo(): any {
+  return h(
+    'svg',
+    { viewBox: '0 0 64 64', 'aria-hidden': 'true' },
+    h('rect', { x: 4, y: 4, width: 56, height: 56, rx: 14, fill: '#0d1117' }),
+    h('path', {
+      d: 'M18 46V22l14 12 14-12v24',
+      fill: 'none',
+      stroke: '#58a6ff',
+      strokeWidth: 4,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+    }),
+    h('circle', { cx: 32, cy: 45, r: 3, fill: '#3fb950' }),
+  );
 }
 
 export function AboutDialog(props: { t: Translate; state: StatePayload; onClose: () => void }): any {
@@ -32,7 +41,6 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
   const repository = plugin.repository;
   const ownerRepo = repository === undefined ? undefined : repository.replace(/^https?:\/\/github\.com\//, '');
   const core = state.core;
-  const coreVersion = core.version === undefined ? '' : `trendradar ${core.version}`;
   const coreRepo = core.repository;
   const coreOwnerRepo = coreRepo === undefined ? undefined : coreRepo.replace(/^https?:\/\/github\.com\//, '');
 
@@ -44,8 +52,7 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
     return () => document.removeEventListener('keydown', onKey);
   }, [props]);
 
-  // 没有独立的复制按钮：整行点击即复制「包名@版本」（与身份条的包名点击行为一致），
-  // 复制成功后整行边框短暂转绿并出现「已复制」字样。
+  // 包名整行点击复制「包名@版本」；成功后行尾出现「已复制」，1.4s 后恢复。
   const copy = (): void => {
     void copyText(fullName).then((ok) => {
       if (!ok) return;
@@ -54,63 +61,73 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
     });
   };
 
-  // 核心仓库：与插件仓库同一风格，展示 owner/repo + 版本；没有仓库地址时
-  // 退回版本号（或占位符），不拼可能 404 的链接。
+  // 包名行：label「包名」+ 等宽值，整行可点，无独立复制按钮。
+  const pkgRow = h(
+    'dd',
+    { className: 'dshgt-about-pkgrow' },
+    h(
+      'button',
+      {
+        type: 'button',
+        className: `dshgt-about-pkglink${copied ? ' is-copied' : ''}`,
+        title: copied ? t('about.copied') : t('about.copy'),
+        'aria-label': `${t('about.copy')}: ${fullName}`,
+        onClick: copy,
+      },
+      h('span', { className: 'dshgt-mono dshgt-about-pkglink-name' }, fullName),
+      h('span', { className: 'dshgt-about-copied' }, t('about.copied')),
+    ),
+  );
+
+  // 核心行：仅展示 owner/repo（无版本），整串是外链；没有仓库地址时退回版本号或占位符。
   const coreValue = (): any => {
     if (coreRepo !== undefined && coreOwnerRepo !== undefined) {
-      const label = core.version === undefined ? coreOwnerRepo : `${coreOwnerRepo}@${core.version}`;
-      return h(
-        'span',
-        { className: 'dshgt-about-core' },
-        h('a', { href: coreRepo, target: '_blank', rel: 'noreferrer' }, label),
-        h(
-          'a',
-          { className: 'dshgt-about-gh', href: coreRepo, target: '_blank', rel: 'noreferrer', title: t('about.core.repo'), 'aria-label': t('about.core.repo') },
-          githubIcon(),
-        ),
-      );
+      return h('a', { className: 'dshgt-mono', href: coreRepo, target: '_blank', rel: 'noreferrer' }, coreOwnerRepo);
     }
-    return coreVersion === '' ? '—' : coreVersion;
+    return core.version === undefined ? '—' : `trendradar ${core.version}`;
   };
 
-  const dialog = h(
+  return h(
     'div',
-    { className: 'dshgt-modal-mask', onClick: (event: any) => { if (event.target === event.currentTarget) props.onClose(); } },
+    { className: 'dshgt-root' },
     h(
       'div',
-      { className: 'dshgt-modal dshgt-about', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('about.title') },
+      { className: 'dshgt-modal-mask', onClick: (event: any) => { if (event.target === event.currentTarget) props.onClose(); } },
       h(
         'div',
-        { className: 'dshgt-about-head' },
-        h('h3', { className: 'dshgt-about-title' }, t('about.title')),
-        h(Btn, { small: true, onClick: () => props.onClose() }, t('about.close')),
-      ),
-      h(
-        'button',
-        {
-          type: 'button',
-          className: `dshgt-about-pkg${copied ? ' is-copied' : ''}`,
-          title: copied ? t('about.copied') : t('about.copy'),
-          'aria-label': `${t('about.copy')}: ${fullName}`,
-          onClick: copy,
-        },
-        h('span', { className: 'dshgt-about-pkg-name dshgt-mono' }, fullName),
-        copied ? h('span', { className: 'dshgt-about-pkg-done' }, t('about.copied')) : null,
-      ),
-      h(KV, {
-        items: [
-          [
-            t('about.repo'),
+        { className: 'dshgt-modal dshgt-about', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('about.title') },
+        h(
+          'div',
+          { className: 'dshgt-about-head' },
+          h('h3', { className: 'dshgt-about-title' }, t('about.title')),
+          h('button', { type: 'button', className: 'dshgt-about-close', onClick: () => props.onClose() }, t('about.close')),
+        ),
+        h(
+          'div',
+          { className: 'dshgt-about-identity' },
+          h('div', { className: 'dshgt-about-logo' }, logo()),
+          h('div', { className: 'dshgt-about-name' }, t('section.title')),
+          h('span', { className: 'dshgt-about-ver dshgt-mono' }, `v${plugin.version}`),
+        ),
+        h(
+          'dl',
+          { className: 'dshgt-kv dshgt-about-kv' },
+          h('dt', null, t('about.pkg')),
+          pkgRow,
+          h('dt', null, t('about.repo')),
+          h(
+            'dd',
+            null,
             repository === undefined || ownerRepo === undefined
               ? h('span', { className: 'dshgt-hint' }, t('about.repo.missing'))
               : h('a', { href: repository, target: '_blank', rel: 'noreferrer' }, ownerRepo),
-          ],
-          [t('about.license'), 'MIT'],
-          [t('about.core'), coreValue()],
-          [t('about.env'), t('about.env.value')],
-        ],
-      }),
+          ),
+          h('dt', null, t('about.core')),
+          h('dd', null, coreValue()),
+          h('dt', null, t('about.license')),
+          h('dd', null, 'MIT'),
+        ),
+      ),
     ),
   );
-  return h('div', { className: 'dshgt-root' }, dialog);
 }

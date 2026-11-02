@@ -351,22 +351,28 @@ export const CSS = `
 .dshgt-log-head .dshgt-btn{margin-left:auto;}
 .dshgt-log-pre{margin:0;max-height:52vh;overflow:auto;padding:12px;border-radius:8px;background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-card));font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;}
 .dshgt-log-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.dshgt-about{max-width:520px;width:100%;}
+.dshgt-about{max-width:460px;width:100%;}
 .dshgt-about-head{display:flex;align-items:center;gap:10px;}
-.dshgt-about-title{margin:0;font-size:16px;}
-.dshgt-about-head .dshgt-btn{margin-left:auto;}
-.dshgt-about-pkg{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid var(--gt-border);background:var(--gt-card);border-radius:8px;padding:9px 10px;cursor:pointer;font-family:inherit;color:inherit;transition:border-color .12s ease,background .12s ease;}
-.dshgt-about-pkg:hover{border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));background:color-mix(in srgb,var(--gt-fg) 4%,var(--gt-card));}
-.dshgt-about-pkg.is-copied{border-color:color-mix(in srgb,var(--gt-ok) 45%,var(--gt-border));}
-.dshgt-about-pkg-name{flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text;}
-.dshgt-about-pkg-done{flex:none;font-size:11px;color:var(--gt-ok);}
-.dshgt-about .dshgt-kv{grid-template-columns:110px minmax(0,1fr);}
+.dshgt-about-title{margin:0;font-size:15px;font-weight:600;}
+.dshgt-about-close{margin-left:auto;appearance:none;font:inherit;font-size:12px;cursor:pointer;border-radius:7px;border:1px solid var(--gt-border);background:var(--gt-bg);padding:4px 11px;color:var(--gt-muted);}
+.dshgt-about-close:hover{color:var(--gt-fg);border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));}
+/* 居中的应用身份区块：logo / 名称 / 版本胶囊 */
+.dshgt-about-identity{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0 18px;}
+.dshgt-about-logo svg{width:56px;height:56px;border-radius:14px;display:block;box-shadow:0 4px 14px rgba(0,0,0,.18);}
+.dshgt-about-name{font-size:16px;font-weight:650;letter-spacing:-.01em;}
+.dshgt-about-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--gt-fg);background:var(--gt-card);border:1px solid var(--gt-border);border-radius:999px;padding:1px 9px;line-height:17px;}
+/* 信息表：上方一条分割线，左对齐 label/value */
+.dshgt-about .dshgt-kv{grid-template-columns:88px minmax(0,1fr);border-top:1px solid var(--gt-border);padding-top:2px;}
 .dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;}
 .dshgt-about .dshgt-kv a:hover{text-decoration:underline;}
 .dshgt-about .dshgt-kv dd{min-width:0;overflow-wrap:anywhere;}
-.dshgt-about-core{display:inline-flex;align-items:center;gap:7px;}
-.dshgt-about-gh{display:inline-flex;align-items:center;justify-content:center;color:var(--gt-muted);}
-.dshgt-about-gh:hover{color:var(--gt-fg);}
+/* 包名行：整行可点复制，无独立按钮；复制后行尾浮现「已复制」 */
+.dshgt-about-pkgrow{padding:0 !important;}
+.dshgt-about-pkglink{appearance:none;font:inherit;border:0;background:none;padding:9px 6px;margin:-9px -6px;border-radius:6px;width:calc(100% + 12px);display:flex;align-items:center;gap:8px;text-align:left;cursor:pointer;color:inherit;}
+.dshgt-about-pkglink:hover{background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-bg));}
+.dshgt-about-pkglink-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text;}
+.dshgt-about-copied{opacity:0;transition:opacity .12s ease;font-size:11px;color:var(--gt-ok);flex:none;}
+.dshgt-about-pkglink.is-copied .dshgt-about-copied{opacity:1;}
 .dshgt-gh{width:15px;height:15px;display:block;fill:currentColor;}
 
 /* ——— 订阅：命令栏 + 四列表格 + 选择条 + 发版记录抽屉 ——— */
