@@ -267,6 +267,14 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           /* 拦截不是错误：下方「打开授权页」仍可用 */
         }
       }
+      // device 方法：把用户直接送到 GitHub 的验证码输入页（验证码仍要手输，页面里有可点的链接兜底）。
+      if (view.phase === 'waiting-device' && view.verificationUri !== undefined) {
+        try {
+          window.open(view.verificationUri, '_blank', 'noopener,noreferrer');
+        } catch {
+          /* 同上 */
+        }
+      }
     } catch (error) {
       notify('err', error instanceof Error ? error.message : String(error));
     }
@@ -369,6 +377,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const isGh = draft.github.authMode === 'gh';
   const isBrowser = draft.github.authMode === 'browser';
   const browserAvailable = state.github.browserAvailable === true;
+  // 回环 web flow 要 client_secret（内置公开 client_id 没有）→ false 时主按钮直接用设备码。
+  const loopbackAvailable = state.github.loopbackAvailable === true;
 
   const sections: Array<{ id: SectionId; label: string }> = [
     { id: 'source', label: t('st.source') },
@@ -572,7 +582,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                   {
                     small: true,
                     variant: 'primary',
-                    onClick: () => void startSignIn('browser'),
+                    onClick: () => void startSignIn(loopbackAvailable ? 'browser' : 'device'),
                     disabled: signInActive,
                   },
                   signIn.phase === 'done' && signIn.login !== undefined
@@ -582,7 +592,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                       : t('auth.browser.signin'),
                 )
               : h('span', { className: 'dshgt-hint' }, t('auth.browser.unavailable')),
-            browserAvailable
+            browserAvailable && loopbackAvailable
               ? h(Btn, { small: true, variant: 'ghost', onClick: () => void startSignIn('device'), disabled: signInActive }, t('auth.browser.device'))
               : null,
             signInActive ? h(Btn, { small: true, variant: 'ghost', onClick: () => void cancelSignIn() }, t('auth.browser.cancel')) : null,

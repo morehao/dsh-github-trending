@@ -59,13 +59,13 @@ GitHub 趋势榜的 **DeepSeek Harness 插件**：按日 / 周 / 月周期定时
 
 认证分区支持三种方式（可随时切换）：
 
-- **浏览器登录（默认推荐）**：点「用 GitHub 登录」在浏览器完成授权，无需手工粘贴 token。走 OAuth PKCE + 本机回环回调（或设备码），token 由 DSH 凭据记录安全保存，不落 `settings.json`。插件内置了公开的 OAuth App client_id（client_id 属公开标识、非机密；纯 PKCE 不使用 client_secret），开箱即用。
+- **浏览器登录（默认推荐）**：点「用 GitHub 登录」在浏览器完成授权，无需手工粘贴 token，token 由 DSH 凭据记录安全保存、不落 `settings.json`。插件内置了公开的 OAuth App client_id，开箱即用；GitHub 的 web flow 换 token 仍然**必须带 client_secret**（PKCE 只是叠加保护），而客户端不能内置机密，所以默认走**设备码**：点一下后在打开的 GitHub 页面输入验证码即可。若你自带 OAuth App，可在插件配置里同时给 `githubClientId` + `githubClientSecret`，就会改用本机回环回调（不用手输验证码）。
 - **本机 gh**：复用你终端里 `gh auth login` 的登录态。
 - **PAT**：手工填 Personal Access Token（存到凭据引用 / 环境变量）。
 
 > 浏览器登录需要核心提供 `authorization` 服务，并且 GitHub flow 注册成功才算可用；两者任一不满足时，设置页直接提示不可用并引导改用 gh / PAT，而不是给一个点了没反应的按钮。宿主启动时服务可能晚于插件就绪，插件会等服务就绪再注册，并在读状态时再兜底一次。
 >
-> 授权页默认尝试自动打开；若被浏览器的弹窗拦截，状态行里始终有可点的「打开授权页」链接与「复制链接」。
+> 设备码 / 授权页默认尝试自动打开；若被浏览器的弹窗拦截，状态行里始终有可点的「打开授权页」链接、验证码与「复制链接」。
 
 ### 订阅
 

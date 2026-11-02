@@ -32,7 +32,8 @@
 - 本地核心进程（一次性的 `run` 子进程）
 - `github.com/morehao/trendradar/releases`：仅首次运行（或点「下载核心」）时下载二进制与其 `checksums.txt`；之后不再联网
 - 你配置的模型端点（由**核心**发起，插件不代发）
-- `api.github.com`（由**核心**发起 push/PR；插件本身不发 GitHub 请求）
+- `api.github.com`（push / PR 由**核心**发起；插件只在「测试认证」与登录成功后取 `login` 时读 `/user`）
+- `github.com/login/oauth/*` 与 `github.com/login/device`（仅在你点「用 GitHub 登录」时；浏览器登录的授权 / 换 token / 设备码）
 - 本机 `127.0.0.1` 上的临时回环代理（仅当宿主 provider 的凭据不可导出时，端口随机、一次性 token、运行结束即关闭）
 
 **不上传什么**
@@ -60,7 +61,7 @@
 | `repo.commitMode` | `branch` | `branch`（分支 + PR）/ `direct` |
 | `pr.enabled` / `autoMerge` | `true` / `true` | |
 | `pr.titleTemplate` | `chore(trending): add {date} digest` | 默认规则，界面不展示 |
-| `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` |
+| `github.authMode` | `gh` | `gh`（本机 gh 登录态）/ `pat` / `browser`（OAuth 授权得到的 token，存 `ctx.credentials`） |
 | `github.tokenRef` | `GITHUB_TOKEN` | `ctx.credentials` 引用名（`pat` 用） |
 | `trending.since` / `languages` / `topN` | `daily` / `all,typescript,python,go,rust` / `25` | `since` 是单次运行周期（`daily`/`weekly`/`monthly`，抓取窗口=标的周期由核心保证）；实际支持范围由核心决定 |
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量与失败重试（映射核心 `summarize.*`） |
@@ -78,6 +79,14 @@
 | `schedule.periods` | `daily,weekly,monthly` | 定时自动产出的周期：默认三周期全产出（无需勾选），日=每天、周=周日、月=月末触发；旧配置自动升级为三周期 |
 | `corePath` | 空 | 等价于 `TRENDING_DIGEST_CORE`（仅开发/排障，界面不提供入口，用环境变量或直接改 `settings.json`；设了就完全不下载） |
 | `coreAutoDownload` | `true` | 缓存缺失时是否自动下载核心；关掉后只报 `CORE_NOT_DOWNLOADED`，由你在设置页点「下载核心」 |
+
+插件自身还有三个「安装形态」配置（profile 补丁的 `config`，不在 `settings.json`，界面不提供入口）：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `stateDir` | `$DSH_HOME/github-trending` | 状态目录（等价于 `TRENDING_DIGEST_HOME`） |
+| `corePath` | 空 | 本地核心可执行文件（等价于 `TRENDING_DIGEST_CORE`） |
+| `githubClientId` / `githubClientSecret` | 内置 client_id / 空 | 自带 OAuth App 时成对提供；有 secret 才启用回环 web flow，否则 GitHub 登录走设备码。secret 也可用环境变量 `DSH_GITHUB_CLIENT_SECRET` 提供（config 优先），不进 `settings.json`、不进日志 |
 
 ## 两个工具
 

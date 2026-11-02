@@ -27,7 +27,13 @@ export const CALLBACK_PATH = '/api/morehao/github-trending/oauth/github/callback
 /**
  * 内置的 GitHub OAuth App 公开 client_id（**非机密**：OAuth 的 client_id 设计上就是公开的，
  * 会出现在授权 URL 里，与 `gh`/VS Code 内置自己的 client_id 同理）。
- * 纯 PKCE public client，无需 client_secret。用户/部署可在 `apply(config.githubClientId)` 覆盖。
+ *
+ * ⚠️ 只有 client_id 不够：GitHub 的 web application flow 在换 token 时**仍然要求
+ * client_secret**（PKCE 是叠加保护，不能替代，2025-07 起官方也只说「推荐」而非「可免 secret」）。
+ * 因此：
+ *   - 内置 client_id → 只能走 **device flow**（`resolveMethod` 自动降级），开箱即用；
+ *   - 用户自带 OAuth App（`githubClientId` + `githubClientSecret`）→ 才启用回环 web flow。
+ * 且 device flow 需要在 OAuth App 设置里勾选启用（本插件内置的 App 已启用）。
  *
  * OAuth App 侧登记的回调：`http://127.0.0.1/api/morehao/github-trending/oauth/github/callback`
  * （loopback 按 RFC 8252 忽略端口，运行时随机端口可正常回跳）。
@@ -38,6 +44,28 @@ export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23li7rhp0EKoqbkJKY';
 export function resolveClientId(deps: GithubAuthDeps): string | undefined {
   const fromConfig = deps.clientId;
   return fromConfig !== undefined && fromConfig !== '' ? fromConfig : DEFAULT_GITHUB_CLIENT_ID;
+}
+
+/** 解析生效的 client_secret（没有就返回 undefined，绝不以空串形式发出去）。 */
+export function resolveClientSecret(deps: GithubAuthDeps): string | undefined {
+  const secret = deps.clientSecret;
+  return secret !== undefined && secret !== '' ? secret : undefined;
+}
+
+/**
+ * 回环（浏览器 web flow）是否可用：GitHub 换 token 必须带 client_secret，
+ * 内置的公开 client_id 没有 secret，只能退到设备码。见文件头的说明。
+ */
+export function isLoopbackSignInAvailable(deps: GithubAuthDeps): boolean {
+  return resolveClientSecret(deps) !== undefined;
+}
+
+/**
+ * 实际要跑的方法：`browser` 需要 client_secret，缺省时自动降级为 `device`（开箱即用）。
+ * 显式选择 `device` 的调用不受影响。
+ */
+export function resolveMethod(deps: GithubAuthDeps, requested: 'browser' | 'device'): 'browser' | 'device' {
+  return requested === 'browser' && !isLoopbackSignInAvailable(deps) ? 'device' : requested;
 }
 
 const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
@@ -92,6 +120,11 @@ export interface GithubAuthDeps {
   endpoints?: { authorize?: string; accessToken?: string; deviceCode?: string; user?: string };
   /** GitHub OAuth App 的 public client_id（无需 secret）。 */
   clientId?: string;
+  /**
+   * GitHub OAuth App 的 client_secret。只有自带 OAuth App 的回环 web flow 才需要；
+   * 缺省时 `browser` 方法自动降级为 device flow。不进 `settings.json`、不进日志。
+   */
+  clientSecret?: string;
   scope?: string;
   attemptTimeoutMs?: number;
 }
@@ -189,24 +222,37 @@ export interface GithubGrantPayload {
 async function exchangeCode(
   fetchImpl: FetchLike,
   endpoint: string,
-  params: { clientId: string; code: string; verifier: string; redirectUri: string },
+  params: { clientId: string; clientSecret?: string; code: string; verifier: string; redirectUri: string },
   signal: AbortSignal | undefined,
 ): Promise<{ token: string; tokenType?: string; scope?: string }> {
+  // GitHub 的 web flow 换 token 必须带 client_secret（PKCE 只是叠加保护）。
+  // 没有 secret 的调用会拿到 incorrect_client_credentials，调用方应先 resolveMethod 降级。
+  const form = new URLSearchParams({
+    client_id: params.clientId,
+    code: params.code,
+    code_verifier: params.verifier,
+    redirect_uri: params.redirectUri,
+  });
+  if (params.clientSecret !== undefined) form.set('client_secret', params.clientSecret);
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: params.clientId,
-      code: params.code,
-      code_verifier: params.verifier,
-      redirect_uri: params.redirectUri,
-    }).toString(),
+    body: form.toString(),
     signal,
   });
   if (!response.ok) throw new Error(`GitHub access_token HTTP ${response.status}`);
   const body = (await response.json()) as { access_token?: unknown; token_type?: unknown; scope?: unknown; error?: unknown };
   if (typeof body.access_token !== 'string' || body.access_token === '') {
-    throw new Error(`GitHub access_token 未返回 token${typeof body.error === 'string' ? `（${body.error}）` : ''}`);
+    const error = typeof body.error === 'string' ? body.error : undefined;
+    if (error === 'incorrect_client_credentials') {
+      // 用户可见文案：直接告诉他下一步该点什么，而不是把 GitHub 的错误码原样抛出去。
+      throw new Error(
+        params.clientSecret === undefined
+          ? 'GitHub 网页授权需要 client_secret（incorrect_client_credentials），内置的公开 client_id 无法完成这一步：请改用设备码登录，或配置自己的 OAuth App client_id + client_secret。'
+          : 'GitHub 认为这个 OAuth App 的 client_id / client_secret 不正确（incorrect_client_credentials）：请检查插件配置，或改用设备码登录。',
+      );
+    }
+    throw new Error(`GitHub access_token 未返回 token${error === undefined ? '' : `（${error}）`}`);
   }
   return {
     token: body.access_token,
@@ -240,6 +286,11 @@ async function runBrowser(deps: GithubAuthDeps, session: AuthorizationSessionLik
   }
   const clientId = resolveClientId(deps);
   if (clientId === undefined || clientId === '') throw new Error('缺少 GitHub OAuth client_id');
+  const clientSecret = resolveClientSecret(deps);
+  if (clientSecret === undefined) {
+    // 防御：正常路径已在 resolveMethod 里降到 device；真走到这里说明调用方绕过了。
+    throw new Error('回环登录不可用：没有配置 GitHub OAuth App 的 client_secret，请改用设备码登录');
+  }
   const fetchImpl = deps.fetchImpl ?? fetch;
   const endpoints = normalizeEndpoints(deps.endpoints);
   const scope = deps.scope ?? DEFAULT_SCOPE;
@@ -297,7 +348,12 @@ async function runBrowser(deps: GithubAuthDeps, session: AuthorizationSessionLik
 
     const code = await withAbort(codePromise, session.signal, () => rejectCode(new Error('authorization cancelled')));
     updateCurrent({ phase: 'exchanging' });
-    const exchanged = await exchangeCode(fetchImpl, endpoints.accessToken, { clientId, code, verifier, redirectUri }, session.signal);
+    const exchanged = await exchangeCode(
+      fetchImpl,
+      endpoints.accessToken,
+      { clientId, clientSecret, code, verifier, redirectUri },
+      session.signal,
+    );
     const login = await fetchLogin(fetchImpl, endpoints.user, exchanged.token, session.signal);
     const payload: GithubGrantPayload = {
       version: 1,
@@ -337,9 +393,15 @@ async function runDevice(deps: GithubAuthDeps, session: AuthorizationSessionLike
     verification_uri?: unknown;
     expires_in?: unknown;
     interval?: unknown;
+    error?: unknown;
   };
   if (typeof start.device_code !== 'string' || typeof start.user_code !== 'string' || typeof start.verification_uri !== 'string') {
-    throw new Error('GitHub device/code 返回不完整');
+    const error = typeof start.error === 'string' ? start.error : undefined;
+    throw new Error(
+      error === 'device_flow_disabled'
+        ? 'GitHub 没有为这个 OAuth App 启用设备码登录：请到 OAuth App 设置勾选 Device flow，或改用「本机 gh」/ PAT。'
+        : `GitHub device/code 返回不完整${error === undefined ? '' : `（${error}）`}`,
+    );
   }
   const deviceCode = start.device_code;
   const intervalSec = typeof start.interval === 'number' && start.interval > 0 ? start.interval : 5;
@@ -512,6 +574,11 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
   if (current !== undefined && (current.phase === 'waiting-browser' || current.phase === 'waiting-device' || current.phase === 'exchanging')) {
     throw new Error('already-in-flight');
   }
+  // GitHub 的 web flow 必须有 client_secret；内置 client_id 没有 secret → 自动走设备码。
+  const effectiveMethod = resolveMethod(deps, method);
+  if (effectiveMethod !== method) {
+    deps.logger?.('auth.method.fallback', { from: method, to: effectiveMethod, reason: 'no-client-secret' });
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), attemptTimeout(deps));
   const attempt: Attempt = { phase: 'idle', controller, done: Promise.resolve() };
@@ -520,7 +587,7 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
   try {
     started = authorization.begin({
       key: GITHUB_RECORD_KEY,
-      method,
+      method: effectiveMethod,
       signal: controller.signal,
       // 浏览器往返靠 authorizeUrl + 回调；notify 只更新内存视图，prompt 不支持（拒绝）。
       interaction: {

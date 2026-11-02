@@ -139,12 +139,16 @@ test('registerGithubFlow：无 authorization 服务 → no-op 不抛', () => {
   githubAuth.registerGithubFlow({ get: () => undefined, logger: () => {} });
 });
 
-test('githubAuth.beginGithubSignIn：浏览器 flow 成功 → commit grant 且 state 校验通过', async () => {
+test('githubAuth.beginGithubSignIn：浏览器 flow 成功 → 带 client_secret + PKCE，commit grant', async () => {
   githubAuth.resetAttemptForTest();
   const webServer = makeWebServer();
   const authorization = makeAuthorization();
-  const fetchImpl = async (url) => {
-    if (url === EP.accessToken) return jsonResponse({ access_token: 'ghu_new', token_type: 'bearer', scope: 'repo' });
+  let exchangeBody;
+  const fetchImpl = async (url, init) => {
+    if (url === EP.accessToken) {
+      exchangeBody = new URLSearchParams(String(init?.body ?? ''));
+      return jsonResponse({ access_token: 'ghu_new', token_type: 'bearer', scope: 'repo' });
+    }
     if (url === EP.user) return jsonResponse({ login: 'octocat' });
     throw new Error(`unexpected ${url}`);
   };
@@ -153,6 +157,7 @@ test('githubAuth.beginGithubSignIn：浏览器 flow 成功 → commit grant 且 
     fetchImpl,
     endpoints: EP,
     clientId: 'cid',
+    clientSecret: 'csecret',
     logger: () => {},
   };
   githubAuth.registerGithubFlow(deps);
@@ -176,6 +181,10 @@ test('githubAuth.beginGithubSignIn：浏览器 flow 成功 → commit grant 且 
   // 等 flow.run 收尾
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(statusCode, 200);
+  // GitHub 换 token 必须带 client_secret；PKCE 的 verifier 也要一起发。
+  assert.equal(exchangeBody.get('client_secret'), 'csecret');
+  assert.equal(exchangeBody.get('code'), 'thecode');
+  assert.ok((exchangeBody.get('code_verifier') ?? '').length >= 43);
 });
 
 test('githubAuth：回调 state 不匹配 → 400 且不放行', async () => {
@@ -189,6 +198,7 @@ test('githubAuth：回调 state 不匹配 → 400 且不放行', async () => {
     },
     endpoints: EP,
     clientId: 'cid',
+    clientSecret: 'csecret',
     logger: () => {},
   };
   githubAuth.registerGithubFlow(deps);
@@ -200,6 +210,74 @@ test('githubAuth：回调 state 不匹配 → 400 且不放行', async () => {
   handler({ method: 'GET', url: `${githubAuth.CALLBACK_PATH}?code=x&state=WRONG` }, res);
   assert.equal(statusCode, 400);
   githubAuth.cancelGithubSignIn(deps);
+});
+
+test('githubAuth.resolveMethod：没有 client_secret 时 browser 降级为 device', () => {
+  const base = { get: () => undefined };
+  assert.equal(githubAuth.resolveMethod(base, 'browser'), 'device');
+  assert.equal(githubAuth.resolveMethod({ ...base, clientSecret: 's' }, 'browser'), 'browser');
+  assert.equal(githubAuth.resolveMethod(base, 'device'), 'device');
+  assert.equal(githubAuth.isLoopbackSignInAvailable({ get: () => undefined, clientSecret: '' }), false);
+  assert.equal(githubAuth.isLoopbackSignInAvailable({ get: () => undefined, clientSecret: 's' }), true);
+});
+
+test('githubAuth：没有 client_secret 时 browser 自动走设备码（不开回环回调）', async () => {
+  githubAuth.resetAttemptForTest();
+  const webServer = makeWebServer();
+  const authorization = makeAuthorization();
+  let deviceRequests = 0;
+  const fetchImpl = async (url) => {
+    if (url === EP.deviceCode) {
+      deviceRequests += 1;
+      return jsonResponse({ device_code: 'dev', user_code: 'ABCD-1234', verification_uri: 'https://github.test/device', expires_in: 30, interval: 60 });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const deps = {
+    get: (name) => (name === 'webServer' ? webServer : name === 'authorization' ? authorization : undefined),
+    fetchImpl,
+    endpoints: EP,
+    clientId: 'cid',
+    logger: () => {},
+  };
+  githubAuth.registerGithubFlow(deps);
+  const view = await githubAuth.beginGithubSignIn(deps, 'browser');
+  assert.equal(view.phase, 'waiting-device');
+  assert.equal(view.userCode, 'ABCD-1234');
+  assert.equal(view.authorizeUrl, undefined, '不该再给 web flow 的授权链接');
+  assert.equal(deviceRequests, 1);
+  assert.equal(webServer.routes.size, 0, '设备码流程不注册回环回调');
+  githubAuth.cancelGithubSignIn(deps);
+  await new Promise((r) => setTimeout(r, 10));
+});
+
+test('githubAuth：client_secret 被 GitHub 拒绝 → 错误文案指向检查配置', async () => {
+  githubAuth.resetAttemptForTest();
+  const webServer = makeWebServer();
+  const authorization = makeAuthorization();
+  const fetchImpl = async (url) => {
+    if (url === EP.accessToken) return jsonResponse({ error: 'incorrect_client_credentials' });
+    throw new Error(`unexpected ${url}`);
+  };
+  const deps = {
+    get: (name) => (name === 'webServer' ? webServer : name === 'authorization' ? authorization : undefined),
+    fetchImpl,
+    endpoints: EP,
+    clientId: 'cid',
+    clientSecret: 'wrong',
+    logger: () => {},
+  };
+  githubAuth.registerGithubFlow(deps);
+  const beginPromise = githubAuth.beginGithubSignIn(deps, 'browser');
+  await new Promise((r) => setImmediate(r));
+  const state = new URL(githubAuth.attemptView().authorizeUrl).searchParams.get('state');
+  const handler = [...webServer.routes.values()][0];
+  const res = { writeHead() { return this; }, end() { return this; } };
+  handler({ method: 'GET', url: `${githubAuth.CALLBACK_PATH}?code=thecode&state=${state}` }, res);
+  await beginPromise;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(githubAuth.attemptView().phase, 'error');
+  assert.match(githubAuth.attemptView().error ?? '', /client_id \/ client_secret/);
 });
 
 test('githubAuth device flow：pending → 成功 → commit', async () => {

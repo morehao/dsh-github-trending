@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { routes, runner as runnerModule, schedule as scheduleModule, state as stateModule, githubAuth } from '../lib/internal.js';
+import { routes, runner as runnerModule, schedule as scheduleModule, state as stateModule } from '../lib/internal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE = path.join(here, 'fixtures', 'fake-core.mjs');
@@ -477,14 +477,38 @@ async function browserServer(options = {}) {
   };
   const bEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DSHGT_ROUTES_KEY: 'sk-routes' };
   const withAuthorization = options.withAuthorization !== false;
+  const withClientSecret = options.withClientSecret !== false;
   const get = (name) => (name === 'authorization' ? (withAuthorization ? authorization : undefined) : name === 'webServer' ? webServer : undefined);
-  // 真实链路里 flow 由 apply() 注册；这里显式注册（routes 本身不注册）。
-  if (withAuthorization) githubAuth.registerGithubFlow({ get, clientId: 'test-client-id', logger: () => {} });
+  // 离线 stub：GitHub OAuth / device / user 端点（测试不联网）。
+  const githubFetch = async (url) => {
+    const target = String(url);
+    if (target === 'https://github.com/login/oauth/access_token') {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'ghu_test', token_type: 'bearer', scope: 'repo' }) };
+    }
+    if (target === 'https://github.com/login/device/code') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          device_code: 'dev',
+          user_code: 'ABCD-1234',
+          verification_uri: 'https://github.com/login/device',
+          expires_in: 600,
+          interval: 60,
+        }),
+      };
+    }
+    if (target === 'https://api.github.com/user') {
+      return { ok: true, status: 200, json: async () => ({ login: 'tester' }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
   const bRunner = new runnerModule.Runner({ store: bStore, get, env: bEnv });
   const bScheduler = new scheduleModule.Scheduler({ store: bStore, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
   const server = http.createServer(routes.createRoutes({
-    store: bStore, runner: bRunner, scheduler: bScheduler, get, env: bEnv,
+    store: bStore, runner: bRunner, scheduler: bScheduler, get, env: bEnv, fetchImpl: githubFetch,
     version: '0.1.0-test', githubClientId: 'test-client-id',
+    ...(withClientSecret ? { githubClientSecret: 'test-client-secret' } : {}),
   }));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return {
@@ -502,6 +526,7 @@ test('GET /github/browser/status 初始为 idle 且 browserAvailable=true', asyn
     assert.equal(body.attempt.phase, 'idle');
     const state = await (await fetch(`${b.base}/state`, { headers: HEADER })).json();
     assert.equal(state.github.browserAvailable, true);
+    assert.equal(state.github.loopbackAvailable, true, '配了 client_secret 才能走回环 web flow');
     assert.equal(state.github.authMode, 'browser');
   } finally { b.close(); }
 });
@@ -519,6 +544,22 @@ test('无 authorization 服务：browserAvailable=false，begin 返回 GITHUB_AU
   } finally { b.close(); }
 });
 
+test('无 client_secret：loopbackAvailable=false，begin(browser) 自动走设备码', async () => {
+  const b = await browserServer({ withClientSecret: false });
+  try {
+    const state = await (await fetch(`${b.base}/state`, { headers: HEADER })).json();
+    assert.equal(state.github.browserAvailable, true, 'authorization 服务在，登录仍可用');
+    assert.equal(state.github.loopbackAvailable, false, '内置 client_id 没有 secret，回环不可用');
+    const res = await fetch(`${b.base}/github/browser/begin`, { method: 'POST', headers: HEADER, body: JSON.stringify({ method: 'browser' }) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.attempt.phase, 'waiting-device');
+    assert.equal(body.attempt.userCode, 'ABCD-1234');
+    assert.equal(body.attempt.authorizeUrl, undefined);
+    await fetch(`${b.base}/github/browser/cancel`, { method: 'POST', headers: HEADER, body: '{}' });
+  } finally { b.close(); }
+});
+
 test('POST /github/browser/begin → 回调被接受且离开 idle，cancel 可收尾', async () => {
   const b = await browserServer();
   try {
@@ -532,7 +573,7 @@ test('POST /github/browser/begin → 回调被接受且离开 idle，cancel 可�
     assert.ok(handler, 'callback route registered');
     let code = 0;
     const res = { writeHead(c) { code = c; return this; }, end() { return this; } };
-    // 状态不匹配 → 400（URL 校验分支），不断言 exchange（真实 fetch 无法离线）。
+    // 状态不匹配 → 400（URL 校验分支）；正确 state → 200，exchange 走注入的离线 fetch stub。
     handler({ method: 'GET', url: `${'/api/morehao/github-trending/oauth/github/callback'}?code=abc&state=WRONG` }, res);
     assert.equal(code, 400);
     // 正确 state → 200

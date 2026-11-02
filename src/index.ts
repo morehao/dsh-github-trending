@@ -47,8 +47,14 @@ function readVersion(): string {
 
 export const VERSION = readVersion();
 
-export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?: string; githubClientId?: string } = {}): void {
+export function apply(
+  ctx: PluginContext,
+  config: { stateDir?: string; corePath?: string; githubClientId?: string; githubClientSecret?: string } = {},
+): void {
   const env = process.env;
+  // OAuth App 的 client_secret 只在「自带 OAuth App」时才需要（回环 web flow）；
+  // 内置 client_id 没有 secret，GitHub 登录会自动走设备码。优先级：显式 config > 环境变量。
+  const githubClientSecret = (config.githubClientSecret ?? env.DSH_GITHUB_CLIENT_SECRET)?.trim();
   const get = (key: string): unknown => (typeof ctx.get === 'function' ? ctx.get(key) : undefined);
   const log = (event: string, data?: Record<string, unknown>): void => {
     const suffix = data === undefined ? '' : ` ${JSON.stringify(data)}`;
@@ -107,6 +113,7 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
     get: resolve,
     logger: log,
     ...(config.githubClientId === undefined ? {} : { clientId: config.githubClientId }),
+    ...(githubClientSecret === undefined || githubClientSecret === '' ? {} : { clientSecret: githubClientSecret }),
   });
   const registerAuth = (resolve?: (name: string) => unknown): void => {
     if (!ensureGithubFlow(githubAuth(resolve ?? get))) log('auth.flow.deferred', { reason: 'authorization-not-ready' });
@@ -139,6 +146,7 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
     pluginName: pluginInfo.name,
     ...(pluginInfo.repository === undefined ? {} : { repository: pluginInfo.repository }),
     ...(config.githubClientId === undefined ? {} : { githubClientId: config.githubClientId }),
+    ...(githubClientSecret === undefined || githubClientSecret === '' ? {} : { githubClientSecret }),
     logger: log,
   });
   const register = (): unknown => {

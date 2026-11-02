@@ -28,7 +28,7 @@ import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
 import { probeGithubAuth } from './github.js';
-import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow } from './github-auth.js';
+import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow, isLoopbackSignInAvailable } from './github-auth.js';
 import { importFirstAvailable } from './import-cli.js';
 import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
@@ -64,12 +64,14 @@ function githubAuthDeps(deps: RouteDeps): {
   get: (name: string) => unknown;
   fetchImpl?: typeof fetch;
   clientId?: string;
+  clientSecret?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 } {
   return {
     get: deps.get,
     ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
     ...(deps.githubClientId === undefined ? {} : { clientId: deps.githubClientId }),
+    ...(deps.githubClientSecret === undefined ? {} : { clientSecret: deps.githubClientSecret }),
     ...(deps.logger === undefined ? {} : { logger: deps.logger }),
   };
 }
@@ -88,8 +90,10 @@ export interface RouteDeps {
   /** 包名与仓库地址都来自 package.json，由 src/index.ts 传入。 */
   pluginName?: string;
   repository?: string;
-  /** 浏览器 GitHub 登录用的 public client_id（由 apply 的 config 传入；缺省时按钮会提示未配置）。 */
+  /** 浏览器 GitHub 登录用的 public client_id（由 apply 的 config 传入；缺省时用内置默认）。 */
   githubClientId?: string;
+  /** 自带 OAuth App 时的 client_secret（只用于回环 web flow；缺省时该 method 自动降级为设备码）。 */
+  githubClientSecret?: string;
   logger?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -502,6 +506,11 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       attempt: attemptView(),
       /** 浏览器登录是否可用：authorization 服务在、且 GitHub flow 真的注册上了（client_id 有内置默认）。 */
       browserAvailable: browserSignInAvailable(deps),
+      /**
+       * 回环 web flow 是否可用：GitHub 换 token 必须有 client_secret，内置 client_id 没有 → 只能设备码。
+       * 前端据此决定主按钮启动哪个 method（false 时直接用 device，避免点了必然失败的 web flow）。
+       */
+      loopbackAvailable: isLoopbackSignInAvailable(githubAuthDeps(deps)),
     },
   };
 }

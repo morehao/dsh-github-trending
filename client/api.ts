@@ -312,8 +312,10 @@ export interface StatePayload {
     source: string;
     /** 浏览器登录 attempt 视图。 */
     attempt?: GithubAttemptView;
-    /** 是否配置了 browser 模式的 client_id。 */
+    /** authorization 服务可用且 GitHub 授权流程注册成功（登录按钮是否可点）。 */
     browserAvailable?: boolean;
+    /** 回环 web flow 是否可用：false 时 GitHub 只能走设备码（内置 client_id 无 client_secret）。 */
+    loopbackAvailable?: boolean;
   };
   /** 发版运行记录的另一种挂载位置；与 `status.releaseRuns` 二者读其一即可。 */
   releaseRuns?: ReleaseRunRecord[];
