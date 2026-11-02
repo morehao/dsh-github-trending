@@ -31,12 +31,12 @@ import { credentialView } from './credential.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
 
-type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'summarize' | 'releases';
+type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'releases';
 
 /** 分区顺序，与左侧 tab 一致；用于「是否还有未保存改动」的判定。 */
-const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases'];
+const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'releases'];
 
-const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, summarize: false, releases: false };
+const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, releases: false };
 
 function cloneSettings(settings: SettingsShape): SettingsShape {
   return JSON.parse(JSON.stringify(settings)) as SettingsShape;
@@ -54,9 +54,7 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
     case 'auth':
       return { github: settings.github };
     case 'scope':
-      return { trending: settings.trending, schedule: settings.schedule };
-    case 'summarize':
-      return { summarize: settings.summarize };
+      return { trending: settings.trending, schedule: settings.schedule, summarize: settings.summarize };
     case 'releases':
       return { releases: settings.releases };
   }
@@ -389,7 +387,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     { id: 'repo', label: t('st.repo') },
     { id: 'auth', label: t('st.auth') },
     { id: 'scope', label: t('st.scope') },
-    { id: 'summarize', label: t('st.summarize') },
     { id: 'releases', label: t('st.releases') },
   ];
 
@@ -667,11 +664,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       h('span', { className: 'dshgt-hint' }, t('schedule.periods.value')),
     ),
     h('p', { className: 'dshgt-hint' }, t('schedule.source')),
-  );
-
-  const summarizeCard = h(
-    Card,
-    { title: t('card.summarize.title'), hint: t('card.summarize.hint') },
+    h('h4', { className: 'dshgt-subhead' }, t('card.summarize.title')),
     h(
       Row,
       { label: t('summarize.batchSize'), help: t('summarize.batchSize.help') },
@@ -807,8 +800,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         : section === 'repo' ? repoCard
           : section === 'auth' ? authCard
             : section === 'scope' ? scopeCard
-              : section === 'summarize' ? summarizeCard
-                : releasesCard;
+              : releasesCard;
 
   return h(
     'div',
