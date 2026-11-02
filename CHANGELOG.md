@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.9] - 2026-11-02
+
+### Fixes
+
+- **client**: 修复宽屏自适应、运行记录筛选与关于弹层 (#90)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.8...v0.8.9
+
 ## [v0.8.7] - 2026-11-02
 
 ### Features
