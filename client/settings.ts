@@ -10,7 +10,7 @@
  * （需要时用环境变量或直接改 settings.json），手动 `凭据引用` 也不露出（由快速
  * 填充自动带入）。避免把开发/排障概念摊在首屏，也避免出现「点了没反应」的开关。
  */
-import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, duration, h, localTime, React } from './ui.js';
+import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, copyText, duration, h, localTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import {
   apiCall,
@@ -267,7 +267,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           /* 拦截不是错误：下方「打开授权页」仍可用 */
         }
       }
-      // device 方法：优先打开预填验证码的 complete 页，用户只需点授权；没有就回退到裸验证页。
+      // device 方法：打开 GitHub 的验证页。若 provider 返回了预填码的 complete 地址就用它，
+      // 否则（GitHub 实测不返回）回退到裸验证页——验证码仍需手动输入，下方状态行提供一键复制。
       const deviceUrl = view.verificationUriComplete ?? view.verificationUri;
       if (view.phase === 'waiting-device' && deviceUrl !== undefined) {
         try {
@@ -292,6 +293,14 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const copyAuthorizeLink = (): void => {
     if (signIn.authorizeUrl === undefined) return;
     void navigator.clipboard?.writeText(signIn.authorizeUrl).then(() => notify('ok', t('auth.browser.copied')));
+  };
+
+  // GitHub 不返回 verification_uri_complete：验证码必须手输，故提供一键复制码，减少抄错导致的「找不到」。
+  const copyDeviceCode = (): void => {
+    if (signIn.userCode === undefined) return;
+    void copyText(signIn.userCode).then((ok) =>
+      notify(ok ? 'ok' : 'err', ok ? t('auth.browser.codeCopied') : t('auth.browser.codeCopyFailed')),
+    );
   };
 
   // 登录进行中时轮询状态；终态（done/error/idle）后停止。
@@ -645,7 +654,13 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
               )
             : null,
           signIn.userCode !== undefined
-            ? h('div', { className: 'dshgt-mono' }, `${t('auth.browser.code')} ${signIn.userCode}`)
+            ? h(
+                'div',
+                { className: 'dshgt-desc', style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+                h('span', null, t('auth.browser.code')),
+                h('span', { className: 'dshgt-mono', style: { fontSize: '1.1em', fontWeight: 'bold', letterSpacing: '1px' } }, signIn.userCode),
+                h(Btn, { small: true, variant: 'ghost', onClick: () => copyDeviceCode() }, t('auth.browser.copyCode')),
+              )
             : null,
         )
       : null,

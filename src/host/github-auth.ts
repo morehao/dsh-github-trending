@@ -139,7 +139,11 @@ export interface GithubAttemptView {
   phase: GithubAttemptPhase;
   authorizeUrl?: string;
   verificationUri?: string;
-  /** device flow 预填验证码的地址（GitHub 返回的 `verification_uri_complete`）：打开只需点授权。 */
+  /**
+   * device flow 的预填验证码地址（`verification_uri_complete`），**可选**：若 provider 返回就透出，
+   * 前端优先用它打开（码已预填）。注意 GitHub 官方 device flow 实测不返回该字段，此时走
+   * `verificationUri` + 手动输入；保留此字段只为兼容会返回它的 provider。
+   */
   verificationUriComplete?: string;
   userCode?: string;
   expiresAt?: number;
