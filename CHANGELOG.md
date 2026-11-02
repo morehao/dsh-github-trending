@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.8.4] - 2026-11-02
+
+### Features
+
+- **auth**: open device-code page with prefilled code
+- **auth**: 美化 GitHub OAuth 回调落地页 (#78)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.3...v0.8.4
+
 ## [v0.8.3] - 2026-11-02
 
 ### Fixes
