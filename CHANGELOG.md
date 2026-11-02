@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.12] - 2026-11-02
+
+### Refactors
+
+- **client**: 恢复提示改为居中弹层并统一页面内容框 (#99)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.11...v0.8.12
+
 ## [v0.8.11] - 2026-11-02
 
 ### Fixes
