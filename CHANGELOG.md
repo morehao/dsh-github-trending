@@ -1,10 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [v0.8.11] - 2026-11-02
 
 ### Fixes
 
-- **client**: 自更新后的「请重启」提示改为面板正文顶部醒目横条，不再缩在右下角，也不再自动消失——改为点「知道了」或「退出并重启」才收起
+- **client**: 自更新恢复提示改为顶部常驻横条 (#96)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.10...v0.8.11
 
 ## [v0.8.10] - 2026-11-02
 
