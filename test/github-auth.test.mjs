@@ -414,3 +414,18 @@ test('beginGithubSignIn：没有 authorization 服务 → 抛错而不是静默'
   githubAuth.resetAttemptForTest();
   await assert.rejects(() => githubAuth.beginGithubSignIn({ get: () => undefined }, 'browser'), /authorization/);
 });
+
+test('renderCallbackPage：成功/错误页自包含、无外链、文案正确', () => {
+  const ok = githubAuth.renderCallbackPage('success');
+  assert.match(ok, /<!doctype html>/i);
+  assert.match(ok, /GitHub 授权成功/);
+  assert.match(ok, /已完成登录/);
+  assert.match(ok, /prefers-color-scheme:dark/);
+  assert.match(ok, /window\.close/);
+  const bad = githubAuth.renderCallbackPage('error');
+  assert.match(bad, /GitHub 授权失败/);
+  assert.doesNotMatch(bad, /window\.close/);
+  // 无外部资源：不出现 http(s):// 引用（避免离线/CSP 抖动）
+  assert.doesNotMatch(ok, /(src|href)\s*=\s*["']?https?:/i);
+  assert.doesNotMatch(bad, /(src|href)\s*=\s*["']?https?:/i);
+});

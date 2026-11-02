@@ -188,6 +188,53 @@ export function verifyState(received: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** 回调落地页的两种结果（纯展示，无外部资源，离线可测）。 */
+type CallbackPageKind = 'success' | 'error';
+
+/**
+ * 回环回调的落地页 HTML。自包含、无外链资源（CSP 友好、离线可用），
+ * 跟随系统深浅色；成功页会尝试自动关闭本窗口（脚本失败时文字兜底）。
+ */
+export function renderCallbackPage(kind: CallbackPageKind): string {
+  const ok = kind === 'success';
+  const title = ok ? '登录完成' : '登录未完成';
+  const heading = ok ? 'GitHub 授权成功' : 'GitHub 授权失败';
+  const body = ok ? '已完成登录，可以关闭此页面。' : '授权校验未通过，请回到 DSH 重新发起登录。';
+  const accent = ok ? '#1f883d' : '#cf222e';
+  const icon = ok
+    ? '<path d="M20 6 9 17l-5-5"/>'
+    : '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>';
+  const autoClose = ok
+    ? '<script>(function(){try{setTimeout(function(){window.close()},1200)}catch(e){}})()</script>'
+    : '';
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>${title}</title>
+<style>
+  :root{--bg:#f6f8fa;--card:#ffffff;--fg:#1f2328;--muted:#59636e;--border:#d1d9e0;--accent:${accent}}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#151b23;--fg:#e6edf3;--muted:#9198a1;--border:#3d444d}}
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:flex;align-items:center;justify-content:center;padding:24px;
+    background:var(--bg);color:var(--fg);
+    font:400 15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+  main{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);
+    border-radius:14px;padding:40px 32px;text-align:center;
+    box-shadow:0 8px 24px rgba(0,0,0,.06)}
+  .mark{width:64px;height:64px;margin:0 auto 20px;border-radius:50%;display:flex;
+    align-items:center;justify-content:center;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+  .mark svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  h1{margin:0 0 8px;font-size:19px;font-weight:600;letter-spacing:.2px}
+  p{margin:0;color:var(--muted);font-size:14px}
+</style></head>
+<body><main role="status">
+  <div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div>
+  <h1>${heading}</h1>
+  <p>${body}</p>
+</main>${autoClose}</body></html>`;
+}
+
 /** 拼授权页 URL。 */
 export function buildAuthorizeUrl(params: {
   authorizeEndpoint: string;
@@ -322,12 +369,14 @@ async function runBrowser(deps: GithubAuthDeps, session: AuthorizationSessionLik
       const single = url.searchParams.getAll('state').length === 1 && url.searchParams.getAll('code').length === 1;
       const bad = req.method !== 'GET' || url.pathname !== CALLBACK_PATH || !single || code === '' || !verifyState(gotState, state);
       if (bad) {
-        res.writeHead(400, { 'cache-control': 'no-store' }).end();
+        res
+          .writeHead(400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+          .end(renderCallbackPage('error'));
         return;
       }
       res
         .writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-        .end('<!doctype html><meta charset="utf-8"><title>GitHub</title><p>已完成登录，可以关闭此页面。</p>');
+        .end(renderCallbackPage('success'));
       resolveCode(code);
     },
   });
