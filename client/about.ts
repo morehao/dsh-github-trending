@@ -100,7 +100,27 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
           'div',
           { className: 'dshgt-about-head' },
           h('h3', { className: 'dshgt-about-title' }, t('about.title')),
-          h('button', { type: 'button', className: 'dshgt-about-close', onClick: () => props.onClose() }, t('about.close')),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dshgt-about-close',
+              title: t('about.close'),
+              'aria-label': t('about.close'),
+              onClick: () => props.onClose(),
+            },
+            h(
+              'svg',
+              { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': 'true', focusable: 'false' },
+              h('path', {
+                d: 'M4 4l8 8M12 4l-8 8',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.6,
+                strokeLinecap: 'round',
+              }),
+            ),
+          ),
         ),
         h(
           'div',

@@ -372,10 +372,11 @@ export const CSS = `
 .dshgt-about{max-width:460px;width:100%;}
 .dshgt-about-head{display:flex;align-items:center;gap:10px;}
 .dshgt-about-title{margin:0;font-size:15px;font-weight:600;}
-.dshgt-about-close{margin-left:auto;appearance:none;font:inherit;font-size:12px;cursor:pointer;border-radius:7px;border:1px solid var(--gt-border);background:var(--gt-bg);padding:4px 11px;color:var(--gt-muted);}
-.dshgt-about-close:hover{color:var(--gt-fg);border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));}
+.dshgt-about-close{margin-left:auto;flex:none;display:grid;place-items:center;width:28px;height:28px;padding:0;appearance:none;font:inherit;cursor:pointer;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--gt-muted);}
+.dshgt-about-close:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));border-color:var(--gt-border);}
+.dshgt-about-close:focus-visible{outline:2px solid color-mix(in srgb,var(--gt-accent) 45%,transparent);outline-offset:1px;}
 /* 居中的应用身份区块：logo / 名称 / 版本胶囊 */
-.dshgt-about-identity{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0 18px;}
+.dshgt-about-identity{display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 0 16px;}
 .dshgt-about-logo svg{width:56px;height:56px;border-radius:14px;display:block;box-shadow:0 4px 14px rgba(0,0,0,.18);}
 .dshgt-about-name{font-size:16px;font-weight:650;letter-spacing:-.01em;}
 .dshgt-about-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--gt-fg);background:var(--gt-card);border:1px solid var(--gt-border);border-radius:999px;padding:1px 9px;line-height:17px;}
