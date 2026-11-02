@@ -329,6 +329,8 @@ export interface GithubAttemptView {
   phase: GithubAttemptPhase;
   authorizeUrl?: string;
   verificationUri?: string;
+  /** device flow 预填验证码的地址：打开只需点授权。 */
+  verificationUriComplete?: string;
   userCode?: string;
   expiresAt?: number;
   login?: string;

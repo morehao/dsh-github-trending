@@ -139,6 +139,8 @@ export interface GithubAttemptView {
   phase: GithubAttemptPhase;
   authorizeUrl?: string;
   verificationUri?: string;
+  /** device flow 预填验证码的地址（GitHub 返回的 `verification_uri_complete`）：打开只需点授权。 */
+  verificationUriComplete?: string;
   userCode?: string;
   expiresAt?: number;
   login?: string;
@@ -149,6 +151,7 @@ interface Attempt {
   phase: GithubAttemptPhase;
   authorizeUrl?: string;
   verificationUri?: string;
+  verificationUriComplete?: string;
   userCode?: string;
   expiresAt?: number;
   login?: string;
@@ -172,6 +175,18 @@ export function attemptView(): GithubAttemptView {
 
 function base64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** 判断一个未知值是否是可直接打开的 http(s) URL（用于校验 GitHub 返回的验证页地址）。 */
+export function isHttpUrl(value: unknown): boolean {
+  if (typeof value !== 'string' || value === '') return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === 'https:' || url.protocol === 'http:';
 }
 
 /** PKCE：返回 verifier 与 S256 challenge。 */
@@ -440,6 +455,7 @@ async function runDevice(deps: GithubAuthDeps, session: AuthorizationSessionLike
     device_code?: unknown;
     user_code?: unknown;
     verification_uri?: unknown;
+    verification_uri_complete?: unknown;
     expires_in?: unknown;
     interval?: unknown;
     error?: unknown;
@@ -457,15 +473,21 @@ async function runDevice(deps: GithubAuthDeps, session: AuthorizationSessionLike
   const expiresInSec = typeof start.expires_in === 'number' && start.expires_in > 0 ? start.expires_in : 900;
   const deadline = Date.now() + expiresInSec * 1000;
 
+  // 预填验证码的地址：存在且是 http(s) 才采用，否则回退到裸 verification_uri。
+  const verificationUriComplete = isHttpUrl(start.verification_uri_complete)
+    ? (start.verification_uri_complete as string)
+    : undefined;
+
   updateCurrent({
     phase: 'waiting-device',
     verificationUri: start.verification_uri,
+    ...(verificationUriComplete === undefined ? {} : { verificationUriComplete }),
     userCode: start.user_code,
     expiresAt: deadline,
   });
   session.notify?.({
     message: 'Enter this code on the verification page to finish signing in.',
-    url: start.verification_uri,
+    url: verificationUriComplete ?? start.verification_uri,
     code: start.user_code,
   });
 
@@ -642,7 +664,9 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
       interaction: {
         notify: (notice: { message: string; url?: string; code?: string }) => {
           if (notice.code !== undefined && notice.url !== undefined) {
-            updateCurrent({ phase: 'waiting-device', verificationUri: notice.url, userCode: notice.code });
+            // runDevice 已在 updateCurrent 里写全（含 verificationUriComplete）；
+            // 这里只补 userCode，避免把 complete 地址覆盖成裸 verification_uri。
+            updateCurrent({ phase: 'waiting-device', userCode: notice.code });
           } else if (notice.url !== undefined) {
             updateCurrent({ phase: 'waiting-browser', authorizeUrl: notice.url });
           }

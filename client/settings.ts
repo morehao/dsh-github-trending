@@ -267,10 +267,11 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           /* 拦截不是错误：下方「打开授权页」仍可用 */
         }
       }
-      // device 方法：把用户直接送到 GitHub 的验证码输入页（验证码仍要手输，页面里有可点的链接兜底）。
-      if (view.phase === 'waiting-device' && view.verificationUri !== undefined) {
+      // device 方法：优先打开预填验证码的 complete 页，用户只需点授权；没有就回退到裸验证页。
+      const deviceUrl = view.verificationUriComplete ?? view.verificationUri;
+      if (view.phase === 'waiting-device' && deviceUrl !== undefined) {
         try {
-          window.open(view.verificationUri, '_blank', 'noopener,noreferrer');
+          window.open(deviceUrl, '_blank', 'noopener,noreferrer');
         } catch {
           /* 同上 */
         }
@@ -627,11 +628,20 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                 h(Btn, { small: true, variant: 'ghost', onClick: () => copyAuthorizeLink() }, t('auth.browser.copy')),
               )
             : null,
-          signIn.verificationUri !== undefined
+          signIn.verificationUriComplete !== undefined || signIn.verificationUri !== undefined
             ? h(
                 'div',
                 { className: 'dshgt-desc' },
-                h('a', { className: 'dshgt-link', href: signIn.verificationUri, target: '_blank', rel: 'noreferrer' }, signIn.verificationUri),
+                h(
+                  'a',
+                  {
+                    className: 'dshgt-link',
+                    href: signIn.verificationUriComplete ?? signIn.verificationUri,
+                    target: '_blank',
+                    rel: 'noreferrer',
+                  },
+                  t('auth.browser.open'),
+                ),
               )
             : null,
           signIn.userCode !== undefined

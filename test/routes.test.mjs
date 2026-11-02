@@ -493,6 +493,7 @@ async function browserServer(options = {}) {
           device_code: 'dev',
           user_code: 'ABCD-1234',
           verification_uri: 'https://github.com/login/device',
+          verification_uri_complete: 'https://github.com/login/device?user_code=ABCD-1234',
           expires_in: 600,
           interval: 60,
         }),
@@ -555,6 +556,7 @@ test('无 client_secret：loopbackAvailable=false，begin(browser) 自动走设�
     const body = await res.json();
     assert.equal(body.attempt.phase, 'waiting-device');
     assert.equal(body.attempt.userCode, 'ABCD-1234');
+    assert.equal(body.attempt.verificationUriComplete, 'https://github.com/login/device?user_code=ABCD-1234');
     assert.equal(body.attempt.authorizeUrl, undefined);
     await fetch(`${b.base}/github/browser/cancel`, { method: 'POST', headers: HEADER, body: '{}' });
   } finally { b.close(); }

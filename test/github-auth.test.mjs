@@ -229,7 +229,7 @@ test('githubAuth：没有 client_secret 时 browser 自动走设备码（不开�
   const fetchImpl = async (url) => {
     if (url === EP.deviceCode) {
       deviceRequests += 1;
-      return jsonResponse({ device_code: 'dev', user_code: 'ABCD-1234', verification_uri: 'https://github.test/device', expires_in: 30, interval: 60 });
+      return jsonResponse({ device_code: 'dev', user_code: 'ABCD-1234', verification_uri: 'https://github.test/device', verification_uri_complete: 'https://github.test/device?user_code=ABCD-1234', expires_in: 30, interval: 60 });
     }
     throw new Error(`unexpected ${url}`);
   };
@@ -244,9 +244,61 @@ test('githubAuth：没有 client_secret 时 browser 自动走设备码（不开�
   const view = await githubAuth.beginGithubSignIn(deps, 'browser');
   assert.equal(view.phase, 'waiting-device');
   assert.equal(view.userCode, 'ABCD-1234');
+  assert.equal(view.verificationUri, 'https://github.test/device');
+  assert.equal(view.verificationUriComplete, 'https://github.test/device?user_code=ABCD-1234', '优先透出预填验证码的 complete 地址');
   assert.equal(view.authorizeUrl, undefined, '不该再给 web flow 的授权链接');
   assert.equal(deviceRequests, 1);
   assert.equal(webServer.routes.size, 0, '设备码流程不注册回环回调');
+  githubAuth.cancelGithubSignIn(deps);
+  await new Promise((r) => setTimeout(r, 10));
+});
+
+test('githubAuth：device 缺 verification_uri_complete 时回退到裸 verification_uri', async () => {
+  githubAuth.resetAttemptForTest();
+  const webServer = makeWebServer();
+  const authorization = makeAuthorization();
+  const fetchImpl = async (url) => {
+    if (url === EP.deviceCode) {
+      return jsonResponse({ device_code: 'dev', user_code: 'ZZZZ-0000', verification_uri: 'https://github.test/device', expires_in: 30, interval: 60 });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const deps = {
+    get: (name) => (name === 'webServer' ? webServer : name === 'authorization' ? authorization : undefined),
+    fetchImpl,
+    endpoints: EP,
+    clientId: 'cid',
+    logger: () => {},
+  };
+  githubAuth.registerGithubFlow(deps);
+  const view = await githubAuth.beginGithubSignIn(deps, 'browser');
+  assert.equal(view.phase, 'waiting-device');
+  assert.equal(view.verificationUri, 'https://github.test/device');
+  assert.equal(view.verificationUriComplete, undefined, '没有 complete 时不透出该字段');
+  githubAuth.cancelGithubSignIn(deps);
+  await new Promise((r) => setTimeout(r, 10));
+});
+
+test('githubAuth：非 http(s) 的 verification_uri_complete 被丢弃', async () => {
+  githubAuth.resetAttemptForTest();
+  const webServer = makeWebServer();
+  const authorization = makeAuthorization();
+  const fetchImpl = async (url) => {
+    if (url === EP.deviceCode) {
+      return jsonResponse({ device_code: 'dev', user_code: 'ZZZZ-0000', verification_uri: 'https://github.test/device', verification_uri_complete: 'javascript:alert(1)', expires_in: 30, interval: 60 });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const deps = {
+    get: (name) => (name === 'webServer' ? webServer : name === 'authorization' ? authorization : undefined),
+    fetchImpl,
+    endpoints: EP,
+    clientId: 'cid',
+    logger: () => {},
+  };
+  githubAuth.registerGithubFlow(deps);
+  const view = await githubAuth.beginGithubSignIn(deps, 'browser');
+  assert.equal(view.verificationUriComplete, undefined);
   githubAuth.cancelGithubSignIn(deps);
   await new Promise((r) => setTimeout(r, 10));
 });
