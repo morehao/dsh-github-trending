@@ -10,7 +10,7 @@ import { Runner } from './host/runner.js';
 import { readPluginInfo } from './host/plugin-info.js';
 import { Scheduler } from './host/schedule.js';
 import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
-import { registerGithubFlow } from './host/github-auth.js';
+import { ensureGithubFlow, type GithubAuthDeps } from './host/github-auth.js';
 import { createUpdateService } from './host/update.js';
 import { createTrendingHistoryTool, createTrendingRunTool } from './tools.js';
 
@@ -34,6 +34,8 @@ interface TimerService {
 export interface PluginContext {
   get?: (name: string) => unknown;
   effect?: (factory: () => unknown, label?: string) => unknown;
+  /** cordis 的服务就绪钩子：依赖被提供（或重提供）时回调，用于「晚到的服务」注册。 */
+  inject?: (deps: string[], callback: (scope: PluginContext) => unknown) => unknown;
   logger?: PluginLogger;
   webServer?: { register: (options: { kind: 'prefix'; path: string; handler: unknown }) => unknown };
   [key: string]: unknown;
@@ -97,12 +99,25 @@ export function apply(ctx: PluginContext, config: { stateDir?: string; corePath?
   });
 
   const pluginInfo = readPluginInfo();
-  // 浏览器 GitHub 登录：向核心 `ctx.authorization` 注册 flow（无该服务则降级 no-op，不影响 gh/pat）。
-  registerGithubFlow({
-    get,
+  // 浏览器 GitHub 登录：**等服务就绪再注册**。宿主按服务可用性激活插件，本插件只
+  // inject webServer，apply 可能早于 authorization（它要等 credentials 的异步 init
+  // 才可见），此时 ctx.get 返回 undefined；一次性尝试会永久丢掉注册。
+  // ensureGithubFlow 幂等，HTTP 面读状态时还会再兜底一次（见 routes.statePayload）。
+  const githubAuth = (resolve: (name: string) => unknown): GithubAuthDeps => ({
+    get: resolve,
     logger: log,
     ...(config.githubClientId === undefined ? {} : { clientId: config.githubClientId }),
   });
+  const registerAuth = (resolve?: (name: string) => unknown): void => {
+    if (!ensureGithubFlow(githubAuth(resolve ?? get))) log('auth.flow.deferred', { reason: 'authorization-not-ready' });
+  };
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['authorization'], (scope: PluginContext) => {
+      registerAuth((name) => (typeof scope.get === 'function' ? scope.get(name) : undefined));
+    });
+  } else {
+    registerAuth();
+  }
   const update = createUpdateService({
     get,
     env,

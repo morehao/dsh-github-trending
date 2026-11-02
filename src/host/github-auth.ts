@@ -72,6 +72,8 @@ export interface AuthorizationLike {
   registerFlow?: (flow: AuthorizationFlow) => unknown;
   begin?: (request: unknown) => Promise<{ status: 'authorized' | 'cancelled' }>;
   cancel?: (key: string) => void;
+  /** 核心 0.2.x 有：按 key 查已注册的 flow；判定「真的注册上了」靠它。 */
+  describe?: (key: string) => unknown;
 }
 
 export interface WebServerLike {
@@ -406,17 +408,9 @@ async function runDevice(deps: GithubAuthDeps, session: AuthorizationSessionLike
 // 注册 + 进程内 begin / cancel 胶水
 // ---------------------------------------------------------------------------
 
-/**
- * 向 `ctx.authorization` 注册 GitHub flow（若核心没有该服务则降级 no-op）。
- * 在 `apply()` 里调用一次。
- */
-export function registerGithubFlow(deps: GithubAuthDeps): void {
-  const authorization = deps.get('authorization') as AuthorizationLike | undefined;
-  if (authorization === undefined || typeof authorization.registerFlow !== 'function') {
-    deps.logger?.('auth.flow.skipped', { reason: 'no-authorization-service' });
-    return;
-  }
-  authorization.registerFlow({
+/** flow 的静态定义（deps 只进 run，注册本身与 deps 无关）。 */
+function flowDefinition(deps: GithubAuthDeps): AuthorizationFlow {
+  return {
     key: GITHUB_RECORD_KEY,
     label: 'GitHub',
     methods: [
@@ -424,18 +418,96 @@ export function registerGithubFlow(deps: GithubAuthDeps): void {
       { id: 'device', label: 'Use a device code' },
     ],
     run: (session) => (session.method === 'device' ? runDevice(deps, session) : runBrowser(deps, session)),
-  });
-  deps.logger?.('auth.flow.registered', { key: GITHUB_RECORD_KEY });
+  };
 }
 
 /**
+ * 核心没有 `describe()` 时的兜底：按 authorization 实例记「本进程注册过」。
+ * 用 WeakSet 而不是布尔值，避免测试/热重载换实例后残留旧结论。
+ */
+const registeredOn = new WeakSet<object>();
+/** 已经明确失败过的实例：registerFlow 只会因 DUPLICATE_FLOW 抛，重试没有意义且会刷日志。 */
+const failedOn = new WeakSet<object>();
+
+/** 这个 key 现在是否**真的**有 flow 在注册表里。 */
+export function isGithubFlowRegistered(deps: GithubAuthDeps): boolean {
+  const authorization = deps.get('authorization') as AuthorizationLike | undefined;
+  if (authorization === undefined) return false;
+  if (typeof authorization.describe === 'function') {
+    try {
+      return authorization.describe(GITHUB_RECORD_KEY) !== undefined;
+    } catch {
+      return registeredOn.has(authorization);
+    }
+  }
+  return registeredOn.has(authorization);
+}
+
+/**
+ * 幂等注册 GitHub flow；`authorization` 还没就绪时返回 false，调用方可稍后重试。
+ *
+ * 为什么不能只在 `apply()` 里试一次：宿主按「服务可用性」激活插件，本插件只
+ * `inject: ['webServer']`，apply 完全可能早于 `authorization`——后者要等
+ * `credentials` 的异步 `[Service.init]`（启动时读 `.credentials.yaml`）走完才
+ * 可见，而 `ctx.get()` 对未 active 的 provider 返回 undefined。那一刻若放弃注册，
+ * 就永久没有 flow；而可用性又是按请求现算的，于是出现「按钮亮着、点了必然
+ * NO_FLOW、界面毫无反馈」。所以注册做成可重入的自愈入口：apply 用
+ * `ctx.inject(['authorization'])` 等服务就绪，HTTP 面每次读状态再兜底一次。
+ *
+ * @returns 注册后是否可用（服务缺失 / 注册失败时为 false）。
+ */
+export function ensureGithubFlow(deps: GithubAuthDeps): boolean {
+  const authorization = deps.get('authorization') as AuthorizationLike | undefined;
+  if (authorization === undefined || typeof authorization.registerFlow !== 'function') return false;
+  if (isGithubFlowRegistered(deps)) {
+    registeredOn.add(authorization);
+    return true;
+  }
+  if (failedOn.has(authorization)) return false;
+  try {
+    authorization.registerFlow(flowDefinition(deps));
+  } catch (error) {
+    // DUPLICATE_FLOW 之类：注册表里其实已经有（例如核心没实现 describe），按可用处理。
+    failedOn.add(authorization);
+    deps.logger?.('auth.flow.failed', {
+      key: GITHUB_RECORD_KEY,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return isGithubFlowRegistered(deps);
+  }
+  registeredOn.add(authorization);
+  deps.logger?.('auth.flow.registered', { key: GITHUB_RECORD_KEY });
+  return true;
+}
+
+/**
+ * 向 `ctx.authorization` 注册 GitHub flow（若核心没有该服务则降级 no-op）。
+ * 等价于 {@link ensureGithubFlow}，保留旧名字给 `apply()` 与测试用。
+ */
+export function registerGithubFlow(deps: GithubAuthDeps): void {
+  if (!ensureGithubFlow(deps)) deps.logger?.('auth.flow.skipped', { reason: 'no-authorization-service' });
+}
+
+/** 离开 idle 的最长等待：flow 的 run() 同步写首个状态，这里只是防核心实现改变后抢跑。 */
+const START_TIMEOUT_MS = 1500;
+const START_POLL_MS = 10;
+
+/**
  * 启动一次浏览器登录 attempt（进程内 `authorization.begin`，不阻塞请求）。
- * @returns 当前 attempt 视图（含 authorizeUrl，供前端打开）。二次调用在已有进行中时抛错。
+ *
+ * 返回的视图保证**不是 `idle`**：要么已经进入 waiting-*，要么已经落成 `error`
+ * （供路由转成 HTTP 错误）。`idle` 只可能来自「flow 没注册」这类抢跑，前端拿到
+ * 它就会以为什么都没发生——那正是「点了没反应」的形态，所以这里把它堵掉。
+ *
+ * @throws 服务不可用、flow 未注册、已有 attempt 在飞时抛错。
  */
 export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' | 'device' = 'browser'): Promise<GithubAttemptView> {
   const authorization = deps.get('authorization') as AuthorizationLike | undefined;
   if (authorization === undefined || typeof authorization.begin !== 'function') {
     throw new Error('authorization 服务不可用：无法进行浏览器登录');
+  }
+  if (!ensureGithubFlow(deps)) {
+    throw new Error('authorization 服务尚未就绪，GitHub 授权流程没有注册成功：请稍后重试');
   }
   if (current !== undefined && (current.phase === 'waiting-browser' || current.phase === 'waiting-device' || current.phase === 'exchanging')) {
     throw new Error('already-in-flight');
@@ -444,8 +516,9 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
   const timer = setTimeout(() => controller.abort(), attemptTimeout(deps));
   const attempt: Attempt = { phase: 'idle', controller, done: Promise.resolve() };
   current = attempt;
-  attempt.done = authorization
-    .begin!({
+  let started: Promise<{ status: 'authorized' | 'cancelled' }>;
+  try {
+    started = authorization.begin({
       key: GITHUB_RECORD_KEY,
       method,
       signal: controller.signal,
@@ -460,7 +533,14 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
         },
         prompt: () => Promise.reject(new Error('interactive prompt unsupported in this surface')),
       },
-    })
+    });
+  } catch (error) {
+    // 同步抛（真正的 NO_FLOW 在核心是 promise reject，这里防实现变化）。
+    clearTimeout(timer);
+    updateCurrent({ phase: 'error', error: error instanceof Error ? error.message : String(error) });
+    return attemptView();
+  }
+  attempt.done = started
     .then((outcome) => {
       if (outcome.status === 'cancelled') updateCurrent({ phase: 'idle' });
     })
@@ -468,9 +548,16 @@ export async function beginGithubSignIn(deps: GithubAuthDeps, method: 'browser' 
       updateCurrent({ phase: 'error', error: error instanceof Error ? error.message : String(error) });
     })
     .finally(() => clearTimeout(timer));
-  // 让 run() 有机会把 authorizeUrl 写进视图（begin 内部先走 run 的同步段）。
-  await Promise.resolve();
+  await waitForStart(attempt);
   return attemptView();
+}
+
+/** 等 attempt 离开 `idle`（正常路径一次微任务内就完成；异常路径最多等 START_TIMEOUT_MS）。 */
+async function waitForStart(attempt: Attempt, timeoutMs = START_TIMEOUT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (attempt.phase === 'idle' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+  }
 }
 
 /** 取消进行中的 attempt。 */

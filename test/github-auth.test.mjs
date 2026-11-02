@@ -273,3 +273,66 @@ test('githubAuth.resolveClientId：无 config 时回退内置默认 client_id', 
   // 内置默认是公开值（非空、非 secret 形态）
   assert.match(githubAuth.DEFAULT_GITHUB_CLIENT_ID, /^Ov23li/);
 });
+
+// --- 回归：apply 时 authorization 还没就绪导致的「按钮亮着、点了没反应」 ---
+
+/** 带 describe 的最小 authorization 桩：能观察「注册了几次」与「begin 抛错」。 */
+function makeAuthorizationStub(options = {}) {
+  const flows = new Map();
+  const stub = {
+    flows,
+    registrations: 0,
+    registerFlow(flow) {
+      stub.registrations += 1;
+      flows.set(flow.key, flow);
+      return () => flows.delete(flow.key);
+    },
+    async begin(request) {
+      if (options.beginError !== undefined) throw new Error(options.beginError);
+      if (!flows.has(request.key)) throw new Error(`no authorization flow is registered for "${request.key}"`);
+      return { status: 'cancelled' };
+    },
+    cancel() {},
+  };
+  if (options.describe !== false) stub.describe = (key) => flows.get(key);
+  return stub;
+}
+
+test('ensureGithubFlow：服务晚到 → 先 false 后 true，且重复调用只注册一次', () => {
+  const stub = makeAuthorizationStub();
+  let service;
+  const deps = { get: (name) => (name === 'authorization' ? service : undefined), logger: () => {} };
+  assert.equal(githubAuth.isGithubFlowRegistered(deps), false);
+  assert.equal(githubAuth.ensureGithubFlow(deps), false, '服务未就绪时返回 false，且不抛');
+  service = stub;
+  assert.equal(githubAuth.ensureGithubFlow(deps), true);
+  assert.equal(githubAuth.ensureGithubFlow(deps), true);
+  assert.equal(stub.registrations, 1, '重复 ensure 不能再注册一次（核心会 DUPLICATE_FLOW）');
+  assert.equal(githubAuth.isGithubFlowRegistered(deps), true);
+});
+
+test('ensureGithubFlow：没有 describe 的核心用实例级兜底判定', () => {
+  const stub = makeAuthorizationStub({ describe: false });
+  const deps = { get: (name) => (name === 'authorization' ? stub : undefined), logger: () => {} };
+  assert.equal(githubAuth.isGithubFlowRegistered(deps), false);
+  assert.equal(githubAuth.ensureGithubFlow(deps), true);
+  assert.equal(githubAuth.isGithubFlowRegistered(deps), true);
+});
+
+test('beginGithubSignIn：核心 begin 失败时落成 error（绝不返回 idle）', async () => {
+  githubAuth.resetAttemptForTest();
+  const stub = makeAuthorizationStub({ beginError: 'no authorization flow is registered for "github/default"' });
+  const deps = { get: (name) => (name === 'authorization' ? stub : undefined), logger: () => {} };
+  const view = await githubAuth.beginGithubSignIn(deps, 'browser');
+  assert.equal(view.phase, 'error');
+  assert.match(String(view.error), /no authorization flow/);
+  // 再点一次仍然给出 error，而不是回到「什么都没发生」
+  const again = await githubAuth.beginGithubSignIn(deps, 'browser');
+  assert.equal(again.phase, 'error');
+  githubAuth.resetAttemptForTest();
+});
+
+test('beginGithubSignIn：没有 authorization 服务 → 抛错而不是静默', async () => {
+  githubAuth.resetAttemptForTest();
+  await assert.rejects(() => githubAuth.beginGithubSignIn({ get: () => undefined }, 'browser'), /authorization/);
+});

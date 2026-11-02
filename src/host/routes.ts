@@ -28,7 +28,7 @@ import { detectCoexistence, inspectCore } from './core.js';
 import { locateCore } from '../core/locate.js';
 import { credentialServices, describeRef, resolveGithubToken } from './credentials.js';
 import { probeGithubAuth } from './github.js';
-import { attemptView, beginGithubSignIn, cancelGithubSignIn } from './github-auth.js';
+import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow } from './github-auth.js';
 import { importFirstAvailable } from './import-cli.js';
 import { checkPendingPr } from './pending-pr.js';
 import { preflightModel } from './preflight.js';
@@ -42,10 +42,21 @@ export const ROUTE_PREFIX = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 const MAX_BODY = 512 * 1024;
 
-/** 核心是否提供 authorization 服务（有则浏览器登录可用；client_id 有内置默认）。 */
+/** 核心是否提供 authorization 服务（决定「浏览器登录」这一档是否可能出现）。 */
 function isAuthorizationAvailable(get: (name: string) => unknown): boolean {
   const authorization = get('authorization') as { begin?: unknown } | undefined;
   return authorization !== undefined && typeof authorization.begin === 'function';
+}
+
+/**
+ * 浏览器登录此刻是否**真的**可用：服务在 + flow 真的注册上了。
+ * 只判「服务在」会造出「按钮亮着、点了必然 NO_FLOW」的死按钮（见 review）。
+ * 顺手兜底 ensure 一次：apply 可能赶在 authorization 就绪之前，而这条读状态的路
+ * 是前端每次打开页面都会走的，正好用来自愈。
+ */
+function browserSignInAvailable(deps: RouteDeps): boolean {
+  if (!isAuthorizationAvailable(deps.get)) return false;
+  return ensureGithubFlow(githubAuthDeps(deps));
 }
 
 /** 组装 GitHub 浏览器登录 adapter 的依赖（get/fetch/clientId/logger）。 */
@@ -325,8 +336,12 @@ async function dispatch(
     const method = body.method === 'device' ? 'device' : 'browser';
     try {
       const view = await beginGithubSignIn(githubAuthDeps(deps), method);
+      // attempt 落成 error 时必须变成 HTTP 错误：客户端只在 catch 里提示，
+      // 返回 200 + phase:error 会被 UI 当成「什么都没发生」（旧版的症状）。
+      if (view.phase === 'error') throw new IpcError('GITHUB_AUTH_UNAVAILABLE', redact(view.error ?? 'GitHub 登录失败'));
       return { attempt: view };
     } catch (error) {
+      if (error instanceof IpcError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (message === 'already-in-flight') {
         return { attempt: attemptView(), alreadyInFlight: true };
@@ -485,8 +500,8 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
       source: github.source,
       /** 浏览器登录 attempt 视图（idle / waiting-browser / waiting-device / exchanging / done / error）。 */
       attempt: attemptView(),
-      /** 浏览器登录是否可用：核心提供了 authorization 服务即可（client_id 有内置默认）。 */
-      browserAvailable: isAuthorizationAvailable(deps.get),
+      /** 浏览器登录是否可用：authorization 服务在、且 GitHub flow 真的注册上了（client_id 有内置默认）。 */
+      browserAvailable: browserSignInAvailable(deps),
     },
   };
 }

@@ -442,7 +442,7 @@ test('/releases/run 并发（已有运行在跑）→ 409', async () => {
 });
 
 // --- GitHub 浏览器登录路由 ---
-async function browserServer() {
+async function browserServer(options = {}) {
   const bStore = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-routes-browser-')) });
   const bRepo = mkdtempSync(path.join(tmpdir(), 'dshgt-routes-browser-repo-'));
   mkdirSync(path.join(bRepo, '.git'));
@@ -476,9 +476,10 @@ async function browserServer() {
     register(route) { routesMap.set(route.path, route.handler); return () => routesMap.delete(route.path); },
   };
   const bEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DSHGT_ROUTES_KEY: 'sk-routes' };
-  const get = (name) => (name === 'authorization' ? authorization : name === 'webServer' ? webServer : undefined);
+  const withAuthorization = options.withAuthorization !== false;
+  const get = (name) => (name === 'authorization' ? (withAuthorization ? authorization : undefined) : name === 'webServer' ? webServer : undefined);
   // 真实链路里 flow 由 apply() 注册；这里显式注册（routes 本身不注册）。
-  githubAuth.registerGithubFlow({ get, clientId: 'test-client-id', logger: () => {} });
+  if (withAuthorization) githubAuth.registerGithubFlow({ get, clientId: 'test-client-id', logger: () => {} });
   const bRunner = new runnerModule.Runner({ store: bStore, get, env: bEnv });
   const bScheduler = new scheduleModule.Scheduler({ store: bStore, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
   const server = http.createServer(routes.createRoutes({
@@ -502,6 +503,19 @@ test('GET /github/browser/status 初始为 idle 且 browserAvailable=true', asyn
     const state = await (await fetch(`${b.base}/state`, { headers: HEADER })).json();
     assert.equal(state.github.browserAvailable, true);
     assert.equal(state.github.authMode, 'browser');
+  } finally { b.close(); }
+});
+
+test('无 authorization 服务：browserAvailable=false，begin 返回 GITHUB_AUTH_UNAVAILABLE 而不是 idle', async () => {
+  const b = await browserServer({ withAuthorization: false });
+  try {
+    const state = await (await fetch(`${b.base}/state`, { headers: HEADER })).json();
+    assert.equal(state.github.browserAvailable, false, '没有服务时按钮不该亮');
+    const res = await fetch(`${b.base}/github/browser/begin`, { method: 'POST', headers: HEADER, body: JSON.stringify({ method: 'browser' }) });
+    assert.equal(res.status, 500);
+    const body = await res.json();
+    assert.equal(body.code, 'GITHUB_AUTH_UNAVAILABLE');
+    assert.match(String(body.message), /authorization/);
   } finally { b.close(); }
 });
 

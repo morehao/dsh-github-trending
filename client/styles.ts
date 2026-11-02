@@ -199,6 +199,8 @@ export const CSS = `
 .dshgt-ready-extra{color:var(--gt-muted);font-size:12px;margin-left:7px;}
 .dshgt-linkbtn{border:0;background:none;color:var(--gt-accent);font-family:inherit;font-size:12.5px;padding:6px 2px;border-radius:4px;cursor:pointer;}
 .dshgt-linkbtn:hover{text-decoration:underline;}
+.dshgt-link{color:var(--gt-accent);text-decoration:none;font-size:12.5px;word-break:break-all;}
+.dshgt-link:hover{text-decoration:underline;}
 .dshgt-week{display:flex;gap:6px;align-items:stretch;}
 .dshgt-day{flex:1;min-width:0;border:1px solid var(--gt-border);border-radius:8px;padding:8px;background:var(--gt-card);display:flex;flex-direction:column;gap:5px;text-align:left;font-family:inherit;color:inherit;}
 .dshgt-day-clickable{cursor:pointer;}

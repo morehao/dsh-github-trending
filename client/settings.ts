@@ -250,14 +250,21 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
 
   const startSignIn = async (method: 'browser' | 'device'): Promise<void> => {
     try {
-      const view = await beginGithubSignIn(method);
+      let view = await beginGithubSignIn(method);
+      // 兜底：Host 理论上不再返回 idle（已修），但真拿到 idle 时要再问一次状态，
+      // 否则界面会停在「什么都没发生」。
+      if (view.phase === 'idle') view = await getGithubSignInStatus();
       setSignIn(view);
-      // browser 方法：把授权页在浏览器打开（远程场景下这步可能被浏览器拦，提供复制链接兜底）。
+      if (view.phase === 'error') {
+        notify('err', t('auth.browser.failed.detail', { message: view.error ?? '' }));
+        return;
+      }
+      // browser 方法：顺手开一个标签页；被弹窗拦截也没关系——状态行里有可点的授权链接。
       if (view.phase === 'waiting-browser' && view.authorizeUrl !== undefined) {
         try {
           window.open(view.authorizeUrl, '_blank', 'noopener,noreferrer');
         } catch {
-          /* window.open 被拦截不是错误：下方「复制链接」仍可用 */
+          /* 拦截不是错误：下方「打开授权页」仍可用 */
         }
       }
     } catch (error) {
@@ -586,8 +593,12 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
             h(Input, { mono: true, width: 220, value: draft.github.tokenRef, placeholder: 'GITHUB_TOKEN', onInput: (value: string) => update((next) => { next.github.tokenRef = value; }) }),
             h('span', { className: 'dshgt-hint' }, t('auth.tokenRef.hint')),
           ),
-    // 浏览器登录进行中的状态行：授权页链接（可复制）+ 设备码。
-    isBrowser && signIn.phase !== 'idle' && signIn.phase !== 'done'
+    // 浏览器登录失败：必须显式说出来，否则「点了没反应」又回来了。
+    isBrowser && signIn.phase === 'error'
+      ? h(Alert, { kind: 'err', title: t('auth.browser.failed') }, signIn.error ?? t('auth.browser.failed.hint'))
+      : null,
+    // 浏览器登录进行中的状态行：可点的授权页链接 + 复制兜底 + 设备码。
+    isBrowser && (signIn.phase === 'waiting-browser' || signIn.phase === 'waiting-device' || signIn.phase === 'exchanging')
       ? h(
           'div',
           { className: 'dshgt-hint' },
@@ -597,7 +608,20 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                 { className: 'dshgt-desc' },
                 h('span', null, t('auth.browser.openHint')),
                 ' ',
+                h(
+                  'a',
+                  { className: 'dshgt-link', href: signIn.authorizeUrl, target: '_blank', rel: 'noreferrer' },
+                  t('auth.browser.open'),
+                ),
+                ' ',
                 h(Btn, { small: true, variant: 'ghost', onClick: () => copyAuthorizeLink() }, t('auth.browser.copy')),
+              )
+            : null,
+          signIn.verificationUri !== undefined
+            ? h(
+                'div',
+                { className: 'dshgt-desc' },
+                h('a', { className: 'dshgt-link', href: signIn.verificationUri, target: '_blank', rel: 'noreferrer' }, signIn.verificationUri),
               )
             : null,
           signIn.userCode !== undefined
