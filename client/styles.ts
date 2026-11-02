@@ -375,11 +375,11 @@ export const CSS = `
 .dshgt-about-close{margin-left:auto;flex:none;display:grid;place-items:center;width:28px;height:28px;padding:0;appearance:none;font:inherit;cursor:pointer;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--gt-muted);}
 .dshgt-about-close:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 7%,var(--gt-bg));border-color:var(--gt-border);}
 .dshgt-about-close:focus-visible{outline:2px solid color-mix(in srgb,var(--gt-accent) 45%,transparent);outline-offset:1px;}
-/* 居中的应用身份区块：logo / 名称 / 版本胶囊 */
-.dshgt-about-identity{display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 0 16px;}
-.dshgt-about-logo svg{width:56px;height:56px;border-radius:14px;display:block;box-shadow:0 4px 14px rgba(0,0,0,.18);}
-.dshgt-about-name{font-size:16px;font-weight:650;letter-spacing:-.01em;}
-.dshgt-about-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--gt-fg);background:var(--gt-card);border:1px solid var(--gt-border);border-radius:999px;padding:1px 9px;line-height:17px;}
+/* 应用身份：顶部渐变横幅（Hero），logo / 名称 / 版本胶囊居中；用背景替代纯留白，收窄整体高度 */
+.dshgt-about-identity{position:relative;margin:-16px -16px 0;padding:16px;border-radius:12px 12px 0 0;display:flex;flex-direction:column;align-items:center;gap:7px;border-bottom:1px solid var(--gt-border);background:radial-gradient(120% 150% at 50% 0%,color-mix(in srgb,var(--gt-accent) 15%,var(--gt-bg)),var(--gt-bg));}
+.dshgt-about-logo svg{width:32px;height:32px;border-radius:12px;display:block;box-shadow:0 3px 10px rgba(0,0,0,.16);}
+.dshgt-about-name{font-size:13.5px;font-weight:680;letter-spacing:-.01em;line-height:1.2;}
+.dshgt-about-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:var(--gt-fg);background:var(--gt-card);border:1px solid var(--gt-border);border-radius:999px;padding:0 8px;line-height:16px;}
 /* 信息表：上方一条分割线，左对齐 label/value */
 .dshgt-about .dshgt-kv{grid-template-columns:88px minmax(0,1fr);border-top:1px solid var(--gt-border);padding-top:2px;}
 .dshgt-about .dshgt-kv a{color:var(--gt-accent);text-decoration:none;}
@@ -571,6 +571,7 @@ export const CSS = `
 @media (max-width:560px){
   .dshgt-modal{width:calc(100% - 20px);padding:14px;max-height:88vh;}
   .dshgt-about{max-width:none;}
+  .dshgt-about-identity{margin:-14px -14px 0;padding:14px;}
   .dshgt-about .dshgt-kv{grid-template-columns:88px minmax(0,1fr);}
   .dshgt-authmodal-footer .dshgt-hint{flex-basis:100%;}
 }
