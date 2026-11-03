@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.16] - 2026-11-03
+
+### Fixes
+
+- **update**: surface restart notice right after in-panel update (#109)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.8.15...v0.8.16
+
 ## [v0.8.12] - 2026-11-02
 
 ### Refactors
