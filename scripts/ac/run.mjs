@@ -201,7 +201,7 @@ function repoFiles(repo) {
   const file = path.join(dir, 'config.yaml');
   writeFileSync(file, 'model:\n  provider: deepseek\n  name: deepseek-chat\n  apiKey: sk-must-not-import\nrepo:\n  path: /tmp/notes\n  baseBranch: trunk\ntrending:\n  languages: ["all", "go"]\n  perLanguage: 12\n');
   const result = importCli.importFromCli(file);
-  const ok = result.ok && result.skippedSecrets.includes('model.apiKey') && !JSON.stringify(result.settings).includes('sk-must-not-import') && result.settings.repo.baseBranch === 'trunk' && result.settings.trending.topN === 12;
+  const ok = result.ok && result.skippedSecrets.includes('model.apiKey') && !JSON.stringify(result.settings).includes('sk-must-not-import') && result.settings.repo.baseBranch === 'trunk' && JSON.stringify(result.settings.trending.languages) === JSON.stringify(['all', 'go']) && result.settings.trending.topN === undefined;
   record('AC-P-12', '首次导入：非敏感字段落位，密钥未导入', ok, `imported=${result.imported.join(', ')}\nskippedSecrets=${result.skippedSecrets.join(', ')}`);
 }
 

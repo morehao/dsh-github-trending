@@ -170,6 +170,7 @@ export const CSS = `
 .dshgt-empty{padding:48px 0;text-align:center;color:var(--gt-muted);font-size:13px;}
 .dshgt-tag{display:inline-flex;align-items:center;height:20px;padding:0 7px;border:1px solid var(--gt-border);border-radius:999px;font-size:11px;color:var(--gt-muted);background:var(--gt-bg);white-space:nowrap;}
 .dshgt-inline-tag{margin-left:6px;vertical-align:1px;}
+.dshgt-tag-warn{color:var(--gt-warn,#c08a00);border-color:color-mix(in srgb,var(--gt-warn,#c08a00) 45%,var(--gt-border));}
 
 /* ——— 顶部身份条（第一行）：名称 / 版本 / 完整包名 / GitHub / 检查更新 ——— */
 .dshgt-idbar{display:flex;align-items:center;gap:9px;height:48px;padding:0 var(--dshgt-inset);border-bottom:1px solid var(--gt-border);flex:none;background:var(--gt-bg);min-width:0;}
@@ -180,7 +181,7 @@ export const CSS = `
 .dshgt-id-sep{width:1px;height:16px;background:var(--gt-border);flex:none;}
 .dshgt-id-pkg{appearance:none;border:0;background:none;padding:2px 4px;border-radius:5px;color:var(--gt-muted);cursor:pointer;font-size:12px;max-width:min(44vw,360px);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;}
 .dshgt-id-pkg:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-bg));}
-.dshgt-idbar-right{margin-left:auto;position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:0;}
+.dshgt-idbar-actions{margin-left:auto;position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:0;}
 .dshgt-id-gh{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--gt-muted);border:1px solid transparent;flex:none;}
 .dshgt-id-gh:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 6%,var(--gt-bg));border-color:var(--gt-border);}
 /* 更新入口：版本徽标 + 纯图标刷新，作为一个整体；与 GitHub 图标同形制 */
@@ -301,6 +302,8 @@ export const CSS = `
 .dshgt-seg button.on{background:var(--gt-card);color:var(--gt-fg);font-weight:600;white-space:nowrap;}
 .dshgt-digest-doc{padding:26px 32px 22px;min-width:0;}
 .dshgt-doc-meta{display:flex;gap:12px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--gt-muted);padding-bottom:12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-degraded-badge{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--gt-warn,#c08a00) 45%,var(--gt-border));border-radius:8px;font-size:12px;line-height:1.5;color:var(--gt-fg);background:color-mix(in srgb,var(--gt-warn,#c08a00) 12%,transparent);}
+.dshgt-degraded-icon{font-size:14px;line-height:1;}
 .dshgt-digest-raw{margin:0;padding:22px 28px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.75;white-space:pre-wrap;word-break:break-word;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 2.5%,var(--gt-card));max-height:640px;overflow:auto;}
 .dshgt-digest-loading{padding:40px 28px;color:var(--gt-muted);font-size:13px;}
 .dshgt-digest-empty{padding:42px 36px 46px;}

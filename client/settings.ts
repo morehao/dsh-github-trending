@@ -636,11 +636,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
     h(
       Row,
-      { label: t('scope.topN') },
-      h(Input, { mono: true, width: 70, value: String(draft.trending.topN), onInput: (value: string) => update((next) => { next.trending.topN = Math.round(Number(value) || 0); }) }),
-    ),
-    h(
-      Row,
       { label: t('scope.languages') },
       h(Chips, {
         values: LANGUAGES,

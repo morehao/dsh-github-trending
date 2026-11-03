@@ -51,7 +51,8 @@ test('导入非敏感字段，密钥与 cron 不落位', () => {
   assert.equal(settings.pr.autoMerge, false);
   assert.deepEqual(settings.trending.languages, ['all', 'go']);
   assert.equal(settings.trending.since, 'weekly');
-  assert.equal(settings.trending.topN, 15);
+  // perLanguage 已废除：旧配置里存在该字段时静默忽略，不再映射到 topN。
+  assert.equal(settings.trending.topN, undefined);
   assert.equal(settings.output.dir, 'digests');
 
   assert.ok(result.skippedSecrets.includes('model.apiKey'), '应当报告跳过了 apiKey');

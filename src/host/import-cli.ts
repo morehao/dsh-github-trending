@@ -229,9 +229,7 @@ export function importFromCli(filePath: string, base: Settings = DEFAULT_SETTING
   take(imported, 'trending.since', asString(trending.since), (value) => {
     patch.trending.since = value === 'weekly' ? 'weekly' : 'daily';
   });
-  take(imported, 'trending.perLanguage', asNumber(trending.perLanguage), (value) => {
-    patch.trending.topN = Math.round(value);
-  });
+  // trending.perLanguage 已废除（有多少收多少）：旧配置里存在该字段时静默忽略。
 
   take(imported, 'output.dir', asString(output.dir), (value) => {
     patch.output.dir = value;

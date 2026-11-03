@@ -38,6 +38,14 @@ export interface RunsProps {
   onOpenDigest: (target?: DigestTarget) => void;
 }
 
+// isDegradedRecord reports whether a run produced degraded trending data. The
+// core writes a human-readable degradation reason into warnings; older records
+// without such warnings are simply considered clean.
+function isDegradedRecord(record: RunRecord): boolean {
+  if (!record.ok || record.skipped) return false;
+  return Array.isArray(record.warnings) && record.warnings.some((w) => w.includes('降级'));
+}
+
 function recordSummary(t: Translate, record: RunRecord): string {
   if (!record.ok) {
     return [record.errorCode, record.errorMessage].filter((item) => item !== undefined && item !== '').join(' · ') || t('state.failed');
@@ -217,6 +225,7 @@ export function RunsView(props: RunsProps): any {
           h('span', { className: 'dshgt-run-muted' }, recordSummary(t, record)),
           record.legacy === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('runs.legacy')) : null,
           record.forced === true ? h('span', { className: 'dshgt-tag dshgt-inline-tag' }, t('run.forced.tag')) : null,
+          isDegradedRecord(record) ? h('span', { className: 'dshgt-tag dshgt-inline-tag dshgt-tag-warn' }, t('runs.degraded.tag')) : null,
         ),
         h('span', { className: 'dshgt-run-files' }, t('runs.files', { count: record.files })),
         record.tokens === undefined

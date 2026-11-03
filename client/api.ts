@@ -235,7 +235,7 @@ export interface SettingsShape {
   repo: { path: string; baseBranch: string; remote: string; commitMode: 'branch' | 'direct'; authorName: string; authorEmail: string };
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };
   github: { authMode: 'pat' | 'gh' | 'browser'; tokenRef: string };
-  trending: { since: Period; languages: string[]; topN: number };
+  trending: { since: Period; languages: string[] };
   summarize: {
     batchSize: number;
     maxRetries: number;

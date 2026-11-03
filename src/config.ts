@@ -74,7 +74,6 @@ export interface GithubSettings {
 export interface TrendingSettings {
   since: Since;
   languages: string[];
-  topN: number;
 }
 
 export interface OutputSettings {
@@ -201,7 +200,7 @@ export const DEFAULT_SETTINGS: Settings = {
     labels: [],
   },
   github: { authMode: 'gh', tokenRef: 'GITHUB_TOKEN' },
-  trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'], topN: 25 },
+  trending: { since: 'daily', languages: ['all', 'typescript', 'python', 'go', 'rust'] },
   summarize: {
     batchSize: 10,
     maxRetries: 1,
@@ -391,7 +390,6 @@ export function normalizeSettings(input: unknown): Settings {
     trending: {
       since: isPeriod(since) ? since : 'daily',
       languages: strArray(trending.languages, DEFAULT_SETTINGS.trending.languages),
-      topN: Math.round(num(trending.topN, DEFAULT_SETTINGS.trending.topN)),
     },
     summarize: {
       batchSize: Math.round(num(summarize.batchSize, DEFAULT_SETTINGS.summarize.batchSize)),
@@ -508,9 +506,6 @@ export function validateSettings(settings: Settings, providers: readonly string[
   } else if (!path.isAbsolute(repo.path)) {
     problems.push({ field: 'repo.path', code: 'CONFIG_INVALID', message: '仓库路径必须是绝对路径' });
   }
-  if (!Number.isInteger(trending.topN) || trending.topN <= 0) {
-    problems.push({ field: 'trending.topN', code: 'CONFIG_INVALID', message: '每语言条数必须是正整数' });
-  }
   // summarize.*
   if (!isEnrich(summarize.enrich)) {
     problems.push({ field: 'summarize.enrich', code: 'CONFIG_INVALID', message: 'enrich 必须是 none / repo / readme' });
@@ -596,7 +591,7 @@ export interface CoreConfig {
     authorEmail?: string;
   };
   pr: { enabled: boolean; titleTemplate: string; labels: string[]; autoMerge: boolean };
-  trending: { languages: string[]; since: string; perLanguage: number };
+  trending: { languages: string[]; since: string };
   summarize: {
     batchSize: number;
     maxRetries: number;
@@ -673,7 +668,6 @@ export function toCoreConfig(
     trending: {
       languages: settings.trending.languages,
       since: period ?? settings.trending.since,
-      perLanguage: settings.trending.topN,
     },
     summarize: {
       batchSize: settings.summarize.batchSize,

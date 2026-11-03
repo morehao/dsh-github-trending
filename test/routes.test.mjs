@@ -130,11 +130,11 @@ test('/config 校验并保存；非法时 400 且不落盘', async () => {
   const good = await fetch(`${base}/config`, {
     method: 'POST',
     headers: HEADER,
-    body: JSON.stringify({ settings: { model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' }, repo: { path: repo }, trending: { topN: 12 } } }),
+    body: JSON.stringify({ settings: { model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_ROUTES_KEY' }, repo: { path: repo }, trending: { languages: ['all', 'go', 'rust'] } } }),
   });
   const goodPayload = await good.json();
   assert.equal(goodPayload.saved, true);
-  assert.equal(store.readSettings().trending.topN, 12);
+  assert.deepEqual(store.readSettings().trending.languages, ['all', 'go', 'rust']);
 });
 
 test('POST /run 省略 period 默认跑日/周/月三榜；GET /log 能取到日志', async () => {
@@ -223,7 +223,7 @@ test('/config 分段保存只校验并写入当前分区（不被其它分区阻
         // 同时带一个非法的 model（model.model 为空）；仓库分区保存不应被它阻塞。
         model: { provider: 'openai-compatible', mode: 'proxy', model: '', baseURL: '' },
         repo: { path: repo },
-        trending: { topN: 7 },
+        trending: { languages: ['all', 'go'] },
       },
     }),
   });
@@ -232,7 +232,7 @@ test('/config 分段保存只校验并写入当前分区（不被其它分区阻
   const after = store.readSettings();
   assert.equal(after.repo.path, repo);
   assert.equal(after.model.model, before.model.model); // 非目标分区不被覆盖
-  assert.equal(after.trending.topN, before.trending.topN);
+  assert.deepEqual(after.trending.languages, before.trending.languages);
 });
 
 // ——— 预览与 30 条历史 ———

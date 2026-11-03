@@ -405,12 +405,22 @@ export function DigestView(props: DigestProps): any {
                       : h(
                           React.Fragment,
                           null,
+                          rendered.meta.degraded === 'true' ? degradedBadge(t) : null,
                           metaLine(rendered),
                           h('div', { className: 'dshgt-md' }, rendered.nodes),
                         ),
                   ),
           ),
     ),
+  );
+}
+
+function degradedBadge(t: Translate): any {
+  return h(
+    'div',
+    { className: 'dshgt-degraded-badge', role: 'note' },
+    h('span', { className: 'dshgt-degraded-icon' }, '⚠️'),
+    h('span', null, t('digest.degraded.badge')),
   );
 }
 
