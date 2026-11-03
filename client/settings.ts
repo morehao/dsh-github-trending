@@ -626,6 +626,10 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
   );
 
+  // 观测库设置：旧 settings.json 可能没有 observe 字段，先补一份安全默认再编辑/渲染。
+  const observeOf = (s: SettingsShape) => s.observe ?? { enabled: true, backfillDays: 30, maxCandidates: 300 };
+  const observe = observeOf(draft);
+
   const scopeCard = h(
     Card,
     {
@@ -703,6 +707,28 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       h(Input, { mono: true, width: 90, value: String(draft.summarize.readmeChars), onInput: (value: string) => update((next) => { next.summarize.readmeChars = Math.round(Number(value) || 0); }) }),
     ),
     draft.summarize.enrich === 'none' ? null : h(Alert, { kind: 'warn' }, h('div', null, t('summarize.enrichNote'))),
+    // 本地 star 观测库（核心 observe.*）：旧设置里可能还没有该字段，先取默认再编辑。
+    // 观测库让「今日新增」来自本地每日快照的差分；关闭即回到「增量只来自趋势页」的旧行为。
+    h('h4', { className: 'dshgt-subhead' }, t('card.observe.title')),
+    h(
+      Row,
+      { label: t('observe.enabled'), help: t('observe.enabled.help') },
+      h(Toggle, {
+        checked: observe.enabled,
+        onChange: (value: boolean) => update((next) => { next.observe = { ...observeOf(next), enabled: value }; }),
+      }),
+    ),
+    h(
+      Row,
+      { label: t('observe.backfillDays'), help: t('observe.backfillDays.help') },
+      h(Input, { mono: true, width: 90, value: String(observe.backfillDays), onInput: (value: string) => update((next) => { next.observe = { ...observeOf(next), backfillDays: Math.round(Number(value) || 0) }; }) }),
+    ),
+    h(
+      Row,
+      { label: t('observe.maxCandidates'), help: t('observe.maxCandidates.help') },
+      h(Input, { mono: true, width: 90, value: String(observe.maxCandidates), onInput: (value: string) => update((next) => { next.observe = { ...observeOf(next), maxCandidates: Math.round(Number(value) || 0) }; }) }),
+    ),
+    observe.enabled ? null : h(Alert, { kind: 'info' }, h('div', null, t('observe.disabledNote'))),
   );
 
   // 发版节奏与并发是这次新增的字段：旧设置文件里可能还没有，先给安全默认值再编辑，
