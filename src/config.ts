@@ -682,7 +682,13 @@ export interface CoreConfig {
     budgetSeconds: number;
     period: 'weekly';
   };
-  output: { dir: string; branchPrefix: string; retentionDays: number };
+  output: {
+    dir: string;
+    branchPrefix: string;
+    retentionDays: number;
+    /** 核心 0.8.9+ 才认识；旧核心会忽略未知字段。 */
+    branchGrouping?: 'per-period' | 'per-date';
+  };
 }
 
 /**
@@ -771,6 +777,12 @@ export function toCoreConfig(
       dir: settings.output.dir,
       branchPrefix: 'trending/',
       retentionDays: 90,
+      // 分支模式下插件每次调度都跑日/周/月三个周期（periodList 固定返回全部
+      // 周期），三个兄弟分支都要写同一份 trending/index.md —— 第一个 PR 合完，
+      // 第二个就冲突。把同一天的周期合并到一条分支（per-date）后，索引在一条
+      // 分支上自然累计，一个 PR 带齐当期全部产物。direct 模式直接提交基线分支，
+      // 不涉及分支布局，保持 per-period 以免改变旧核心行为。
+      branchGrouping: settings.repo.commitMode === 'branch' ? 'per-date' : 'per-period',
     },
   };
   return config;

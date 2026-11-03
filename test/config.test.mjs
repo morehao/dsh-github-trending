@@ -58,6 +58,21 @@ test('direct 提交模式不会写 PR 开关', () => {
   assert.equal(config.toCoreConfig(settings, 'k').pr.enabled, false);
 });
 
+test('分支模式下多周期合并到同一天的分支，避免 index.md 兄弟冲突', () => {
+  const branch = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'm' },
+    repo: { path: '/tmp/x' },
+  });
+  assert.equal(config.toCoreConfig(branch, 'k').output.branchGrouping, 'per-date');
+
+  const direct = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'm' },
+    repo: { path: '/tmp/x', commitMode: 'direct' },
+    schedule: { periods: ['daily', 'weekly'] },
+  });
+  assert.equal(config.toCoreConfig(direct, 'k').output.branchGrouping, 'per-period');
+});
+
 test('代理模式允许空 baseURL，direct 仍需显式端点', () => {
   const providers = ['deepseek', 'openai-compatible'];
   const proxy = config.normalizeSettings({ model: { provider: 'openai-compatible', mode: 'proxy', model: 'm' }, repo: { path: '/tmp/x' } });
