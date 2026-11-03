@@ -1,14 +1,15 @@
 /**
- * 顶部身份条（A 方案定稿）：插件名称 / 版本 / 完整包名 / GitHub / 检查更新。
+ * 顶部身份条（A 方案定稿）：插件名称 / 版本 / 完整包名 / 检查更新 / GitHub。
  *
- * 包名后面紧跟 GitHub 图标，二者之间用一条竖杠分隔；点包名打开「关于」弹层
- * （许可 / 核心 / 运行环境 + 完整更新区），版本号只是静态信息，不再承担入口。
- * 更新状态复用 update-panel 的共享 controller，与「关于」弹层、概览页是同一份，
- * 不会重复打网络。
+ * 更新与仓库两个图标紧跟包名，不再被推到右端：包名读作身份，后面这段读作它的动作，
+ * 中间不加分隔线，靠 8px 间距表态。点包名打开「关于」弹层（许可 / 核心 / 运行环境 +
+ * 完整更新区），版本号只是静态信息，不承担入口。更新状态复用 update-panel 的共享
+ * controller，与「关于」弹层、概览页是同一份，不会重复打网络。
  *
- * 更新入口是右侧一枚纯图标刷新按钮（与 GitHub 图标同一形制）：状态靠图标颜色 +
- * 角标 + 旋转表达，文案走 title；有新版本时图标左侧出现目标版本号徽标，点它或图标
- * 弹出确认气泡（两段确认）。与 dsh-skills-console 的页头刷新保持同一套视觉。
+ * 更新入口是一枚纯图标刷新按钮（与 GitHub 图标同一形制）：状态靠图标颜色 + 角标 +
+ * 旋转表达，文案走 title；有新版本时刷新图标变琥珀色，目标版本号徽标排在 GitHub
+ * 之后（D2）——放前面会把两个图标整体推开，每次出现都跳一下。点图标或徽标弹出确认
+ * 气泡（两段确认）。与 dsh-skills-console 的页头刷新保持同一套视觉。
  */
 import { Btn, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
@@ -108,47 +109,41 @@ export function IdentityBar(props: IdentityBarProps): any {
       { type: 'button', className: 'dshgt-id-pkg dshgt-mono', title: t('about.title'), onClick: () => props.onOpenAbout() },
       plugin.name,
     ),
-    // 更新入口：版本徽标 + 纯图标刷新，放在 GitHub 图标左侧、与之一组右对齐。
+    // 更新与仓库入口：紧跟包名，作为身份条的第二段。
+    // 有新版本时版本徽标排在 GitHub 之后，图标位置不随状态跳动。
     h(
       'div',
       { className: 'dshgt-idbar-actions' },
       h(
-        'div',
-        { className: 'dshgt-upd-unit' },
-        showBadge
-          ? h(
-              'button',
-              {
-                type: 'button',
-                className: 'dshgt-ver-badge',
-                title: t('shell.update.badgeTitle', { version: latestVersion }),
-                'aria-label': t('shell.update.badgeTitle', { version: latestVersion }),
-                onClick: () => setConfirming((v) => !v),
-              },
-              `v${latestVersion}`,
-            )
-          : null,
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'dshgt-refresh',
-            'data-state': st.state,
-            disabled: busy,
-            title: st.tip,
-            'aria-label': st.tip,
-            'aria-expanded': confirmOpen ? 'true' : undefined,
-            onClick: onRefreshClick,
-          },
-          refreshIcon(),
-        ),
+        'button',
+        {
+          type: 'button',
+          className: 'dshgt-refresh',
+          'data-state': st.state,
+          disabled: busy,
+          title: st.tip,
+          'aria-label': st.tip,
+          'aria-expanded': confirmOpen ? 'true' : undefined,
+          onClick: onRefreshClick,
+        },
+        refreshIcon(),
       ),
       plugin.repository === undefined
         ? null
-        : [
-            h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
-            h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
-          ],
+        : h('a', { className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
+      showBadge
+        ? h(
+            'button',
+            {
+              type: 'button',
+              className: 'dshgt-ver-badge',
+              title: t('shell.update.badgeTitle', { version: latestVersion }),
+              'aria-label': t('shell.update.badgeTitle', { version: latestVersion }),
+              onClick: () => setConfirming((v) => !v),
+            },
+            `v${latestVersion}`,
+          )
+        : null,
       confirmOpen
         ? h(
             'div',

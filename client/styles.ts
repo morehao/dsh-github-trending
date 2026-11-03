@@ -181,15 +181,15 @@ export const CSS = `
 .dshgt-id-sep{width:1px;height:16px;background:var(--gt-border);flex:none;}
 .dshgt-id-pkg{appearance:none;border:0;background:none;padding:2px 4px;border-radius:5px;color:var(--gt-muted);cursor:pointer;font-size:12px;max-width:min(44vw,360px);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;}
 .dshgt-id-pkg:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-bg));}
-.dshgt-idbar-actions{margin-left:auto;position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:0;}
+/* 更新 / GitHub 入口：紧跟包名，不再靠右推到底，也不加分隔线（A 方案）。 */
+.dshgt-idbar-actions{margin-left:2px;position:relative;display:flex;align-items:center;gap:2px;flex:none;min-width:0;}
 .dshgt-id-gh{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--gt-muted);border:1px solid transparent;flex:none;}
 .dshgt-id-gh:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 6%,var(--gt-bg));border-color:var(--gt-border);}
-/* 更新入口：版本徽标 + 纯图标刷新，作为一个整体；与 GitHub 图标同形制 */
-.dshgt-upd-unit{display:inline-flex;align-items:center;gap:4px;flex:none;}
 /* 版本徽标：仅「有新版本」时出现，透明底细描边，高度对齐图标按钮中线 */
 .dshgt-ver-badge{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 8px;border-radius:999px;
   border:1px solid color-mix(in srgb,var(--gt-warn) 42%,transparent);background:transparent;color:var(--gt-warn);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer;
+  margin-left:6px;
   transition:background .12s ease,border-color .12s ease;}
 .dshgt-ver-badge:hover{background:color-mix(in srgb,var(--gt-warn) 12%,transparent);border-color:color-mix(in srgb,var(--gt-warn) 60%,transparent);}
 .dshgt-ver-badge:focus-visible{outline:2px solid var(--gt-accent);outline-offset:1px;}
@@ -209,8 +209,8 @@ export const CSS = `
 .dshgt-refresh[data-state="error"]{color:var(--gt-err);}
 .dshgt-refresh[data-state="ok-flash"]{color:var(--gt-ok);}
 @keyframes dshgt-refresh-spin{to{transform:rotate(360deg);}}
-/* 确认气泡：贴刷新图标右下方弹出 */
-.dshgt-confirm-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:30;box-sizing:border-box;min-width:210px;max-width:280px;
+/* 确认气泡：贴刷新图标左下方弹出（图标在条左侧，贴右会让气泡朝右伸出屏幕） */
+.dshgt-confirm-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:30;box-sizing:border-box;min-width:210px;max-width:280px;
   display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:12px;background:var(--gt-card);border:1px solid var(--gt-border);
   box-shadow:0 12px 32px rgba(0,0,0,.28);}
 .dshgt-confirm-title{font-size:12.5px;color:var(--gt-fg);line-height:1.45;}

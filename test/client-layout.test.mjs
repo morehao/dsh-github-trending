@@ -38,3 +38,14 @@ test('视图内部不再各自限宽或居中', () => {
   assert.doesNotMatch(rule('.dshgt-digest-sheet'), /max-width/);
   assert.doesNotMatch(rule('.dshgt-digest-empty'), /max-width/);
 });
+
+/**
+ * 身份条：更新 / GitHub 入口是包名后面的第二段，不再靠右推到底（A 方案）；
+ * 确认气泡跟着图标落在左侧，贴 right:0 会朝右伸出面板。
+ */
+test('身份条动作区紧跟包名，确认气泡贴左', () => {
+  const actions = rule('.dshgt-idbar-actions');
+  assert.doesNotMatch(actions, /margin-left:auto/, '动作区不该再被推到右端');
+  assert.match(actions, /flex:none/);
+  assert.match(rule('.dshgt-confirm-pop'), /left:0/);
+});
