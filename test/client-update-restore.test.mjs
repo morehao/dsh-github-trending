@@ -178,3 +178,33 @@ async function loadModuleWithReact(entryRel, reactStub) {
   globalThis.__REACT_STUB__ = reactStub;
   return import(pathToFileURL(outfile).href);
 }
+
+test('update-panel：settled（applied / restart-required）才推出恢复提示，其余状态不弹', async () => {
+  const reactStub = {
+    createElement: () => undefined,
+    useState: (v) => [typeof v === 'function' ? v() : v, () => undefined],
+    useEffect: () => undefined,
+    useRef: (v) => ({ current: v }),
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+    Fragment: 'fragment',
+  };
+  const mod = await loadModuleWithReact('client/update-panel.ts', reactStub);
+  const view = { packageName: '@morehao/dsh-github-trending', currentVersion: '0.8.14', latestVersion: '0.8.15', updateAvailable: true, checkFailed: false, canApply: true };
+  const stored = { from: '0.8.14', to: '0.8.15', at: 1 };
+
+  for (const status of ['idle', 'checking', 'available', 'current', 'failed', 'applying']) {
+    assert.equal(mod.isUpdateSettled({ status, view, error: null }), false, `${status} 不应视为已落定`);
+    assert.equal(mod.deriveSettledNotice({ status, view, error: null }, stored), null, `${status} 不应弹恢复提示`);
+  }
+
+  for (const status of ['applied', 'restart-required']) {
+    const state = { status, view, error: null };
+    assert.equal(mod.isUpdateSettled(state), true, `${status} 应视为已落定`);
+    // 优先用 store 里的记号（onConfirmUpdate 已写入 from/to/at）
+    assert.deepEqual(mod.deriveSettledNotice(state, stored), stored);
+    // 记号缺失时用状态里的版本兜底，保证一定有反馈
+    const fallback = mod.deriveSettledNotice(state, null, 123);
+    assert.deepEqual(fallback, { from: '0.8.14', to: '0.8.15', at: 123 });
+  }
+});

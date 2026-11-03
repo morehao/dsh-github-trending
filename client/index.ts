@@ -21,6 +21,7 @@ import { SubscriptionsView } from './subscriptions.js';
 import { AboutDialog } from './about.js';
 import { IdentityBar } from './identity-bar.js';
 import { RestoreNotice } from './restore-notice.js';
+import { usePluginUpdate, isUpdateSettled, deriveSettledNotice } from './update-panel.js';
 import { clearPendingUpdate, readPendingUpdate, type PendingUpdate } from './update-store.js';
 import { SidebarPanelIcon } from './panel-icon.js';
 import { useRunController } from './run-controller.js';
@@ -161,6 +162,15 @@ export function apply(ctx: any): void {
     React.useEffect(() => {
       setPendingUpdate(readPendingUpdate());
     }, []);
+    // 面板内直接点「确认更新」时不会重挂载，上面那个 mount-only 的读取拿不到刚写下的记号，
+    // 导致更新成功后没有任何「已更新、请重启」的反馈（看起来像点了没反应）。这里订阅共享
+    // 更新状态：一旦落到 applied / restart-required（更新已装上、待重启生效），立刻推出恢复提示
+    // 弹 RestoreNotice，不必等重新打开面板。判定收敛在 deriveSettledNotice 里（纯函数、可单测）。
+    const [updateState] = usePluginUpdate();
+    React.useEffect(() => {
+      if (!isUpdateSettled(updateState)) return;
+      setPendingUpdate((current) => current ?? deriveSettledNotice(updateState, readPendingUpdate()));
+    }, [updateState]);
 
     const openDigest = React.useCallback((target?: DigestTarget): void => {
       if (target !== undefined) setDigestTarget(target);
