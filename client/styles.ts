@@ -180,7 +180,7 @@ export const CSS = `
 .dshgt-id-sep{width:1px;height:16px;background:var(--gt-border);flex:none;}
 .dshgt-id-pkg{appearance:none;border:0;background:none;padding:2px 4px;border-radius:5px;color:var(--gt-muted);cursor:pointer;font-size:12px;max-width:min(44vw,360px);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;}
 .dshgt-id-pkg:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 5%,var(--gt-bg));}
-.dshgt-idbar-right{margin-left:auto;position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:0;}
+.dshgt-idbar-actions{margin-left:auto;position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:0;}
 .dshgt-id-gh{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;color:var(--gt-muted);border:1px solid transparent;flex:none;}
 .dshgt-id-gh:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 6%,var(--gt-bg));border-color:var(--gt-border);}
 /* 更新入口：版本徽标 + 纯图标刷新，作为一个整体；与 GitHub 图标同形制 */

@@ -108,15 +108,10 @@ export function IdentityBar(props: IdentityBarProps): any {
       { type: 'button', className: 'dshgt-id-pkg dshgt-mono', title: t('about.title'), onClick: () => props.onOpenAbout() },
       plugin.name,
     ),
-    plugin.repository === undefined
-      ? null
-      : [
-          h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
-          h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
-        ],
+    // 更新入口：版本徽标 + 纯图标刷新，放在 GitHub 图标左侧、与之一组右对齐。
     h(
       'div',
-      { className: 'dshgt-idbar-right' },
+      { className: 'dshgt-idbar-actions' },
       h(
         'div',
         { className: 'dshgt-upd-unit' },
@@ -148,6 +143,12 @@ export function IdentityBar(props: IdentityBarProps): any {
           refreshIcon(),
         ),
       ),
+      plugin.repository === undefined
+        ? null
+        : [
+            h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
+            h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
+          ],
       confirmOpen
         ? h(
             'div',
