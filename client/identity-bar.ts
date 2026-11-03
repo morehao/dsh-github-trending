@@ -14,6 +14,7 @@ import { Btn, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import { usePluginUpdate } from './update-panel.js';
 import { writePendingUpdate } from './update-store.js';
+import { deriveUpdateUiState, updateStatusLabel } from '@morehao/dsh-plugin-kit/update/client';
 
 export interface IdentityBarProps {
   t: Translate;
@@ -52,33 +53,32 @@ export function IdentityBar(props: IdentityBarProps): any {
   const [confirming, setConfirming] = React.useState(false);
   const [updateState, controller] = usePluginUpdate();
   const view = updateState.view;
-  const status = updateState.status;
 
-  const busy = status === 'checking' || status === 'applying';
-  const settled = status === 'restart-required' || status === 'applied';
   const latestVersion = view === null ? '' : view.latestVersion ?? '';
-  const updateAvailable = view !== null && view.updateAvailable;
-  const actionable = updateAvailable && view !== null && view.canApply && !busy && !settled;
   const currentVersion = view === null ? plugin.version : view.currentVersion ?? plugin.version;
 
+  // 跨插件一致的状态派生统一走 plugin-kit（与 dsh-skills-console 同一套）：
+  //   visual → data-state；showBadge/badgeVersion → 版本徽标；busy/settled/actionable → 交互。
+  const ui = deriveUpdateUiState(updateState);
+  const label = updateStatusLabel(updateState);
+  const busy = ui.busy;
+  const actionable = ui.actionable;
+
   React.useEffect(() => {
-    if (!updateAvailable || busy || settled) setConfirming(false);
-  }, [updateAvailable, busy, settled]);
+    if (!actionable) setConfirming(false);
+  }, [actionable]);
 
-  // 状态收敛成「一个 data-state + 一句 tooltip 文案」：
-  //   available → 琥珀（有新版本）；checking/applying → 旋转禁用；error → 红（重试）；
-  //   latest → 普通图标；ok-flash → 绿（刚更新完）。版本号常驻在图标左侧徽标里（仅 available）。
-  function stateAndTip(): { state: string; tip: string } {
-    if (status === 'checking' || view === null) return { state: 'checking', tip: t('shell.update.checking') };
-    if (status === 'applying') return { state: 'checking', tip: t('shell.update.applying', { version: latestVersion }) };
-    if (status === 'restart-required' || status === 'applied') return { state: 'ok-flash', tip: t('shell.update.done', { version: latestVersion }) };
-    if (status === 'failed') return { state: 'error', tip: updateState.error?.code === 'CHECK_FAILED' ? t('shell.update.checkFailed') : t('shell.update.failed') };
-    if (view.checkFailed) return { state: 'error', tip: t('shell.update.checkFailed') };
-    if (view.updateAvailable) return { state: 'available', tip: t('shell.update.available', { latest: latestVersion }) };
-    return { state: 'latest', tip: t('shell.update.latest', { version: currentVersion }) };
-  }
-
-  const st = stateAndTip();
+  // 语义 key → 本仓文案（plugin-kit 只给「该显示哪条」，文案留在本仓 i18n）。
+  const LABEL_COPY: Record<string, string> = {
+    checking: t('shell.update.checking'),
+    applying: t('shell.update.applying', { version: label.params.version ?? '' }),
+    available: t('shell.update.available', { latest: label.params.latest ?? '' }),
+    latest: t('shell.update.latest', { version: label.params.version ?? '' }),
+    done: t('shell.update.done', { version: label.params.version ?? '' }),
+    checkFailed: t('shell.update.checkFailed'),
+    failed: t('shell.update.failed'),
+  };
+  const st = { state: ui.visual, tip: LABEL_COPY[label.key] ?? t('shell.update.latest', { version: currentVersion }) };
 
   // 点刷新图标：可更新 → 开确认气泡；失败 → 重试；其余 → 检查。
   function onRefreshClick(): void {
@@ -94,7 +94,7 @@ export function IdentityBar(props: IdentityBarProps): any {
     void controller.apply();
   }
 
-  const showBadge = Boolean(updateAvailable && view?.canApply && !busy && !settled);
+  const showBadge = ui.showBadge;
   const confirmOpen = confirming && actionable;
 
   return h(
@@ -108,15 +108,10 @@ export function IdentityBar(props: IdentityBarProps): any {
       { type: 'button', className: 'dshgt-id-pkg dshgt-mono', title: t('about.title'), onClick: () => props.onOpenAbout() },
       plugin.name,
     ),
-    plugin.repository === undefined
-      ? null
-      : [
-          h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
-          h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
-        ],
+    // 更新入口：版本徽标 + 纯图标刷新，放在 GitHub 图标左侧、与之一组右对齐。
     h(
       'div',
-      { className: 'dshgt-idbar-right' },
+      { className: 'dshgt-idbar-actions' },
       h(
         'div',
         { className: 'dshgt-upd-unit' },
@@ -148,6 +143,12 @@ export function IdentityBar(props: IdentityBarProps): any {
           refreshIcon(),
         ),
       ),
+      plugin.repository === undefined
+        ? null
+        : [
+            h('span', { key: 'gh-sep', className: 'dshgt-id-sep dshgt-id-sep-gh' }),
+            h('a', { key: 'gh', className: 'dshgt-id-gh', href: plugin.repository, target: '_blank', rel: 'noreferrer', title: t('about.repo'), 'aria-label': t('about.repo') }, githubIcon()),
+          ],
       confirmOpen
         ? h(
             'div',
