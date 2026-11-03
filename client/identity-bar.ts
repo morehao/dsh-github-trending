@@ -5,6 +5,10 @@
  * （许可 / 核心 / 运行环境 + 完整更新区），版本号只是静态信息，不再承担入口。
  * 更新状态复用 update-panel 的共享 controller，与「关于」弹层、概览页是同一份，
  * 不会重复打网络。
+ *
+ * 更新入口是右侧一枚纯图标刷新按钮（与 GitHub 图标同一形制）：状态靠图标颜色 +
+ * 角标 + 旋转表达，文案走 title；有新版本时图标左侧出现目标版本号徽标，点它或图标
+ * 弹出确认气泡（两段确认）。与 dsh-skills-console 的页头刷新保持同一套视觉。
  */
 import { Btn, h, React } from './ui.js';
 import type { Translate } from './i18n.js';
@@ -33,6 +37,16 @@ function githubIcon(): any {
   }));
 }
 
+/** 刷新图标（与 skills-console 同一形状）：圆弧箭头。 */
+function refreshIcon(): any {
+  return h(
+    'svg',
+    { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
+    h('path', { d: 'M20 12a8 8 0 1 1-2.34-5.66' }),
+    h('path', { d: 'M20 4v5h-5' }),
+  );
+}
+
 export function IdentityBar(props: IdentityBarProps): any {
   const { t, plugin } = props;
   const [confirming, setConfirming] = React.useState(false);
@@ -40,42 +54,48 @@ export function IdentityBar(props: IdentityBarProps): any {
   const view = updateState.view;
   const status = updateState.status;
 
-  React.useEffect(() => {
-    if (status === 'applying' || status === 'restart-required' || status === 'applied') setConfirming(false);
-  }, [status]);
-
   const busy = status === 'checking' || status === 'applying';
   const settled = status === 'restart-required' || status === 'applied';
   const latestVersion = view === null ? '' : view.latestVersion ?? '';
   const updateAvailable = view !== null && view.updateAvailable;
-  const actionable = updateAvailable && view !== null && view.canApply && !settled && !busy;
+  const actionable = updateAvailable && view !== null && view.canApply && !busy && !settled;
   const currentVersion = view === null ? plugin.version : view.currentVersion ?? plugin.version;
 
-  function statusLine(): { text: string; kind: string } {
-    if (status === 'checking' || view === null) return { text: t('shell.update.checking'), kind: 'muted' };
-    if (status === 'applying') return { text: t('shell.update.applying', { version: latestVersion }), kind: 'muted' };
-    if (status === 'restart-required' || status === 'applied') return { text: t('shell.update.done', { version: latestVersion }), kind: 'ok' };
-    if (status === 'failed') return { text: updateState.error?.code === 'CHECK_FAILED' ? t('shell.update.checkFailed') : t('shell.update.failed'), kind: 'err' };
-    if (view.checkFailed) return { text: t('shell.update.checkFailed'), kind: 'err' };
-    if (view.updateAvailable) return { text: t('shell.update.available', { latest: view.latestVersion ?? '' }), kind: 'new' };
-    return { text: t('shell.update.latest', { version: currentVersion }), kind: 'ok' };
+  React.useEffect(() => {
+    if (!updateAvailable || busy || settled) setConfirming(false);
+  }, [updateAvailable, busy, settled]);
+
+  // 状态收敛成「一个 data-state + 一句 tooltip 文案」：
+  //   available → 琥珀（有新版本）；checking/applying → 旋转禁用；error → 红（重试）；
+  //   latest → 普通图标；ok-flash → 绿（刚更新完）。版本号常驻在图标左侧徽标里（仅 available）。
+  function stateAndTip(): { state: string; tip: string } {
+    if (status === 'checking' || view === null) return { state: 'checking', tip: t('shell.update.checking') };
+    if (status === 'applying') return { state: 'checking', tip: t('shell.update.applying', { version: latestVersion }) };
+    if (status === 'restart-required' || status === 'applied') return { state: 'ok-flash', tip: t('shell.update.done', { version: latestVersion }) };
+    if (status === 'failed') return { state: 'error', tip: updateState.error?.code === 'CHECK_FAILED' ? t('shell.update.checkFailed') : t('shell.update.failed') };
+    if (view.checkFailed) return { state: 'error', tip: t('shell.update.checkFailed') };
+    if (view.updateAvailable) return { state: 'available', tip: t('shell.update.available', { latest: latestVersion }) };
+    return { state: 'latest', tip: t('shell.update.latest', { version: currentVersion }) };
   }
 
-  function action(): any {
-    if (status === 'applying') return h(Btn, { small: true, disabled: true }, t('shell.update.applyingShort'));
-    if (actionable) {
-      if (confirming) {
-        return [
-          h(Btn, { key: 'yes', small: true, variant: 'danger', onClick: () => { setConfirming(false); writePendingUpdate(currentVersion, latestVersion); void controller.apply(); } }, t('shell.update.confirmYes')),
-          h(Btn, { key: 'no', small: true, onClick: () => setConfirming(false) }, t('shell.update.cancel')),
-        ];
-      }
-      return h(Btn, { small: true, variant: 'primary', onClick: () => setConfirming(true) }, t('shell.update.apply', { version: latestVersion }));
-    }
-    return h(Btn, { small: true, disabled: busy, onClick: () => void controller.check({ fresh: true }) }, t('shell.update.check'));
+  const st = stateAndTip();
+
+  // 点刷新图标：可更新 → 开确认气泡；失败 → 重试；其余 → 检查。
+  function onRefreshClick(): void {
+    if (busy) return;
+    if (actionable) { setConfirming((v) => !v); return; }
+    void controller.check({ fresh: true });
   }
 
-  const line = statusLine();
+  // 「确认更新」：落「刚点过更新」记号后 apply（面板随插件自卸消失，重开靠记号渲染恢复提示）。
+  function onConfirmUpdate(): void {
+    setConfirming(false);
+    writePendingUpdate(currentVersion, latestVersion);
+    void controller.apply();
+  }
+
+  const showBadge = Boolean(updateAvailable && view?.canApply && !busy && !settled);
+  const confirmOpen = confirming && actionable;
 
   return h(
     'div',
@@ -98,11 +118,46 @@ export function IdentityBar(props: IdentityBarProps): any {
       'div',
       { className: 'dshgt-idbar-right' },
       h(
-        'span',
-        { className: 'dshgt-id-upd' },
-        confirming ? h('span', { className: 'dshgt-id-status new' }, t('shell.update.confirmHint')) : h('span', { className: `dshgt-id-status ${line.kind}` }, line.text),
-        h('span', { className: 'dshgt-id-actions' }, action()),
+        'div',
+        { className: 'dshgt-upd-unit' },
+        showBadge
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshgt-ver-badge',
+                title: t('shell.update.badgeTitle', { version: latestVersion }),
+                'aria-label': t('shell.update.badgeTitle', { version: latestVersion }),
+                onClick: () => setConfirming((v) => !v),
+              },
+              `v${latestVersion}`,
+            )
+          : null,
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshgt-id-gh dshgt-refresh',
+            'data-state': st.state,
+            disabled: busy,
+            title: st.tip,
+            'aria-label': st.tip,
+            'aria-expanded': confirmOpen ? 'true' : undefined,
+            onClick: onRefreshClick,
+          },
+          refreshIcon(),
+        ),
       ),
+      confirmOpen
+        ? h(
+            'div',
+            { className: 'dshgt-confirm-pop', role: 'dialog', 'aria-label': t('shell.update.confirmHint') },
+            h('div', { className: 'dshgt-confirm-title' }, t('shell.update.confirmHint')),
+            h('div', { className: 'dshgt-confirm-actions' },
+              h(Btn, { small: true, onClick: () => setConfirming(false) }, t('shell.update.cancel')),
+              h(Btn, { small: true, variant: 'primary', onClick: onConfirmUpdate }, t('shell.update.confirmYes'))),
+          )
+        : null,
     ),
   );
 }
