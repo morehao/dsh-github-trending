@@ -309,3 +309,43 @@ test('network.proxy：归一化默认空串、校验 http(s) 形态、可保存�
   const merged = config.mergeSettingsSection(stored, incoming, 'source');
   assert.equal(merged.network.proxy, 'http://127.0.0.1:7890');
 });
+
+test('observe：默认开启，归一化、校验与 toCoreConfig 透传', () => {
+  // 默认：开启、回填 30 天、候选上限 300。
+  const defaults = config.normalizeSettings({});
+  assert.deepEqual(defaults.observe, { enabled: true, backfillDays: 30, maxCandidates: 300 });
+
+  // 显式关闭 + 改数值 + 未知字段丢弃。
+  const off = config.normalizeSettings({ observe: { enabled: false, backfillDays: 7, maxCandidates: 100, bogus: 1 } });
+  assert.equal(off.observe.enabled, false);
+  assert.equal(off.observe.backfillDays, 7);
+  assert.equal(off.observe.maxCandidates, 100);
+  assert.equal('bogus' in off.observe, false);
+
+  // 透传到核心配置。
+  const coreConfig = config.toCoreConfig(off, 'k');
+  assert.deepEqual(coreConfig.observe, { enabled: false, backfillDays: 7, maxCandidates: 100 });
+
+  // 校验：越界拦下，合法通过。
+  const base = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x' } });
+  assert.equal(config.validateSettings(base).some((p) => p.field.startsWith('observe.')), false);
+  const bad = config.normalizeSettings({
+    model: { provider: 'deepseek', model: 'm' },
+    repo: { path: '/tmp/x' },
+    observe: { backfillDays: 999, maxCandidates: 0 },
+  });
+  const problems = config.validateSettings(bad);
+  assert.ok(problems.some((p) => p.field === 'observe.backfillDays'));
+  assert.ok(problems.some((p) => p.field === 'observe.maxCandidates'));
+});
+
+test('observe 归入 scope 分区并随分段合并保留', () => {
+  const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x' } });
+  const incoming = config.normalizeSettings({ observe: { enabled: false, backfillDays: 14, maxCandidates: 200 } });
+  // 保存 scope 分区时，observe 一起被覆盖。
+  const merged = config.mergeSettingsSection(stored, incoming, 'scope');
+  assert.deepEqual(merged.observe, { enabled: false, backfillDays: 14, maxCandidates: 200 });
+  // 保存其它分区（如 model）时，observe 保持 stored 的值不被牵连。
+  const mergedModel = config.mergeSettingsSection(stored, incoming, 'model');
+  assert.deepEqual(mergedModel.observe, stored.observe);
+});

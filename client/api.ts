@@ -246,6 +246,8 @@ export interface SettingsShape {
     enrichTimeoutSeconds: number;
     enrichBudgetSeconds: number;
   };
+  /** 本地 star 观测库（核心 `observe.*`）；旧设置可能没有该字段，缺省按默认处理。 */
+  observe?: { enabled: boolean; backfillDays: number; maxCandidates: number };
   releases: {
     includePrerelease: boolean;
     includeDrafts: boolean;

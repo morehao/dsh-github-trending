@@ -99,6 +99,22 @@ export interface SummarizeSettings {
 }
 
 /**
+ * 本地 star 观测库（核心 `observe.*`，core ≥ 0.8.8）。
+ * 观测库让「今日新增」来自本地每日快照的差分，而不是趋势页上的一行字；
+ * 默认开启，`enabled=false` 是回滚开关（回到「增量只来自趋势页」的旧行为）。
+ * 存储位置由核心自己解析到 `$DSH_HOME`（计划 D4），**不**在这里暴露，避免用户
+ * 把观测库指进归档仓库。
+ */
+export interface ObserveSettings {
+  /** 是否启用观测库；关闭即回到旧行为（`starsInPeriod` 只来自趋势页/搜索）。 */
+  enabled: boolean;
+  /** 首次见到的仓库从历史接口回填多少天（0=不回填，从今天开始攒）。 */
+  backfillDays: number;
+  /** 单次运行最多记多少个候选仓库（上限 300，约 3 个 GraphQL 批量/天）。 */
+  maxCandidates: number;
+}
+
+/**
  * 每周发版运行的插件侧节奏（核心没有这个字段，**绝不**写进核心 YAML）。
  * 与榜单调度（`schedule.*`）完全独立：两者各有自己的开关与时间点。
  */
@@ -164,6 +180,7 @@ export interface Settings {
   github: GithubSettings;
   trending: TrendingSettings;
   summarize: SummarizeSettings;
+  observe: ObserveSettings;
   releases: ReleasesSettings;
   output: OutputSettings;
   schedule: ScheduleSettings;
@@ -221,6 +238,7 @@ export const DEFAULT_SETTINGS: Settings = {
     enrichTimeoutSeconds: 5,
     enrichBudgetSeconds: 8,
   },
+  observe: { enabled: true, backfillDays: 30, maxCandidates: 300 },
   releases: {
     includePrerelease: false,
     includeDrafts: false,
@@ -262,6 +280,7 @@ export function sectionOfField(field: string): SettingsSection | undefined {
   if (field.startsWith('github.')) return 'auth';
   if (field.startsWith('trending.')) return 'scope';
   if (field.startsWith('summarize.')) return 'summarize';
+  if (field.startsWith('observe.')) return 'scope';
   if (field.startsWith('releases.')) return 'releases';
   if (field.startsWith('schedule.')) return 'schedule';
   if (field === 'corePath' || field === 'coreAutoDownload' || field === 'network.proxy') return 'source';
@@ -293,6 +312,7 @@ export function mergeSettingsSection(stored: Settings, incoming: Settings, secti
       break;
     case 'scope':
       next.trending = incoming.trending;
+      next.observe = incoming.observe;
       break;
     case 'summarize':
       next.summarize = incoming.summarize;
@@ -357,6 +377,7 @@ export function normalizeSettings(input: unknown): Settings {
   const github = (raw.github ?? {}) as Record<string, unknown>;
   const trending = (raw.trending ?? {}) as Record<string, unknown>;
   const summarize = (raw.summarize ?? {}) as Record<string, unknown>;
+  const observe = (raw.observe ?? {}) as Record<string, unknown>;
   const releases = (raw.releases ?? {}) as Record<string, unknown>;
   const releasesSchedule = (releases.schedule ?? {}) as Record<string, unknown>;
   const output = (raw.output ?? {}) as Record<string, unknown>;
@@ -412,6 +433,11 @@ export function normalizeSettings(input: unknown): Settings {
       enrichConcurrency: Math.round(num(summarize.enrichConcurrency, DEFAULT_SETTINGS.summarize.enrichConcurrency)),
       enrichTimeoutSeconds: Math.round(num(summarize.enrichTimeoutSeconds, DEFAULT_SETTINGS.summarize.enrichTimeoutSeconds)),
       enrichBudgetSeconds: Math.round(num(summarize.enrichBudgetSeconds, DEFAULT_SETTINGS.summarize.enrichBudgetSeconds)),
+    },
+    observe: {
+      enabled: bool(observe.enabled, DEFAULT_SETTINGS.observe.enabled),
+      backfillDays: Math.round(num(observe.backfillDays, DEFAULT_SETTINGS.observe.backfillDays)),
+      maxCandidates: Math.round(num(observe.maxCandidates, DEFAULT_SETTINGS.observe.maxCandidates)),
     },
     releases: {
       includePrerelease: bool(releases.includePrerelease, DEFAULT_SETTINGS.releases.includePrerelease),
@@ -544,6 +570,14 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (!Number.isInteger(summarize.readmeChars) || summarize.readmeChars <= 0) {
     problems.push({ field: 'summarize.readmeChars', code: 'CONFIG_INVALID', message: 'readmeChars 必须是正整数' });
   }
+  // observe.*
+  const { observe } = settings;
+  if (!Number.isInteger(observe.backfillDays) || observe.backfillDays < 0 || observe.backfillDays > 365) {
+    problems.push({ field: 'observe.backfillDays', code: 'CONFIG_INVALID', message: 'backfillDays 必须是 0–365 的整数' });
+  }
+  if (!Number.isInteger(observe.maxCandidates) || observe.maxCandidates < 1 || observe.maxCandidates > 1000) {
+    problems.push({ field: 'observe.maxCandidates', code: 'CONFIG_INVALID', message: 'maxCandidates 必须是 1–1000 的整数' });
+  }
   // releases.*
   // 0.7.0 只实现每周一次：daily/monthly 明确拒绝，而不是悄悄按 weekly 跑。
   if (releases.period !== 'weekly') {
@@ -627,6 +661,11 @@ export interface CoreConfig {
     enrichTimeoutSeconds: number;
     enrichBudgetSeconds: number;
   };
+  observe: {
+    enabled: boolean;
+    backfillDays: number;
+    maxCandidates: number;
+  };
   releases: {
     enabled: boolean;
     includePrerelease: boolean;
@@ -703,6 +742,11 @@ export function toCoreConfig(
       enrichConcurrency: settings.summarize.enrichConcurrency,
       enrichTimeoutSeconds: settings.summarize.enrichTimeoutSeconds,
       enrichBudgetSeconds: settings.summarize.enrichBudgetSeconds,
+    },
+    observe: {
+      enabled: settings.observe.enabled,
+      backfillDays: settings.observe.backfillDays,
+      maxCandidates: settings.observe.maxCandidates,
     },
     releases: {
       // 发版订阅常开：插件侧不再提供开关，是否产出由订阅列表决定。

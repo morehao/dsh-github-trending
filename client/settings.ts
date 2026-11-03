@@ -54,7 +54,7 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
     case 'auth':
       return { github: settings.github };
     case 'scope':
-      return { trending: settings.trending, schedule: settings.schedule, summarize: settings.summarize };
+      return { trending: settings.trending, schedule: settings.schedule, summarize: settings.summarize, observe: settings.observe };
     case 'releases':
       return { releases: settings.releases };
   }
