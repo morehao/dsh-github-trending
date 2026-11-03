@@ -132,7 +132,7 @@ export function IdentityBar(props: IdentityBarProps): any {
           'button',
           {
             type: 'button',
-            className: 'dshgt-id-gh dshgt-refresh',
+            className: 'dshgt-refresh',
             'data-state': st.state,
             disabled: busy,
             title: st.tip,

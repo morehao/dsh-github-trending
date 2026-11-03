@@ -193,10 +193,14 @@ export const CSS = `
   transition:background .12s ease,border-color .12s ease;}
 .dshgt-ver-badge:hover{background:color-mix(in srgb,var(--gt-warn) 12%,transparent);border-color:color-mix(in srgb,var(--gt-warn) 60%,transparent);}
 .dshgt-ver-badge:focus-visible{outline:2px solid var(--gt-accent);outline-offset:1px;}
-/* 纯图标刷新：状态靠图标颜色 + 角标 + 旋转表达，文案走 title（tooltip） */
-.dshgt-refresh{position:relative;}
-/* hover 对齐 dsh-skills-console 的 .dshsc-tool：柔和层底、无描边（覆盖 .dshgt-id-gh:hover 的 border） */
-.dshgt-id-gh.dshgt-refresh:hover{background:var(--gt-card);border-color:transparent;}
+/* 纯图标刷新：与 dsh-skills-console 的 .dshsc-tool 逐项一致（尺寸/圆角/无边框/hover 层2底），
+   状态另由图标颜色 + 角标 + 旋转表达，文案走 title（tooltip）。独立成类，不再继承 .dshgt-id-gh。 */
+.dshgt-refresh{position:relative;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--gt-muted);
+  cursor:pointer;text-decoration:none;transition:background .12s ease,color .12s ease;flex:none;}
+.dshgt-refresh:hover{background:var(--dsw-alias-bg-layer-2);color:var(--gt-fg);}
+.dshgt-refresh:focus-visible{outline:2px solid var(--gt-accent);outline-offset:1px;}
+.dshgt-refresh[aria-expanded="true"]{background:var(--dsw-alias-bg-layer-2);color:var(--gt-fg);}
 .dshgt-refresh svg{display:block;transition:color .12s ease;}
 .dshgt-refresh[data-state="available"]{color:var(--gt-warn);}
 .dshgt-refresh[data-state="available"]::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--gt-warn);box-shadow:0 0 0 1.5px var(--gt-bg);}
