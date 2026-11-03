@@ -195,6 +195,8 @@ export const CSS = `
 .dshgt-ver-badge:focus-visible{outline:2px solid var(--gt-accent);outline-offset:1px;}
 /* 纯图标刷新：状态靠图标颜色 + 角标 + 旋转表达，文案走 title（tooltip） */
 .dshgt-refresh{position:relative;}
+/* hover 对齐 dsh-skills-console 的 .dshsc-tool：柔和层底、无描边（覆盖 .dshgt-id-gh:hover 的 border） */
+.dshgt-id-gh.dshgt-refresh:hover{background:var(--gt-card);border-color:transparent;}
 .dshgt-refresh svg{display:block;transition:color .12s ease;}
 .dshgt-refresh[data-state="available"]{color:var(--gt-warn);}
 .dshgt-refresh[data-state="available"]::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--gt-warn);box-shadow:0 0 0 1.5px var(--gt-bg);}
