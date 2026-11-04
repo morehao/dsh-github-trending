@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.1] - 2026-11-04
+
+### Chores
+
+- **core**: 升级 `dsh.core.version` 0.9.0 → 0.9.1。核心侧本版为自动化 PR 流程修复（base 同步、manual 重建、PR 不可合并降噪），插件侧无行为变更。
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.0...v0.9.1
+
 ## [v0.8.16] - 2026-11-03
 
 ### Fixes
