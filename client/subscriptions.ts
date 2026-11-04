@@ -39,9 +39,13 @@ const KNOWN_STATUSES: readonly SubscriptionStatus[] = ['baseline', 'ok', 'no_cha
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * 成功回执（已添加 / 已移除 / 分析完成）自动收起的时长，与设置页 `NOTICE_TTL_MS` 保持一致。
- * 「暂无新变化」这类需要读一下的结论不自动消失，改为带「×」手动关闭。
  */
 const NOTICE_TTL_MS = 5000;
+/**
+ * 「暂无新变化 / 没订阅」这类分析结论比普通成功回执信息量大，给更长的阅读时间后也自动收起；
+ * 同时保留横幅上的「×」让用户能提前关掉。
+ */
+const SKIPPED_NOTICE_TTL_MS = 8000;
 
 type SortKey = 'name' | 'tag' | 'summary';
 
@@ -401,13 +405,14 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     return () => clearTimeout(timer);
   }, [note]);
 
-  // 分析结果里的「成功/完成」类同样自动收起；skipped（暂无新变化/没订阅）需保留给用户阅读，
-  // 用横幅上的「×」手动关闭，因此不在这里计时。
+  // 分析结果横幅（成功/完成、以及 skipped 结论）都自动收起；skipped 信息量大，用更长的 TTL。
+  // 横幅上的「×」仍保留，让用户能提前关掉。
   React.useEffect(() => {
-    if (result === null || !result.ok || result.skipped) return undefined;
+    if (result === null || !result.ok) return undefined;
+    const ttl = result.skipped ? SKIPPED_NOTICE_TTL_MS : NOTICE_TTL_MS;
     const timer = setTimeout(() => {
       setResult((current) => (current === result ? null : current));
-    }, NOTICE_TTL_MS);
+    }, ttl);
     return () => clearTimeout(timer);
   }, [result]);
 
@@ -530,8 +535,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const drawerRow = openRepo === null ? undefined : rows.find((row) => row.name === openRepo);
   const globalBusy = analyzing !== null;
 
-  // 分析结果横幅：成功类自动收起（见上方 effect）；skipped（暂无新变化 / 没订阅）需要用户
-  // 读一下，保留但带「×」手动关闭；失败已在 `error` state 里另作常驻展示。
+  // 分析结果横幅：成功类与 skipped 结论都会自动收起（见上方 effect，skipped 用更长 TTL）；
+  // skipped 另带「×」可提前关闭；失败已在 `error` state 里另作常驻展示。
   const dismissBanner = h(
     'button',
     {
