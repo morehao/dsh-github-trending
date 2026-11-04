@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.2] - 2026-11-04
+
+### Fixes
+
+- **client**: auto-dismiss transient success notices (#129)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.1...v0.9.2
+
 ## [v0.9.1] - 2026-11-04
 
 ### Chores
