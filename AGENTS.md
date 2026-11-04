@@ -28,7 +28,7 @@
 | [src/host/credentials.ts](src/host/credentials.ts) · [src/host/quickfill.ts](src/host/quickfill.ts) · [src/host/proxy.ts](src/host/proxy.ts) | 凭据解析、宿主 provider 快速填充、OAuth 类凭据的回环代理 |
 | [src/core/exec.ts](src/core/exec.ts) · [src/core/channel.ts](src/core/channel.ts) · [src/core/handshake.ts](src/core/handshake.ts) · [src/core/run.ts](src/core/run.ts) | 子进程封装、配置通道（FIFO）、握手、运行 |
 | [client/](client/) | Web Client：`index`（01 外壳）/ `overview` / `digest` / `runs` / `settings` / `about` / `markdown` / `digest-core` / `run-controller` / `panel-icon` / `store` / `api` / `i18n` / `ui` / `styles` |
-| `@morehao/trendradar-contract`（npm） | 契约单一来源：schema + fixtures + 生成的 TS 类型 / ajv 校验器 / 错误目录（wire：`ipcSchema=2` / `digestSchema=2`） |
+| `@morehao/trendradar-contract`（npm） | 契约单一来源：schema + fixtures + 生成的 TS 类型 / ajv 校验器 / 错误目录（wire：`ipcSchema=3` / `digestSchema=2`） |
 | [scripts/set-core-version.mjs](scripts/set-core-version.mjs) | 写 `package.json` 的 `dsh.core.version`（下载哪个核心 Release 的唯一来源） |
 | [scripts/ac/run.mjs](scripts/ac/run.mjs) | AC-P-01…13 的机械部分（人工步骤打印在末尾） |
 | [test/](test/) | `node --test` 离线用例；`test/fixtures/fake-core.mjs` 是假核心 |
@@ -40,9 +40,9 @@
 ### 数据边界
 
 - **状态唯一写者**：`state.json` / `history.json` / `runs/<id>.log` / `previews/<id>.md` 只由 [src/state.ts](src/state.ts) 写；一律「临时文件 + rename」、权限 0600，不允许其他模块直接 `writeFileSync`。设置只有两个写入口：`/config`（用户确认后落盘）与启动时用 bundle 的 `config.corePath` 填空（仅当为空），其余不静默补写。
-- **插件不碰用户仓库**：commit / push / PR / merge 全在核心进程里完成；插件只传配置与凭据，不自己写仓库。只有两个**只读**例外：(1) 设置页读取仓库默认分支时执行 `git symbolic-ref` / `rev-parse`（[src/host/repo.ts](src/host/repo.ts)）；(2) 运行结束后从核心本次返回的 `outcome.files` 里选当天 `.md`，校验路径在 `repo.path` 内、≤512 KB、sha256 与契约一致后，复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（[src/host/runner.ts](src/host/runner.ts)）。两者都不 commit、不改工作树；预览失败不阻断运行。
+- **插件不碰用户仓库**：commit / push / PR / merge 全在核心进程里完成；插件只传配置与凭据，不自己写仓库。唯一的**只读**例外是设置页读取仓库默认分支时执行 `git symbolic-ref` / `rev-parse`（[src/host/repo.ts](src/host/repo.ts)），不 commit、不改工作树。预览副本自 ipc v3 起**直接来自** `RunResult.digest`（核心随结果回传本期 markdown），插件不再读工作树：合并后核心会切回 base 并删分支，事后读文件必然读到旧版或空（[src/host/runner.ts](src/host/runner.ts)）。预览失败不阻断运行。
 - **不翻译语义**：`src/config.ts` 是设置⇄核心 YAML 的唯一映射；核心没有的字段插件里也不加（宁可少一个开关，也不造「点了没反应」的配置）。新增字段必须同时有核心侧依据。
-- **核心版本单一来源**：`package.json` 的 `dsh.core.version` 由 `scripts/set-core-version.mjs` 写入，是「首次运行下载哪个核心 Release」的唯一来源，**不要手改**；契约 wire 版本（ipc/digest=2）由 `dependencies` 里的 `@morehao/trendradar-contract` 决定，`check:naming` 会拦。
+- **核心版本单一来源**：`package.json` 的 `dsh.core.version` 由 `scripts/set-core-version.mjs` 写入，是「首次运行下载哪个核心 Release」的唯一来源，**不要手改**；契约 wire 版本（ipc=3 / digest=2）由 `dependencies` 里的 `@morehao/trendradar-contract` 决定，`check:naming` 会拦。
 - **单运行并发**：所有触发（HTTP 路由、工具、定时器）都必须走 `Runner.run()`；它自己拒绝第二个并发运行，绕过它就等于绕过取消与状态记录。
 
 ### 外部进程与安全

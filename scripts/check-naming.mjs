@@ -4,7 +4,7 @@
 //   1. package.json 的 name  == cordis.patch.yml 的 insert[0].name（宿主 import() 的模块标识符）
 //   2. lib/index.ts 的 export const name == insert[0].id（cordis 配置树内的键）
 //   3. 契约单一来源：`@morehao/trendradar-contract` 依赖精确锁定，且安装到的包版本、
-//      wire 版本（ipcSchema/digestSchema=2、contractVersion 主版本 0）与插件实现一致
+//      wire 版本（ipcSchema=3、digestSchema=2、contractVersion 主版本 0）与插件实现一致
 //   4. dsh.core.{repo,version} 是「首次运行下载哪个核心 Release」的唯一来源，须为合法值
 //   5. exports / files / dsh 段的接线与 main/types 对得上（缺 ./client 或 files 漏 lib 会「能装、白屏」）
 //
@@ -62,7 +62,13 @@ if (typeof contractSpec !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.t
   }
   const versionMap = JSON.parse(await read(`node_modules/${CONTRACT}/version-map.json`));
   const wire = (file) => versionMap[file]?.current;
-  if (wire('ipc.v2.json') !== 2) fail(`契约包 ipcSchema 应为 2，实际 ${wire('ipc.v2.json')}`);
+  const ipcSource = await read('src/ipc.ts');
+  const ipcMatch = /export const IPC_SCHEMA_VERSION = (\d+) as const/.exec(ipcSource);
+  if (ipcMatch === null) {
+    fail('src/ipc.ts 缺少 IPC_SCHEMA_VERSION 常量');
+  } else if (wire('ipc.v3.json') !== Number(ipcMatch[1])) {
+    fail(`契约包 ipcSchema=${wire('ipc.v3.json')} 与插件 IPC_SCHEMA_VERSION=${ipcMatch[1]} 不一致`);
+  }
   if (wire('digest.v2.json') !== 2) fail(`契约包 digestSchema 应为 2，实际 ${wire('digest.v2.json')}`);
   const contractVersion = String(wire('version-info.v2.json'));
   if (contractVersion.split('.')[0] !== '0') {

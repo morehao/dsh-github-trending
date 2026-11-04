@@ -246,8 +246,8 @@ test('成功运行：从 outcome.files 复制当天 .md 到 previews/，并写 d
   assert.equal(record.preview.file, `trending/${DATED}.md`);
 });
 
-test('多个 .md 时优先 basename === <date>.md', async () => {
-  const { runner } = makeRunner({
+test('预览路径以 core 回传的 digest.path 为准（不再按文件名猜）', async () => {
+  const { runner, store } = makeRunner({
     scenario: {
       FAKE_ARTIFACTS: JSON.stringify([
         { path: 'trending/extra.md', content: 'extra' },
@@ -256,55 +256,40 @@ test('多个 .md 时优先 basename === <date>.md', async () => {
     },
   });
   const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview.file, `trending/${DATED}.md`);
+  assert.equal(summary.preview.file, 'trending/extra.md');
+  assert.equal(store.readPreview(summary.id).text, 'extra');
 });
 
-test('只有一个 .md 时回退使用它', async () => {
-  const { runner } = makeRunner({
-    scenario: { FAKE_ARTIFACT_PATH: 'trending/all.md', FAKE_ARTIFACT_CONTENT: 'single' },
-  });
-  const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview.file, 'trending/all.md');
-});
-
-test('多个 .md 且没有当天文件时不猜，不生成预览', async () => {
+test('核心没有回传 digest（纯发版 / 渲染前失败）→ 不生成预览，日志留痕', async () => {
   const events = [];
   const { runner } = makeRunner({
     logger: (event, data) => events.push({ event, data }),
+    scenario: { FAKE_DIGEST: '0' },
+  });
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.preview, undefined);
+  assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'no-digest'));
+});
+
+test('仓库工作树里没有产物文件，也照样生成预览（不再读 repo）', async () => {
+  const content = '# 来自信封\n\n今天没有落盘文件';
+  const { runner, store, repo } = makeRunner({
     scenario: {
-      FAKE_ARTIFACTS: JSON.stringify([
-        { path: 'trending/a.md', content: 'a' },
-        { path: 'trending/b.md', content: 'b' },
-      ]),
+      FAKE_ARTIFACT_PATH: `trending/${DATED}.md`,
+      FAKE_ARTIFACT_CONTENT: content,
     },
   });
   const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview, undefined);
-  assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'ambiguous'));
-});
-
-test('preview 排除 releases/ 前缀：只挑本期 digest，不把发版 md 当预览', async () => {
-  const { runner } = makeRunner({
-    scenario: {
-      FAKE_ARTIFACTS: JSON.stringify([
-        { path: `trending/${DATED}.md`, content: 'digest' },
-        { path: 'releases/vercel_next.js.md', content: 'release' },
-      ]),
-    },
+  assert.equal(summary.ok, true);
+  assert.deepEqual(summary.preview, {
+    file: `trending/${DATED}.md`,
+    bytes: Buffer.byteLength(content),
+    sha256: shaOf(content),
   });
-  const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview.file, `trending/${DATED}.md`);
-});
-
-test('只有 releases/*.md 时没有 digest 预览（不被误选）', async () => {
-  const events = [];
-  const { runner } = makeRunner({
-    logger: (event, data) => events.push({ event, data }),
-    scenario: { FAKE_ARTIFACTS: JSON.stringify([{ path: 'releases/oven_sh_bun.md', content: 'rel' }]) },
-  });
-  const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview, undefined);
-  assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'no-markdown'));
+  assert.equal(store.readPreview(summary.id).text, content);
+  // 工作树里确实没有这个文件：预览完全来自 RunResult.digest。
+  assert.equal(existsSync(path.join(repo, `trending/${DATED}.md`)), false);
 });
 
 test('usage + releases 投影进摘要与历史：tokens = 榜单 + 订阅', async () => {
@@ -328,23 +313,25 @@ test('旧核心无 usage/releases：tokens/releases 缺省', async () => {
   assert.equal(summary.releases, undefined);
 });
 
-test('路径穿越 / 绝对路径：不读 repo 外的文件', async () => {
-  const outsideDir = mkdtempSync(path.join(tmpdir(), 'dshgt-outside-'));
-  const outside = path.join(outsideDir, 'evil.md');
-  writeFileSync(outside, '# evil');
-
-  const traversal = makeRunner({
-    scenario: { FAKE_ARTIFACT_PATH: '../evil.md', FAKE_ARTIFACT_CONTENT: '# evil' },
+test('digest.path 不在 files 里 → IPC_INVALID（核心自相矛盾）', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# a', FAKE_DIGEST_PATH: 'elsewhere.md' },
   });
-  const traversalSummary = await traversal.runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(traversalSummary.preview, undefined);
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.ok, false);
+  assert.equal(summary.error.code, 'IPC_INVALID');
+  assert.equal(store.readHistory().length, 1);
+  assert.equal(store.readHistory()[0].preview, undefined);
+  assert.equal(existsSync(path.join(store.dir, 'previews', `${summary.id}.md`)), false);
+});
 
-  const absolute = makeRunner({
-    scenario: { FAKE_ARTIFACT_PATH: outside },
+test('digest.bytes 与 text 的实际字节数不一致 → IPC_INVALID', async () => {
+  const { runner } = makeRunner({
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# a', FAKE_DIGEST_BYTES: '999' },
   });
-  const absoluteSummary = await absolute.runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(absoluteSummary.preview, undefined);
-  assert.equal(existsSync(path.join(traversal.store.dir, 'previews', `${traversalSummary.id}.md`)), false);
+  const summary = await runner.run({ trigger: 'tool', date: DATED });
+  assert.equal(summary.ok, false);
+  assert.equal(summary.error.code, 'IPC_INVALID');
 });
 
 test('超过 512 KB 的 artifact 不复制', async () => {
@@ -364,20 +351,21 @@ test('内容含 NUL 字节时跳过', async () => {
   assert.equal(summary.preview, undefined);
 });
 
-test('artifact 的 sha256 与内容不一致时跳过', async () => {
+test('digest 的 sha256 与 files 不一致 → IPC_INVALID，不生成预览', async () => {
   const { runner, store } = makeRunner({
     scenario: {
       FAKE_ARTIFACT_PATH: `trending/${DATED}.md`,
       FAKE_ARTIFACT_CONTENT: '# a',
-      FAKE_ARTIFACT_SHA: `sha256:${'d'.repeat(64)}`,
+      FAKE_DIGEST_SHA: `sha256:${'d'.repeat(64)}`,
     },
   });
   const summary = await runner.run({ trigger: 'tool', date: DATED });
-  assert.equal(summary.preview, undefined);
+  assert.equal(summary.ok, false);
+  assert.equal(summary.error.code, 'IPC_INVALID');
   assert.equal(existsSync(path.join(store.dir, 'previews', `${summary.id}.md`)), false);
 });
 
-test('试跑 / 无变更 / 失败都不生成预览', async () => {
+test('试跑 / 无产物 / 失败都不生成预览', async () => {
   const dry = makeRunner({
     scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# dry' },
   });
@@ -394,19 +382,49 @@ test('试跑 / 无变更 / 失败都不生成预览', async () => {
   assert.equal(failed.store.readHistory()[0].preview, undefined);
 });
 
-test('预览生成失败不阻断运行，结果照常写盘', async () => {
+test('unchanged（skipped）只要核心回传 digest 也刷新预览，不再依赖 force', async () => {
+  const content = '# unchanged digest\n';
+  const { runner, store } = makeRunner({
+    scenario: {
+      FAKE_SKIPPED: '1',
+      FAKE_SKIP_REASON: 'unchanged',
+      FAKE_SKIPPED_WITH_ARTIFACTS: '1',
+      FAKE_ARTIFACT_PATH: `trending/${DATED}.md`,
+      FAKE_ARTIFACT_CONTENT: content,
+    },
+  });
+  const summary = await runner.run({ trigger: 'schedule', date: DATED });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.skipped, true);
+  assert.deepEqual(summary.preview, {
+    file: `trending/${DATED}.md`,
+    bytes: Buffer.byteLength(content),
+    sha256: shaOf(content),
+  });
+  assert.equal(store.readPreview(summary.id).text, content);
+});
+
+test('预览写盘失败不阻断运行，结果照常写盘', async () => {
   const events = [];
   const { runner, store } = makeRunner({
     logger: (event, data) => events.push({ event, data }),
-    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_SHA: `sha256:${'d'.repeat(64)}`, FAKE_ARTIFACT_CONTENT: '# a' },
+    scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# a' },
   });
-  const summary = await runner.run({ trigger: 'manual', date: DATED });
-  assert.equal(summary.ok, true);
-  assert.equal(store.readHistory().length, 1);
-  const record = store.readHistory()[0];
-  assert.equal(record.ok, true);
-  assert.equal(record.preview, undefined);
-  assert.ok(events.some((item) => item.event === 'preview.skip'));
+  // 把 previews/ 变成只读目录：写预览必失败，但运行本身必须照常成功。
+  const previews = path.join(store.dir, 'previews');
+  mkdirSync(previews, { recursive: true });
+  chmodSync(previews, 0o500);
+  try {
+    const summary = await runner.run({ trigger: 'manual', date: DATED });
+    assert.equal(summary.ok, true);
+    assert.equal(summary.preview, undefined);
+    const record = store.readHistory()[0];
+    assert.equal(record.ok, true);
+    assert.equal(record.preview, undefined);
+    assert.ok(events.some((item) => item.event === 'preview.skip' && item.data.reason === 'write-failed'));
+  } finally {
+    chmodSync(previews, 0o700);
+  }
 });
 
 test('触发来源经环境变量传给核心：schedule → schedule，tool → manual', async () => {
@@ -441,7 +459,7 @@ test('push 失败带 reason：stale info → stale-lease，提示可自愈', asy
   assert.equal(store.readHistory()[0].errorReason, 'stale-lease');
 });
 
-test('daily 预览：真实产物含根 index.md 时仍挑日期 .md', async () => {
+test('daily 预览：使用 core 声明的 digest（根 index.md 不影响）', async () => {
   const { runner, store } = makeRunner({
     scenario: {
       FAKE_ARTIFACTS: JSON.stringify([
@@ -456,7 +474,7 @@ test('daily 预览：真实产物含根 index.md 时仍挑日期 .md', async () 
   assert.equal(store.readPreview(summary.id).text, '# daily');
 });
 
-test('周榜预览：按周期期望名挑 YYYY-Wnn.md，排除 index.md', async () => {
+test('周榜预览：使用 core 声明的 digest（YYYY-Wnn）', async () => {
   const { runner, store } = makeRunner({
     scenario: {
       FAKE_ARTIFACTS: JSON.stringify([
@@ -471,7 +489,7 @@ test('周榜预览：按周期期望名挑 YYYY-Wnn.md，排除 index.md', async
   assert.equal(store.readPreview(summary.id).text, '# weekly');
 });
 
-test('月榜预览：按周期期望名挑 YYYY-MM.md', async () => {
+test('月榜预览：使用 core 声明的 digest（YYYY-MM）', async () => {
   const { runner, store } = makeRunner({
     scenario: {
       FAKE_ARTIFACTS: JSON.stringify([
@@ -635,21 +653,4 @@ test('runReleases(repo)：全量运行仍推进 lastReleaseWeek（不回归）',
   assert.equal(record.scopeRepo, undefined);
   const state = store.readState();
   assert.equal(state.lastReleaseWeek, scheduleModule.isoWeekKey(new Date(record.finishedAt), 'Asia/Shanghai'));
-});
-
-test('runReleases(repo)：核心低于 0.8.0 → 降级不传 --repo（仍跑全量），不锁本周', async () => {
-  const { runner, store } = makeRunner({
-    scenario: {
-      FAKE_REQUIRE_STAGES: '1',
-      // 核心版本过低：若真传了 --repo，FAKE_REQUIRE_REPO 会失败；这里不设它，改为断言降级。
-      FAKE_VERSION: '0.7.1',
-      FAKE_RELEASES: '1,1,0',
-    },
-  });
-  // 传了 repo，但核心 0.7.1 < 0.8.0 → 不传 --repo，降级为全量；scopeRepo 仍记录意图。
-  const record = await runner.runReleases({ trigger: 'manual', repo: 'vercel/next.js' });
-  assert.equal(record.status, 'ok');
-  assert.equal(record.scopeRepo, 'vercel/next.js');
-  const state = store.readState();
-  assert.equal(state.lastReleaseWeek, undefined); // 单仓意图始终不锁本周
 });

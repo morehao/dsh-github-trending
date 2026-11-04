@@ -6,7 +6,7 @@
  * 榜单运行写 history.json；发版运行只写 `state.releaseRuns`，两者节奏完全不同。
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Period, Settings } from '../config.js';
@@ -32,19 +32,6 @@ import { resolveModelKey } from './quickfill.js';
 import { startProxy, type ProxyHandle } from './proxy.js';
 import { isoWeekKey, zonedDateString } from './schedule.js';
 import { runSubscribe } from './subscribe.js';
-import { versionAtLeast } from './version.js';
-
-/**
- * 支持 `run --force`（忽略摘要缓存重新生成）的最低核心版本。
- * 与 core patch 发版 `0.7.1` 对齐；`dsh.core.version` 应 >= 它，dev override 指向更旧核心时靠闸门降级。
- */
-export const FORCE_MIN_CORE_VERSION = '0.7.1';
-
-/**
- * 支持 `run --stages releases --repo`（单仓发版分析）的最低核心版本。
- * 与 core v0.8.0 对齐；核心更旧时单仓触发降级为全量（不传 --repo）。
- */
-export const REPO_MIN_CORE_VERSION = '0.8.0';
 
 export interface RunSummary {
   id: string;
@@ -136,45 +123,12 @@ function runDate(settings: Settings, now: Date = new Date()): string {
   }
 }
 
-/** target 是否严格位于 root 目录内（root 自身不算）。 */
-function isInside(root: string, target: string): boolean {
-  const rel = path.relative(root, target);
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
-/** 契约 artifact 的 sha256 可能带 `sha256:` 前缀、大小写不一；统一成小写 hex 再比。 */
-function normalizeSha256(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const hex = value.trim().replace(/^sha256:/i, '').toLowerCase();
-  return /^[0-9a-f]{64}$/.test(hex) ? hex : undefined;
-}
-
 /**
  * 契约计数/时长取值：缺失或非数字一律按 0（旧核心没有 checked/changed）。
  * 入参是 unknown 是因为本地契约包还是 0.3.0，`ReleasesReport` 的索引签名认不出新字段。
  */
 function counterOf(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-/**
- * 与 core `render.NameOf` 对齐的产物基名（不含扩展名）：
- *   daily → YYYY-MM-DD；weekly → YYYY-Wnn（ISO 周年/周）；monthly → YYYY-MM。
- * 用于在 outcome.files 里按周期精确挑出本期 digest 的 `.md`（而不是猜）。
- */
-export function isoWeekName(date: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (match === null) return date;
-  const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-  if (Number.isNaN(d.getTime())) return date;
-  // 日历日 → ISO 周年/周：按 UTC 解释这个纯日期，复用调度侧的唯一一份周键算法。
-  return isoWeekKey(d, 'UTC');
-}
-
-export function periodFileBase(period: Period, date: string): string {
-  if (period === 'monthly') return date.slice(0, 7);
-  if (period === 'weekly') return isoWeekName(date);
-  return date;
 }
 
 /**
@@ -271,17 +225,8 @@ export class Runner {
         );
       }
 
-      // force 需要核心支持 `run --force`（0.7.1+）。dev override 可能指向旧核心，
-      // 这里按版本闸门降级为普通重跑并记一条 warning，不让用户看到一个裸的「未知参数」硬失败。
-      const forceRequested = options.force === true;
-      const forceSupported = versionAtLeast(handshakeResult.version.version, FORCE_MIN_CORE_VERSION);
-      const effectiveForce = forceRequested && forceSupported;
-      if (forceRequested && !forceSupported) {
-        store.appendLog(
-          logFile,
-          `[force] 核心 ${handshakeResult.version.version} 低于 ${FORCE_MIN_CORE_VERSION}，不支持 --force，已降级为普通重跑`,
-        );
-      }
+      // `--force` 随 ipc v3 一起成为无条件下限（握手已要求核心 0.9.0+），不再按版本降级。
+      const effectiveForce = options.force === true;
 
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
       const apiKey = model.apiKey;
@@ -322,15 +267,8 @@ export class Runner {
         ...(core.tag === undefined ? {} : { coreTag: core.tag }),
         ...(effectiveForce ? { forced: true } : {}),
       });
-      const preview = this.capturePreview({
-        id,
-        date,
-        period,
-        settings,
-        outcome,
-        secrets: [apiKey, github.token],
-        ...(effectiveForce ? { force: true } : {}),
-      });
+      // 预览直接来自 RunResult.digest（ipc v3）：不再读用户仓库，合并后切 base / 删分支都不影响。
+      const preview = this.capturePreview({ id, outcome, secrets: [apiKey, github.token] });
       if (preview !== undefined) summary.preview = preview;
       this.record(summary, settings);
       return summary;
@@ -432,16 +370,8 @@ export class Runner {
         );
       }
 
-      // 单仓触发：核心需支持 `--repo`（>= REPO_MIN_CORE_VERSION）。旧核心不传 --repo，
-      // 降级为全量跑（前端只展示该仓结果），与 --force 的降级风格一致，绝不裸错。
-      let effectiveRepo = requestedRepo;
-      if (requestedRepo !== undefined && !versionAtLeast(handshakeResult.version.version, REPO_MIN_CORE_VERSION)) {
-        store.appendLog(
-          logFile,
-          `[release] 核心 ${handshakeResult.version.version} 低于 ${REPO_MIN_CORE_VERSION}，单仓分析降级为全量`,
-        );
-        effectiveRepo = undefined;
-      }
+      // `--repo` 同样随 ipc v3 成为无条件下限（握手已要求核心 0.9.0+）。
+      const effectiveRepo = requestedRepo;
 
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
       proxy = model.proxy;
@@ -754,92 +684,42 @@ export class Runner {
   }
 
   /**
-   * 从本次核心返回的 artifact 清单里选当天的 `.md`，只读复制到 previews/。
+   * 把本次运行渲染的 digest 原文写进 previews/（ipc v3 起由核心随 RunResult 回传）。
    *
-   * 这是插件**唯一**读取用户仓库的场景，而且只读核心自己刚写出的那一份：
-   * - 路径必须在 `repo.path` 内（词法 + realpath 各判一次，挡 `..`/绝对路径/符号链接）；
-   * - 上限 512 KB、拒绝 NUL、sha256 必须与契约声明一致；
+   * 这里**不再读用户仓库**：分支可能在运行结束前就被合并、切回 base 并删除，
+   * 任何「事后去工作树里找文件」的做法都会读到旧版或空。文本、字节数与 sha256
+   * 的跨字段一致性已在 `parseRunResult` 里校验过；这里只做展示侧的防御：
+   * - 上限 512 KB（与预览读取上限一致）、拒绝 NUL；
+   * - 落盘前统一 `redact()`，避免把密钥写进预览文件；
    * - 任何一步失败都只记日志，返回 undefined；运行结果不受影响。
    */
   private capturePreview(input: {
     id: string;
-    date?: string;
-    period?: Period;
-    settings: Settings;
     outcome: RunOutcome;
     secrets: Array<string | undefined>;
-    /** 强制重跑：即使核心判定 skipped/unchanged 也尝试生成预览（文件在仓库里已存在且内容一致）。 */
-    force?: boolean;
   }): PreviewMeta | undefined {
-    const { outcome, settings, date, period, id } = input;
-    if (!outcome.ok || outcome.dryRun || date === undefined) return undefined;
-    // skipped（unchanged）默认不生成预览；但显式 force 时仍要刷新展示——文件在仓库里
-    // 已存在且内容与本次渲染一致，后续 sha/路径校验照样把关。
-    if (outcome.skipped && input.force !== true) return undefined;
+    const { outcome, id } = input;
+    if (!outcome.ok || outcome.dryRun) return undefined;
     const skip = (reason: string, extra: Record<string, unknown> = {}): undefined => {
       this.deps.logger?.('preview.skip', { id, reason, ...extra });
       return undefined;
     };
+    const digest = outcome.digest;
+    if (digest === undefined) return skip('no-digest');
 
-    // 排除索引页与 readme：真正的 digest 是本期唯一那份 `.md`。
-    // 同时排除 `releases/` 前缀——发版摘要产物与 trending 同 commit，但**不是**本期
-    // digest 预览；混进来会让「唯一 digest 预览」语义失效。
-    const markdown = outcome.files.filter((file) => {
-      const ext = path.extname(file.path).toLowerCase();
-      const base = path.basename(file.path).toLowerCase();
-      const normalized = file.path.replace(/\\/g, '/');
-      const inReleases = normalized === 'releases' || normalized.startsWith('releases/');
-      return ext === '.md' && base !== 'readme.md' && base !== 'index.md' && !inReleases;
-    });
-    if (markdown.length === 0) return skip('no-markdown');
+    const buffer = Buffer.from(digest.text, 'utf8');
+    if (buffer.length > PREVIEW_MAX_BYTES) return skip('too-large', { path: digest.path, bytes: buffer.length });
+    if (buffer.includes(0)) return skip('contains-nul', { path: digest.path });
 
-    // 按周期期望名精确匹配：daily=date.md；weekly=YYYY-Wnn.md；monthly=YYYY-MM.md。
-    // 若唯一命中则直接用；否则回退到「唯一一个非 index 的 .md」；仍不唯一就不猜。
-    const expected = period === undefined ? `${date}.md` : `${periodFileBase(period, date)}.md`;
-    const named = markdown.filter((file) => path.basename(file.path) === expected);
-    const chosen = named.length > 0 ? named[0] : markdown.length === 1 ? markdown[0] : undefined;
-    if (chosen === undefined) return skip('ambiguous', { candidates: markdown.length, expected, period: period ?? null });
-
-    const repoPath = settings.repo.path;
-    const resolved = path.resolve(repoPath, chosen.path);
-    if (!isInside(repoPath, resolved)) return skip('outside-repo', { path: chosen.path });
-
-    // realpath：如果用户仓库或目标文件本身是软链接，词法检查不够。
-    let fileReal: string;
-    try {
-      const repoReal = realpathSync(repoPath);
-      fileReal = realpathSync(resolved);
-      if (!isInside(repoReal, fileReal)) return skip('symlink-outside-repo', { path: chosen.path });
-    } catch {
-      return skip('missing-file', { path: chosen.path });
-    }
-
-    let buffer: Buffer;
-    try {
-      const stat = statSync(fileReal);
-      if (!stat.isFile()) return skip('not-a-file', { path: chosen.path });
-      if (stat.size > PREVIEW_MAX_BYTES) return skip('too-large', { bytes: stat.size });
-      buffer = readFileSync(fileReal);
-    } catch {
-      return skip('read-failed', { path: chosen.path });
-    }
-    if (buffer.includes(0)) return skip('contains-nul', { path: chosen.path });
-
-    const declared = normalizeSha256(chosen.sha256);
-    const actual = createHash('sha256').update(buffer).digest('hex');
-    if (declared === undefined || declared !== actual) {
-      return skip('sha-mismatch', { path: chosen.path, declared: declared ?? null, actual });
-    }
-
-    const text = redact(buffer.toString('utf8'), input.secrets);
+    const text = redact(digest.text, input.secrets);
     const stored = Buffer.from(text, 'utf8');
     try {
       this.deps.store.writePreview(id, text);
     } catch {
-      return skip('write-failed', { path: chosen.path });
+      return skip('write-failed', { path: digest.path });
     }
     return {
-      file: path.relative(repoPath, resolved).split(path.sep).join('/'),
+      file: digest.path,
       bytes: stored.length,
       sha256: createHash('sha256').update(stored).digest('hex'),
     };

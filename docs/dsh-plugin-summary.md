@@ -43,7 +43,7 @@
 
 产量（usage）与订阅（releases）：本次任务 token 总量 = `usage.totalTokens` + `releases.usage.totalTokens`（含订阅）；累计读时求和不落盘；插件不内置定价表。订阅阶段**常开**（插件不提供 `enabled` 开关），把订阅仓库的新 Release 写成中文 changelog，渲染到 `<output.dir>/releases/`，与榜单同分支同 PR；没有订阅时不产出、榜单产物不变。订阅列表在数据仓版本化，插件经 `subscribe` IPC 读改、不直接写仓。
 
-预览的数据边界：运行成功后 Host 只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内、≤512 KB、sha256 一致，才复制到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、上限 30）；`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
+预览的数据边界：正文由核心随 `RunResult.digest`（ipc v3）回传，Host 校验 `text` 的字节数 / sha256 与 `files` 里同路径条目一致、≤512 KB、无 NUL，才写到 `$DSH_HOME/github-trending/previews/<runId>.md`（0600、滚动上限）；插件不读用户仓库，`state.json` / `history.json` 只存元数据。`GET /preview?id=` 只接受历史里出现过的 id；客户端只渲染 Markdown 子集，链接仅 http(s)，不渲染 HTML / 图片。
 
 插件自更新：顶部身份条的「检查更新」负责检查 npm 最新版（Host 缓存 5 分钟）；确认后经宿主 `pluginManager` 重装插件（`link:` / `file:` / `workspace:` 安装只给手动命令），引擎来自共享包 `@morehao/dsh-plugin-kit`。
 
@@ -146,7 +146,7 @@
 - 密钥与 token 只存 `ctx.credentials`，运行时解析、经 FIFO（POSIX）或 0600 临时文件（Windows，读完即删）交给核心；不写配置文件、不进日志、不进 argv。
 - 只与三类目标通信：本地核心进程、用户配置的模型端点、`api.github.com`。**不向作者控制的任何服务器发送数据**。
 - 回环代理（OAuth 类 provider）只监听 `127.0.0.1`，随机端口、一次性 token，随运行结束关闭。
-- 预览副本：只读核心本次 `outcome.files` 里的当天 `.md`，路径必须在 `repo.path` 内（词法 + realpath）、≤512 KB、sha256 与契约一致；复制到插件数据目录，不写用户仓库、不 commit、不改工作树。读取失败不阻断运行。
+- 预览副本：来自核心回传的 `RunResult.digest.text`（ipc v3），Host 交叉校验字节数 / sha256 与 `files` 一致、≤512 KB、无 NUL，再写入插件数据目录；不读用户仓库、不写用户仓库、不 commit、不改工作树。校验或写盘失败不阻断运行。
 
 ## 12. 市场合规
 

@@ -108,15 +108,6 @@ test('非 force + unchanged：不刷新 lastDigest、无预览、无 forced', as
   assert.equal(store.readHistory()[0].forced, undefined);
 });
 
-test('版本闸门：核心 < 0.7.1 时 force 被降级为普通重跑（不传 --force）', async () => {
-  // 旧核心（0.7.0）仍会成功运行，但不支持 --force：请求 force 也不应传参、不应标 forced。
-  const { runner } = makeRunner({ scenario: { FAKE_VERSION: '0.7.0', FAKE_FORCE_ECHO: '1' } });
-  const summary = await runner.run({ trigger: 'tool', force: true });
-  assert.equal(summary.ok, true);
-  assert.equal(summary.forced, undefined);
-  assert.ok(summary.warnings.includes('force=0'), `应降级为不传 --force：${JSON.stringify(summary.warnings)}`);
-});
-
 test('force + 内容有变：追加提交、刷新 lastDigest、forced 标记', async () => {
   const { runner, store } = makeRunner({ scenario: { ...FORCE_CAPABLE } });
   const summary = await runner.run({ trigger: 'tool', force: true });

@@ -2,16 +2,19 @@
  * 契约类型与运行时守卫。
  *
  * 类型与运行时校验全部来自独立契约包 `@morehao/trendradar-contract`（wire:
- * `ipcSchema=2` / `digestSchema=2`）。本文件只放插件理解契约所必需的两件事：
+ * `ipcSchema=3` / `digestSchema=2`）。本文件只放插件理解契约所必需的两件事：
  * 核心 `version --json` 的握手形状，以及把核心 `run --json` 的 `RunResult`
  * 归一化成插件内部的 `RunOutcome`。
  *
- * 只接受一种结果形状：契约包定义的 `RunResult`（`ipcSchema=2` / `command=run`），
+ * 只接受一种结果形状：契约包定义的 `RunResult`（`ipcSchema=3` / `command=run`），
  * 用它自带的 ajv 校验器把关。旧核心那份只有 `files`/`digest` 的 `runOutput`
  * 不再兼容——协议版本不匹配会在握手阶段被拦下，这里绝不「猜字段」。
  */
+import { createHash } from 'node:crypto';
+
 import { validators } from '@morehao/trendradar-contract';
 import type {
+  DigestArtifact,
   ErrorInfo,
   FileArtifact,
   RunResult,
@@ -27,6 +30,7 @@ import type { AnyCode } from './errors.js';
 export type {
   ErrorCode,
   ErrorInfo,
+  DigestArtifact,
   FileArtifact,
   RunRequest,
   RunResult,
@@ -41,8 +45,8 @@ export type {
   SubscriptionVolume,
 } from '@morehao/trendradar-contract';
 
-/** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v2.json` 的 wire 整数）。 */
-export const IPC_SCHEMA_VERSION = 2 as const;
+/** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v3.json` 的 wire 整数）。 */
+export const IPC_SCHEMA_VERSION = 3 as const;
 
 /** 插件能接受的 digest 契约版本（与核心 `version --json` 的 digestSchema 比对）。 */
 export const SUPPORTED_DIGEST_SCHEMA = 2 as const;
@@ -74,6 +78,8 @@ export interface RunOutcome {
   skipped: boolean;
   dryRun: boolean;
   files: FileArtifact[];
+  /** 本次渲染的 digest 原文（ipc v3）；没有渲染（dry-run / 纯发版 / 渲染前失败）时缺省。 */
+  digest?: DigestArtifact;
   contentHash?: string;
   branch?: string;
   commit?: string;
@@ -190,6 +196,41 @@ function normalizeError(value: unknown): RunError | undefined {
 }
 
 /**
+ * `RunResult.digest`（ipc v3）的跨字段校验。
+ *
+ * 契约只能约束形状，约束不了「text 是不是这份 bytes/sha256 的原文」以及
+ * 「path 是否真的在 files 里」。核心自相矛盾的结果宁可 `IPC_INVALID`，
+ * 也不要让面板显示一份与仓库不一致的文档（成败会被写进历史）。
+ */
+function parseDigest(value: unknown, files: FileArtifact[]): DigestArtifact | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new IpcError('IPC_INVALID', '核心 run --json 的 digest 不是对象');
+  const file = value.path;
+  const bytes = value.bytes;
+  const sha256 = value.sha256;
+  const text = value.text;
+  if (typeof file !== 'string' || file === '' || typeof text !== 'string' || typeof bytes !== 'number' || typeof sha256 !== 'string') {
+    throw new IpcError('IPC_INVALID', '核心 run --json 的 digest 缺 path/bytes/sha256/text');
+  }
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length !== bytes) {
+    throw new IpcError('IPC_INVALID', `digest.bytes=${bytes} 与 text 实际 ${buffer.length} 字节不一致`);
+  }
+  const actual = `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
+  if (actual !== sha256) {
+    throw new IpcError('IPC_INVALID', `digest.sha256 与 text 不一致：声明 ${sha256}，实际 ${actual}`);
+  }
+  const listed = files.find((item) => item.path === file);
+  if (listed === undefined) {
+    throw new IpcError('IPC_INVALID', `digest.path=${file} 不在 files 里`);
+  }
+  if (listed.sha256 !== sha256 || listed.bytes !== bytes) {
+    throw new IpcError('IPC_INVALID', `digest 与 files 里 ${file} 的 bytes/sha256 不一致`);
+  }
+  return { path: file, bytes, sha256, text };
+}
+
+/**
  * 把核心 `run --json` 的 stdout 归一化成 `RunOutcome`。
  *
  * 唯一接受的形状是契约 `RunResult`（`ipcSchema=2` / `command=run`），并用契约包
@@ -203,16 +244,19 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
   // 在契约校验前把 null 归一成 []，不触碰任何产物内容。
   if (value.files === null || value.files === undefined) value.files = [];
   if (value.command !== 'run' || value.ipcSchema !== IPC_SCHEMA_VERSION || !validators.runResult(value)) {
-    throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=2 / command=run）');
+    throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=3 / command=run）');
   }
   const result = value as unknown as RunResult;
   const error = normalizeError(result.error);
   const skipReason = (value as { skipReason?: unknown }).skipReason;
+  const files = Array.isArray(result.files) ? result.files : [];
+  const digest = parseDigest((value as { digest?: unknown }).digest, files);
   return {
     ok: result.ok,
     skipped: result.skipped === true,
     dryRun: options.dryRun,
-    files: Array.isArray(result.files) ? result.files : [],
+    files,
+    ...(digest === undefined ? {} : { digest }),
     contentHash: typeof result.contentHash === 'string' ? result.contentHash : undefined,
     branch: typeof result.branch === 'string' ? result.branch : undefined,
     commit: typeof result.commit === 'string' ? result.commit : undefined,

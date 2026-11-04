@@ -22,15 +22,39 @@ test('契约包依赖精确锁定，且安装版本与导出一致', () => {
   assert.equal(contractVersion, contractPkg.version, '导出的 contractVersion 与包版本不一致');
 });
 
-test('wire 版本是 v2（ipcSchema=2 / digestSchema=2 / contractVersion 主版本 0）', () => {
-  assert.equal(rawSchema.ipc.$defs.RunResult.properties.ipcSchema.const, 2);
-  assert.equal(rawSchema.ipc.$defs.RunRequest.properties.ipcSchema.const, 2);
+test('wire 版本是 v3（ipcSchema=3 / digestSchema=2 / contractVersion 主版本 0）', () => {
+  assert.equal(rawSchema.ipc.$defs.RunResult.properties.ipcSchema.const, 3);
+  assert.equal(rawSchema.ipc.$defs.RunRequest.properties.ipcSchema.const, 3);
   assert.equal(rawSchema.digest.properties.schema.const, 2);
-  assert.equal(rawSchema.versionInfo.properties.ipcSchema.const, 2);
+  assert.equal(rawSchema.versionInfo.properties.ipcSchema.const, 3);
   assert.equal(rawSchema.versionInfo.properties.digestSchema.const, 2);
-  assert.equal(versionMap['ipc.v2.json'].current, 2);
+  assert.equal(versionMap['ipc.v3.json'].current, 3);
   assert.equal(versionMap['digest.v2.json'].current, 2);
   assert.equal(String(versionMap['version-info.v2.json'].current).split('.')[0], '0');
+});
+
+test('RunResult.digest 是 ipc v3 的必填四字段（path/bytes/sha256/text）', () => {
+  const digest = rawSchema.ipc.$defs.DigestArtifact;
+  assert.deepEqual([...digest.required].sort(), ['bytes', 'path', 'sha256', 'text']);
+  const rr = {
+    ipcSchema: 3,
+    ok: true,
+    command: 'run',
+    startedAt: '2026-11-04T00:00:00Z',
+    finishedAt: '2026-11-04T00:05:00Z',
+    skipped: false,
+    files: [{ path: 'trending/daily/2026-11/2026-11-04.md', bytes: 5, sha256: `sha256:${'a'.repeat(64)}` }],
+    digest: {
+      path: 'trending/daily/2026-11/2026-11-04.md',
+      bytes: 5,
+      sha256: `sha256:${'a'.repeat(64)}`,
+      text: '# hi\n',
+    },
+  };
+  assert.equal(validators.runResult(rr), true);
+  assert.equal(validators.runResult({ ...rr, ipcSchema: 2 }), false, 'v2 信封必须被拒');
+  const { text, ...withoutText } = rr.digest;
+  assert.equal(validators.runResult({ ...rr, digest: withoutText }), false, 'digest.text 必填');
 });
 
 test('v2 fixtures 全部通过对应的 ajv 校验', () => {

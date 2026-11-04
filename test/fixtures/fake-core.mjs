@@ -3,7 +3,7 @@
  * 测试用的假核心：只实现插件依赖的两个命令面。
  *
  *   version --json   → {version, commit, ipcSchema, digestSchema, contractVersion, supportedProviders}
- *   run --config X   → 读一遍配置（验证 FIFO/临时文件通道可用），再输出契约 v2 RunResult
+ *   run --config X   → 读一遍配置（验证 FIFO/临时文件通道可用），再输出契约 v3 RunResult
  *
  * 行为全部由环境变量控制，测试里按用例设置：
  *   FAKE_IPC_SCHEMA      覆盖 ipcSchema（AC-P-07）
@@ -26,7 +26,15 @@
  *   FAKE_ARTIFACT_NUL         '1' 时在内容末尾追加 NUL 字节
  *   FAKE_ARTIFACT_SHA         覆盖 artifact.sha256（测 sha 不一致）
  *   FAKE_ARTIFACT_BYTES       覆盖 artifact.bytes
+ *   FAKE_ARTIFACT_WRITE        '1' 时才真的写盘（默认不写：预览来自 RunResult.digest，不依赖工作树）
  *   FAKE_ARTIFACTS            JSON 数组，每项 {path, content?, size?, nul?, sha256?, bytes?}
+ *
+ * digest 回传（ipc v3）：
+ *   FAKE_DIGEST               '0' 时不输出 digest（模拟纯发版/渲染前失败的核心）
+ *   FAKE_DIGEST_PATH          覆盖 digest.path（默认取第一个有内容的 artifact，可造「不在 files 里」）
+ *   FAKE_DIGEST_TEXT          覆盖 digest.text（与 bytes/sha 一起造跨字段不一致）
+ *   FAKE_DIGEST_BYTES         覆盖 digest.bytes
+ *   FAKE_DIGEST_SHA           覆盖 digest.sha256
  *
  * 发版订阅（契约 0.4.0）：
  *   FAKE_RELEASES              "repos,newReleases,tokens[,degraded,failed,skipped,checked,changed]"
@@ -56,7 +64,7 @@ const command = argv[0];
 // 「配置里带密钥」与「不带密钥」两种路径。
 const HASH_WITH_KEY = `sha256:${'a'.repeat(64)}`;
 const HASH_NO_KEY = `sha256:${'b'.repeat(64)}`;
-const DEFAULT_ARTIFACT = { path: 'trending/2026-10-30/all.md', bytes: 12, sha256: `sha256:${'c'.repeat(64)}` };
+const DEFAULT_ARTIFACT = { path: 'trending/2026-10-30/all.md', content: '# default digest\n' };
 
 /** 从插件生成的 YAML 配置里取 repo.path（唯一一个顶层 `path:`）。 */
 function repoPathFromConfig(config) {
@@ -81,26 +89,26 @@ function artifactFromSpec(spec, repoPath) {
   const file = typeof spec.path === 'string' && spec.path !== '' ? spec.path : DEFAULT_ARTIFACT.path;
   let content = contentOf(spec);
   if (spec.nul === true || spec.nul === '1') content = `${content ?? ''}\0`;
-  if (content !== undefined) {
+  if (content !== undefined && process.env.FAKE_ARTIFACT_WRITE === '1') {
     if (repoPath === '') throw new Error('FAKE_ARTIFACT_CONTENT requires repo.path in config');
     const target = path.resolve(repoPath, file);
     mkdirSync(path.dirname(target), { recursive: true });
     writeFileSync(target, content);
   }
   const buffer = content === undefined ? undefined : Buffer.from(content, 'utf8');
-  const bytes = Number.isFinite(Number(spec.bytes)) ? Number(spec.bytes) : buffer === undefined ? DEFAULT_ARTIFACT.bytes : buffer.length;
+  const bytes = Number.isFinite(Number(spec.bytes)) ? Number(spec.bytes) : buffer === undefined ? 0 : buffer.length;
   const sha256 =
     typeof spec.sha256 === 'string'
       ? spec.sha256
       : buffer === undefined
-        ? DEFAULT_ARTIFACT.sha256
+        ? `sha256:${createHash('sha256').update('').digest('hex')}`
         : `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
-  return { path: file, bytes, sha256 };
+  return { wire: { path: file, bytes, sha256 }, content };
 }
 
 /** 本用例要输出的 artifact 列表；默认保持「固定路径 + 固定 hash、不写盘」。 */
 function artifactsFor(config, skipped) {
-  // 幂等 skipped 默认无产物；但 force 重跑「内容未变」时需要产物去生成预览。
+  // 幂等 skipped 默认无产物；给了 artifact 时仍输出（unchanged 也渲染过 digest）。
   if (skipped && process.env.FAKE_SKIPPED_WITH_ARTIFACTS !== '1') return [];
   if (typeof process.env.FAKE_ARTIFACTS === 'string' && process.env.FAKE_ARTIFACTS !== '') {
     const specs = JSON.parse(process.env.FAKE_ARTIFACTS);
@@ -115,7 +123,7 @@ function artifactsFor(config, skipped) {
     process.env.FAKE_ARTIFACT_NUL !== undefined ||
     process.env.FAKE_ARTIFACT_SHA !== undefined ||
     process.env.FAKE_ARTIFACT_BYTES !== undefined;
-  if (!custom) return [DEFAULT_ARTIFACT];
+  if (!custom) return [artifactFromSpec(DEFAULT_ARTIFACT, repoPathFromConfig(config))];
   return [
     artifactFromSpec(
       {
@@ -131,14 +139,29 @@ function artifactsFor(config, skipped) {
   ];
 }
 
+/** 本次回传的 digest：默认取第一个有内容的 artifact，保证 text/bytes/sha 三者自洽。 */
+function digestFor(sources) {
+  if (process.env.FAKE_DIGEST === '0') return undefined;
+  const source = sources.find((item) => item.content !== undefined) ?? sources[0];
+  if (source === undefined) return undefined;
+  const text = process.env.FAKE_DIGEST_TEXT !== undefined ? process.env.FAKE_DIGEST_TEXT : (source.content ?? '');
+  const buffer = Buffer.from(text, 'utf8');
+  return {
+    path: process.env.FAKE_DIGEST_PATH ?? source.wire.path,
+    bytes: process.env.FAKE_DIGEST_BYTES !== undefined ? Number(process.env.FAKE_DIGEST_BYTES) : buffer.length,
+    sha256: process.env.FAKE_DIGEST_SHA ?? `sha256:${createHash('sha256').update(buffer).digest('hex')}`,
+    text,
+  };
+}
+
 if (command === 'version') {
   process.stdout.write(
     JSON.stringify({
       version: process.env.FAKE_VERSION ?? '0.3.0-fake',
       commit: 'test',
-      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '2'),
+      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '3'),
       digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '2'),
-      contractVersion: process.env.FAKE_CONTRACT_VERSION ?? '0.2.0',
+      contractVersion: process.env.FAKE_CONTRACT_VERSION ?? '0.6.0',
       supportedProviders: ['openai-compatible', 'deepseek'],
     }) + '\n',
   );
@@ -193,7 +216,9 @@ if (command === 'run') {
   }
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
-  const files = artifactsFor(config, skipped);
+  const sources = artifactsFor(config, skipped);
+  const files = sources.map((item) => item.wire);
+  const digest = digestFor(sources);
   // 契约 0.4.0：可选 usage / releases 块；给了就按各自 schema 生成（releases 的
   // checked/changed 必填）。用 FAKE_USAGE_* / FAKE_RELEASES_* 控制。
   const usageSpec = process.env.FAKE_USAGE;
@@ -233,7 +258,7 @@ if (command === 'run') {
   }
   process.stdout.write(
     JSON.stringify({
-      ipcSchema: 2,
+      ipcSchema: 3,
       ok: true,
       command: 'run',
       startedAt: now,
@@ -251,6 +276,7 @@ if (command === 'run') {
             prUrl: 'https://example.invalid/pr/1',
             contentHash: hasKey ? HASH_WITH_KEY : HASH_NO_KEY,
           }),
+      ...(digest === undefined ? {} : { digest }),
       ...(usage === undefined ? {} : { usage }),
       ...(releases === undefined ? {} : { releases }),
       warnings: [
@@ -301,7 +327,7 @@ if (command === 'subscribe') {
   const now = new Date().toISOString();
   // 契约 0.4.0：payload 进信封（subscriptions / subscriptionDoc）。
   const envelope = (ok, errorCode, errorMessage, payload = {}) => {
-    const out = { ipcSchema: 2, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [], ...payload };
+    const out = { ipcSchema: 3, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [], ...payload };
     if (!ok) out.error = { code: errorCode, message: errorMessage, retriable: false };
     process.stdout.write(JSON.stringify(out) + '\n');
     process.exit(ok ? 0 : 1);
