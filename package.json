@@ -51,7 +51,7 @@
     }
   },
   "dependencies": {
-    "@morehao/dsh-plugin-kit": "^0.4.1",
+    "@morehao/dsh-plugin-kit": "^0.4.2",
     "@morehao/trendradar-contract": "0.6.0"
   },
   "dsh": {
