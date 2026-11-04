@@ -68,6 +68,16 @@
 - 错误码是**对外契约**：新增码要同时进 `PLUGIN_CODES` 与分类/提示（`errors.ts`）；码与 `message` 会直接展示在运行页与历史表，改名等于改用户可见文案，已有码不要改名。
 - 工具名 `trending_run` / `trending_history` 是稳定接口：一旦发布不再改名，需要新能力就新增工具。
 
+### 前端瞬时反馈（Toast / 成功提示）
+
+- 操作完成后的「成功 / 已保存 / 已添加 / 已移除 / 已复制 / 无变化」这类**瞬时反馈**必须能自己退场，不能一直挂在页面上、等用户点下一次操作才消失。新增任何瞬时反馈前先确认它有退出路径。
+- 三种允许的退场方式，按信息量选：
+  - **自动消失**：短回执（已复制、保存成功）用 `useEffect` + `setTimeout` 定时清除，默认 5s（复制类可 1.5s 左右）。定时器必须在 cleanup 里 `clearTimeout`，并用「对象/值相等」守卫，避免新旧两条提示互相误清。标准实现见 [client/settings.ts](client/settings.ts) 的 `NOTICE_TTL_MS` + `notice` effect。
+  - **可手动关闭**：需要读一下的结论（如「暂无新变化」的原因、跳过原因）可以常驻，但必带关闭按钮（×），用户读完能自己关掉。
+  - **有意常驻**：只有需要用户照做的操作指令（如更新后「请重启」弹层，见 [client/restore-notice.ts](client/restore-notice.ts)）才允许不自动消失，且必须在组件头注释里写明「不自动消失」的理由。
+- **错误提示**（失败原因、校验不通过）默认可常驻，直到用户修正或再次操作——不要把错误也做成 5s 自动消失，避免用户错过。
+- 反例（禁止）：把成功提示塞进一个只在「下一次操作开头」才被 `setNote(null)` / `setResult(null)` 重置的 state，结果提示一直留着。
+
 ### 包与发布
 
 - 三处命名一致：`package.json.name` = `cordis.patch.yml` 的 `insert[0].name`；`src/index.ts` 的 `export const name` = `insert[0].id`；`publishConfig.access = "public"`（`check:naming` 兜底）。

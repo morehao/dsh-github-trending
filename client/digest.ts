@@ -142,6 +142,13 @@ export function DigestView(props: DigestProps): any {
     }
   }, [activePeriod, effectiveBucket, selected?.period, selected?.bucket, props.onSelect]);
 
+  // 「已复制」到点自动恢复，卸载时清掉计时器。
+  React.useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   React.useEffect(() => {
     setMode('render');
   }, [activePeriod, effectiveBucket]);
@@ -379,7 +386,6 @@ export function DigestView(props: DigestProps): any {
                     void copyText(file).then((okResult) => {
                       if (!okResult) return;
                       setCopied(true);
-                      setTimeout(() => setCopied(false), 1600);
                     });
                   },
                 },

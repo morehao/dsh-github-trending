@@ -121,6 +121,16 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // 「已保存」按钮态到点回落到「保存本页」，避免保存成功后永远停在已保存态；再次编辑该分区
+  // 时也会立即复位（见 dirtySections 的清理），两者不冲突。
+  React.useEffect(() => {
+    if (savedSection === null) return undefined;
+    const timer = setTimeout(() => {
+      setSavedSection((current) => (current === savedSection ? null : current));
+    }, NOTICE_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [savedSection]);
+
   const notify = (kind: Notice['kind'], text: string): void => setNotice({ kind, text });
 
   const repoPath = draft === null ? '' : draft.repo.path;

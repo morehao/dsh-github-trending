@@ -108,6 +108,12 @@ function LogDrawer(props: { t: Translate; runId: string; onClose: () => void }):
   }, [runId]);
 
   React.useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  React.useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') props.onClose();
     };
@@ -143,7 +149,6 @@ function LogDrawer(props: { t: Translate; runId: string; onClose: () => void }):
               void copyText(text).then((okResult) => {
                 if (!okResult) return;
                 setCopied(true);
-                setTimeout(() => setCopied(false), 1600);
               });
             },
           },

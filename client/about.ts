@@ -52,12 +52,18 @@ export function AboutDialog(props: { t: Translate; state: StatePayload; onClose:
     return () => document.removeEventListener('keydown', onKey);
   }, [props]);
 
+  // 「已复制」到点自动恢复，卸载时清掉计时器。
+  React.useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   // 包名整行点击复制「包名@版本」；成功后行尾出现「已复制」，1.4s 后恢复。
   const copy = (): void => {
     void copyText(fullName).then((ok) => {
       if (!ok) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
     });
   };
 

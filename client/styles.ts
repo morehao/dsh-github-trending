@@ -58,6 +58,9 @@ export const CSS = `
 .dshgt-alert.err{border-left-color:var(--gt-err);background:color-mix(in srgb,var(--gt-err) 8%,var(--gt-bg));}
 .dshgt-alert.ok{border-left-color:var(--gt-ok);background:color-mix(in srgb,var(--gt-ok) 8%,var(--gt-bg));}
 .dshgt-alert b{display:block;margin-bottom:2px;font-size:12px;}
+.dshgt-alert-row{display:flex;align-items:flex-start;gap:8px;} .dshgt-alert-row>span{flex:1;min-width:0;}
+.dshgt-alert-dismiss{flex:none;appearance:none;border:0;background:none;color:var(--gt-muted);font-size:16px;line-height:1;padding:0 2px;cursor:pointer;border-radius:4px;}
+.dshgt-alert-dismiss:hover{color:var(--gt-fg);background:color-mix(in srgb,var(--gt-fg) 8%,transparent);}
 .dshgt-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
 .dshgt-step{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gt-muted);}
 .dshgt-step .st{margin-left:auto;font-size:11px;}
