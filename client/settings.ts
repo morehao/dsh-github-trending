@@ -6,7 +6,7 @@
  * 「禁止静默复制」「保存前预检」一致；快速填充也要用户再点一次确认。
  *
  * 只暴露普通用户需要的字段：「核心」是状态与核心操作（重新检查 / 下载），
- * 没有可编辑项，因此不出现「保存本页」；`TRENDING_DIGEST_CORE` 不提供界面入口
+ * 没有可编辑项，因此不出现「保存」按钮；`TRENDING_DIGEST_CORE` 不提供界面入口
  * （需要时用环境变量或直接改 settings.json），手动 `凭据引用` 也不露出（由快速
  * 填充自动带入）。避免把开发/排障概念摊在首屏，也避免出现「点了没反应」的开关。
  */
@@ -100,7 +100,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
 
   const anyDirty = SECTIONS.some((id) => dirtySections[id]);
   // 「核心」分区有唯一可保存字段：出站网络代理（network.proxy）。核心状态与下载
-  // 仍是即时操作，不受「保存本页」影响。
+  // 仍是即时操作，不受「保存」按钮影响。
   const sectionEditable = true;
 
   React.useEffect(() => {
@@ -121,7 +121,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // 「已保存」按钮态到点回落到「保存本页」，避免保存成功后永远停在已保存态；再次编辑该分区
+  // 「已保存」按钮态到点回落到「保存」，避免保存成功后永远停在已保存态；再次编辑该分区
   // 时也会立即复位（见 dirtySections 的清理），两者不冲突。
   React.useEffect(() => {
     if (savedSection === null) return undefined;
@@ -512,9 +512,17 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
     h(
       Row,
-      { label: t('model.params') },
+      { label: t('model.temperature'), help: t('model.temperature.help') },
       h(Input, { mono: true, width: 70, value: String(draft.model.temperature), onInput: (value: string) => update((next) => { next.model.temperature = Number(value) || 0; }) }),
+    ),
+    h(
+      Row,
+      { label: t('model.maxTokens'), help: t('model.maxTokens.help') },
       h(Input, { mono: true, width: 90, value: String(draft.model.maxTokens), onInput: (value: string) => update((next) => { next.model.maxTokens = Math.round(Number(value) || 0); }) }),
+    ),
+    h(
+      Row,
+      { label: t('model.params'), help: t('model.allowDegraded.help') },
       h(Toggle, { checked: draft.model.allowDegraded, label: t('model.allowDegraded'), onChange: (value: boolean) => update((next) => { next.model.allowDegraded = value; }) }),
     ),
     preflight === null
@@ -887,7 +895,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                 variant: 'primary',
                 onClick: () => void save(section),
                 disabled: savingSection !== null || !dirtySections[section],
-                title: t('settings.saveSection.hint'),
               },
               savingSection === section
                 ? t('settings.saving')
@@ -898,7 +905,6 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
                     : t('settings.saveSection'),
             )
           : null,
-        sectionEditable ? h('span', { className: 'dshgt-hint' }, t('settings.saveSection.hint')) : null,
         h(Btn, { onClick: () => void importCli() }, t('settings.import')),
         h(Btn, { onClick: copyConfig }, t('settings.copyConfig')),
       ),
