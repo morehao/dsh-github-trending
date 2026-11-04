@@ -454,6 +454,10 @@ export interface PluginUpdateView {
   currentVersion: string;
   latestVersion: string | null;
   updateAvailable: boolean;
+  /** 磁盘已是最新、但需重启生效（Host 按磁盘版本判定后透传）。 */
+  restartRequired?: boolean;
+  /** 本进程加载的代码版本（诊断用）。 */
+  runtimeVersion?: string;
   checkFailed: boolean;
   canApply: boolean;
   installKind: PluginInstallKind;

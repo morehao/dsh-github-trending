@@ -8,6 +8,7 @@
 import { Store } from './state.js';
 import { Runner } from './host/runner.js';
 import { readPluginInfo } from './host/plugin-info.js';
+import { PKG_URL_FOR_UPDATE } from './host/plugin-info.js';
 import { Scheduler } from './host/schedule.js';
 import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
 import { ensureGithubFlow, type GithubAuthDeps } from './host/github-auth.js';
@@ -127,6 +128,8 @@ export function apply(
     meta: {
       name: pluginInfo.name,
       version: VERSION,
+      // pkgUrl：让自更新引擎每次 check 现读磁盘已安装版本（是否落后的唯一真相）。
+      pkgUrl: PKG_URL_FOR_UPDATE,
       ...(pluginInfo.repository === undefined ? {} : { repository: pluginInfo.repository }),
     },
     logger: log,

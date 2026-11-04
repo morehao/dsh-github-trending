@@ -25,6 +25,9 @@ const DEFAULT_NAME = '@morehao/dsh-github-trending';
 
 const PKG_URL = new URL('../package.json', import.meta.url);
 
+/** 本插件 `package.json` 的导入地址：供自更新引擎每次现读「磁盘已安装版本」。 */
+export const PKG_URL_FOR_UPDATE = PKG_URL;
+
 export function readPluginInfo(): PluginInfo {
   const meta = createPluginMeta({ pkgUrl: PKG_URL, defaultName: DEFAULT_NAME });
   return {

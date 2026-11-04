@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.9.5] - 2026-11-04
+
+### Fixes
+
+- **plugin-update**: 版本判定改为以**磁盘已安装版本**为唯一真相（升级 `@morehao/dsh-plugin-kit@^0.5.0`）。修复「一键更新写入磁盘后、进程未重启时，身份条持续提示有新版本」及重复重装同一版本的问题；`restartRequired` 由 Host 视图透传，待重启状态由 `deriveUpdateUiState` 正确落定为 settled。
+
 ## [v0.9.3] - 2026-11-04
 
 ### Tests
