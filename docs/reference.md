@@ -139,11 +139,11 @@
 - 订阅一组仓库，之后**每周一次**把每个仓库这一周「**新增的 Release**（无 Release 时回退 Tag）」合成一段中文总结，写到 `<output.dir>/releases/<owner>/<repo>-01.md`（每册都带两位序号，超出行数预算后下一次写入开 `-02.md`，最新一周在最上面），与榜单**同分支、同 PR** 一起提交。订阅阶段**常开**；没有订阅时不产出，既有榜单产物逐字节不变。跨仓的周汇总（`releases/_weekly/<年>/<ISO周>.{md,json}`）继续生成，供外部 Web 服务的 `GET /api/v2/releases*` 消费。
 - **订阅列表随数据仓版本化**：文件在 `<repo>/<OutputRoot(output.dir)>/subscriptions.yaml`，随产物同一次 commit / PR，可审计、可复现。
 - **插件不直接写仓**：列表经核心 `subscribe` IPC 命令读改——`add` / `remove` 只写 `.git/trendradar-subscriptions.pending`，下一次 `run` 切分支后落盘并随 artifact 提交。插件侧的子进程只做一次 stdin 交互：`RunRequest{command:"subscribe", action, repo?, volume?, configPath}`；核心把 payload 放进结果信封（`subscriptions` / `subscriptionDoc`），旧核心把 `list` 结果逐行打到信封前，插件两种都认。`configPath` 由插件生成（与 `run` 同源的临时配置），保证 `subscribe` 与 `run` 解析到同一个订阅文件；代理模式下 `model.baseURL` 为空，临时配置补一个回环占位端点以通过核心 `config.Load`（订阅命令不调用模型）。
-- 界面：「订阅」页管理列表（增删 + 逐仓库状态），可展开某仓库的变更文档（`GET /subscriptions/releases?repo=&volume=`）；「设置 → 订阅」分区放行为参数与每周触发节奏。
-- **置灰（禁用）依据**：任一运行在跑（`/state.status.running`，含定时 / 榜单 run，随 store 每 5 s 轮询）时，所有「发起分析」「改订阅」按钮禁用；本页增删/分析在途时亦禁用防重复。单仓「触发分析」另有一个真实前置——该仓库必须已落盘到订阅文档（`items` 里有明细）：只写进 `.git/pending`、尚未随 `run` 落盘的新加仓库，核心 `--stages releases` 会报 `repo ... is not in the subscription list`，故该行禁用并提示「待纳入订阅（提交后）才能单独分析」。`baseline`（已落盘、该周无 section）**可以**正常单仓分析，不据此置灰；旧核心整包不回 `items` 时无法区分「未纳入」与「无明细」，不据此置灰、退回点击后错误兜底。一次运行结束（运行态由真转假）会自动重新拉取列表，pending 已落盘的行随之解除置灰。
+- 界面：「订阅」页管理列表（增删 + 逐仓库状态），行内可删；展开某仓库的变更文档（`GET /subscriptions/releases?repo=&volume=`），文档若含 `##` 标题会在抽屉里生成**本册目录（TOC）**、正文中的版本号与 `owner/repo` 做等宽高亮（纯表现、不改写原文）。抽屉里「重新生成」按 `POST /releases/run {repo, force:true}` **忽略摘要缓存、强制重新生成**这一卷（会重新调用模型，可能产生新提交 / PR）。订阅页**不提供多选模式**：单删走行内，「触发分析 / 重新生成」是逐仓库粒度。「设置 → 订阅」分区放行为参数与每周触发节奏。
+- **置灰（禁用）依据**：任一运行在跑（`/state.status.running`，含定时 / 榜单 run，随 store 每 5 s 轮询）时，所有「发起分析」「改订阅」「重新生成」按钮禁用；本页增删/分析在途时亦禁用防重复。单仓「触发分析」/「重新生成」另有一个真实前置——该仓库必须已落盘到订阅文档（`items` 里有明细）：只写进 `.git/pending`、尚未随 `run` 落盘的新加仓库，核心 `--stages releases` 会报 `repo ... is not in the subscription list`，故该行禁用并提示「待纳入订阅（提交后）才能单独分析」。`baseline`（已落盘、该周无 section）**可以**正常单仓分析，不据此置灰；旧核心整包不回 `items` 时无法区分「未纳入」与「无明细」，不据此置灰、退回点击后错误兜底。一次运行结束（运行态由真转假）会自动重新拉取列表，pending 已落盘的行随之解除置灰。
 - 周期：0.7.0 起只支持**每周**（`releases.period=weekly`）——每个 ISO 周、每仓库一条中文摘要，文档按周累积并按行数预算自动分卷；填 `daily`/`monthly` 会被校验拦下并说明原因。
 - 每周订阅行程与榜单调度**互相独立**：`releases.schedule`（`enabled` / `weekday`（ISO 1=周一…7=周日）/ `time` / `timezone`）驱动 `run --stages releases`——只跑订阅阶段，不抓榜单、不渲染 digest、不合并订阅 pending；成功后按 ISO 周（如 `2026-W44`）去重。
-- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新版本 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。
+- 历史里每条运行记录带 `releases` 摘要（仓库数 / 新版本 / 已摘要 / 降级 / 失败 / 跳过）与本次 `tokens`；旧核心没有 `releases` 块时缺省。记录还带 `forced`（本次是否为「重新生成」强制重跑）、`scopeRepo`（单仓触发的仓库）；调度触发永不设置 `force`。
 
 ## 更新插件
 

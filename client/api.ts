@@ -208,6 +208,8 @@ export interface ReleaseRunRecord {
   errorMessage?: string;
   coreVersion?: string;
   scopeRepo?: string;
+  /** 本次是否为强制重新生成（忽略缓存、重新调模型）。 */
+  forced?: boolean;
 }
 
 /** 插件侧每周发版节奏；与榜单调度（`schedule.*`）互相独立。 */
@@ -533,10 +535,14 @@ export async function postSubscriptions(action: 'add' | 'remove', repos: string[
 
 /**
  * 触发生成变更分析（发版订阅阶段）。不给 `repo` = 跑全部订阅；给了 = 只跑该仓库的单仓分析。
+ * `opts.force=true` = 忽略摘要缓存、强制重新生成（用户显式点「重新生成」时用）。
  * 返回本次发版运行记录（含 scopeRepo、状态与计数），前端据此刷新列表/提示结果。
  */
-export async function postReleasesRun(repo?: string): Promise<ReleaseRunRecord> {
-  const payload = await apiCall<{ release?: unknown }>('POST', '/releases/run', repo === undefined ? {} : { repo });
+export async function postReleasesRun(repo?: string, opts?: { force?: boolean }): Promise<ReleaseRunRecord> {
+  const body: Record<string, unknown> = {};
+  if (repo !== undefined) body.repo = repo;
+  if (opts?.force === true) body.force = true;
+  const payload = await apiCall<{ release?: unknown }>('POST', '/releases/run', body);
   return normalizeReleaseRun(payload.release);
 }
 
@@ -571,6 +577,7 @@ function normalizeReleaseRun(raw: unknown): ReleaseRunRecord {
     errorMessage: opt(r.errorMessage),
     coreVersion: opt(r.coreVersion),
     scopeRepo: opt(r.scopeRepo),
+    forced: r.forced === true ? true : undefined,
   };
   for (const [k, v] of Object.entries(maybe)) {
     if (v !== undefined) (record as unknown as Record<string, unknown>)[k] = v;
