@@ -23,7 +23,7 @@ import {
   type SubscriptionList,
   type SubscriptionStatus,
 } from './api.js';
-import { renderMarkdown } from './markdown.js';
+import { renderMarkdown, type HeadingToc } from './markdown.js';
 import type { StoreValue } from './store.js';
 
 export interface SubscriptionsProps {
@@ -72,6 +72,12 @@ function errorText(failure: unknown): string {
  */
 function isNotReadyMessage(message: string): boolean {
   return /is not in the subscription list|has no release document|no release record|not subscribed/i.test(message);
+}
+
+/** CSS `querySelector` 里选择器片段转义：兜住 slug 里的特殊字符（slug 已知只含字母数字与 `-`，仍做一次防御）。 */
+function cssEscape(value: string): string {
+  const win = (globalThis as any).CSS;
+  return win?.escape !== undefined ? win.escape(value) : value.replace(/[^A-Za-z0-9_-]/g, '\\$&');
 }
 
 /** `2026-10-25` → `10-25`；不是日期就原样返回。 */
@@ -178,6 +184,14 @@ interface DocDrawerProps {
   t: Translate;
   repo: string;
   status?: SubscriptionStatus;
+  /** 是否有任何运行在途（含本页分析）：在途时禁用「重新生成」。 */
+  blocked: boolean;
+  /** 该仓库此刻是否正在被重新生成（用于按钮显示进行中）。 */
+  regenerating: boolean;
+  /** 是否已落盘订阅（未落盘的仓库不能单仓重新生成）。 */
+  canRegenerate: boolean;
+  /** 点「重新生成」：忽略缓存、强制重跑该仓库这一卷。 */
+  onRegenerate: () => void;
   onClose: () => void;
 }
 
@@ -191,6 +205,7 @@ function DocDrawer(props: DocDrawerProps): any {
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const closeRef = React.useRef<any>(null);
+  const bodyRef = React.useRef<any>(null);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -232,14 +247,49 @@ function DocDrawer(props: DocDrawerProps): any {
   const stale = props.status === 'rate_limited' || props.status === 'failed';
 
   let nodes: any[] | null = null;
+  let headings: HeadingToc[] = [];
   let parseFailed = false;
   if (doc !== null && !missing && error === null) {
     try {
-      nodes = renderMarkdown(doc.markdown).nodes;
+      const rendered = renderMarkdown(doc.markdown);
+      nodes = rendered.nodes;
+      headings = rendered.headings;
     } catch {
       parseFailed = true;
     }
   }
+
+  // 章节目录只在正文确实有层级（≥2 个标题）时出现：源是无结构的散文时 source 里根本没有 `##`，
+  // 这里就不造假的目录。点击滚动到对应标题，不改变正文任何内容。
+  const toc =
+    !loading && error === null && !parseFailed && headings.length >= 2
+      ? h(
+          'nav',
+          { className: 'dshgt-subs-toc', 'aria-label': t('subs.toc.label') },
+          h('div', { className: 'dshgt-subs-toc-title' }, t('subs.toc.label')),
+          h(
+            'ul',
+            null,
+            headings.map((item, index) =>
+              h(
+                'li',
+                { key: `${item.id}-${index}`, className: `lvl-${Math.min(item.level, 3)}` },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dshgt-subs-toc-link',
+                    onClick: () => {
+                      bodyRef.current?.querySelector?.(`#${cssEscape(item.id)}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+                    },
+                  },
+                  item.text,
+                ),
+              ),
+            ),
+          ),
+        )
+      : null;
 
   const content = loading
     ? h('p', { className: 'dshgt-hint' }, t('subs.drawer.loading'))
@@ -254,7 +304,7 @@ function DocDrawer(props: DocDrawerProps): any {
           )
         : parseFailed || nodes === null
           ? h('div', { className: 'dshgt-subs-drawer-doc' }, h('pre', { className: 'dshgt-subs-drawer-raw' }, doc?.markdown ?? ''))
-          : h('div', { className: 'dshgt-subs-drawer-doc' }, h('div', { className: 'dshgt-md' }, nodes));
+          : h('div', { className: 'dshgt-subs-drawer-doc' }, toc, h('div', { className: 'dshgt-md' }, nodes));
 
   return h(
     'div',
@@ -286,6 +336,20 @@ function DocDrawer(props: DocDrawerProps): any {
           'button',
           {
             type: 'button',
+            className: 'dshgt-subs-drawer-regen',
+            'aria-label': t('subs.drawer.regen.aria', { repo }),
+            title: props.canRegenerate ? t('subs.drawer.regen.title') : t('subs.row.triggerFresh'),
+            disabled: props.blocked || !props.canRegenerate,
+            onClick: () => {
+              if (!props.blocked && props.canRegenerate) props.onRegenerate();
+            },
+          },
+          props.regenerating ? t('subs.drawer.regenring') : t('subs.drawer.regen'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
             className: 'dshgt-subs-drawer-close',
             'aria-label': t('subs.drawer.close'),
             title: t('subs.drawer.close'),
@@ -297,7 +361,10 @@ function DocDrawer(props: DocDrawerProps): any {
       ),
       h(
         'div',
-        { className: 'dshgt-subs-drawer-body' },
+        { className: 'dshgt-subs-drawer-body', ref: bodyRef },
+        props.canRegenerate
+          ? h('p', { className: 'dshgt-subs-regen-hint' }, t('subs.drawer.regen.hint'))
+          : null,
         stale ? h(Alert, { kind: 'warn' }, t(`subs.drawer.warn.${props.status ?? 'failed'}`)) : null,
         total > 1
           ? h(
@@ -387,9 +454,6 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
   const [sort, setSort] = React.useState<SortState>({ key: 'name', dir: 1 });
-  const [selecting, setSelecting] = React.useState(false);
-  const [selected, setSelected] = React.useState<string[]>([]);
-  const [confirming, setConfirming] = React.useState<string[] | null>(null);
   const [openRepo, setOpenRepo] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [addValue, setAddValue] = React.useState('');
@@ -398,6 +462,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   // 发版分析：全局或单仓，任一进行中时其余触发都禁用（后端同一把运行锁）。
   const [analyzing, setAnalyzing] = React.useState<null | { scope: 'all' | 'one'; repo?: string }>(null);
   const [result, setResult] = React.useState<AnalyzeResult | null>(null);
+  // 抽屉重新生成后自增：作为 DocDrawer 的 key 片段，强制重挂载并重新拉取该卷最新内容。
+  const [docReload, setDocReload] = React.useState(0);
 
   const load = React.useCallback((signal?: AbortSignal): void => {
     getSubscriptions(signal)
@@ -456,10 +522,6 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const matched = needle === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(needle));
   const sorted = sortRows(matched, sort);
 
-  const toggleSelect = (repo: string): void => {
-    setSelected((current) => (current.includes(repo) ? current.filter((item) => item !== repo) : [...current, repo]));
-  };
-
   const addRepo = (repo: string): void => {
     setBusy('add');
     setError(null);
@@ -483,40 +545,20 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     postSubscriptions('remove', [repo])
       .then((next) => {
         setList(next);
-        setSelected((current) => current.filter((item) => item !== repo));
         setNote(t('subs.remove.queued', { repo }));
       })
       .catch((failure: unknown) => setError(errorText(failure)))
       .finally(() => setBusy(null));
   };
 
-  // 批量移除：一次 POST 带上全部仓库（Host 侧逐个执行，任一失败如实回错）。
-  const removeMany = (repos: string[]): void => {
-    setBusy('remove:many');
-    setError(null);
-    setNote(null);
-    postSubscriptions('remove', repos)
-      .then((next) => {
-        setList(next);
-        setSelected([]);
-        setSelecting(false);
-        setConfirming(null);
-        setNote(t('subs.removed.many', { count: repos.length }));
-      })
-      .catch((failure: unknown) => {
-        setError(errorText(failure));
-        setConfirming(null);
-      })
-      .finally(() => setBusy(null));
-  };
-
   // 生成变更分析：scope=all 跑全部；scope=one 只跑该仓库。完成后刷新列表并给出结果提示。
-  const runAnalyze = (repo?: string): void => {
+  // force=true（仅在抽屉「重新生成」时传）：忽略缓存、强制重新生成，完成后抽屉会重新拉这一卷。
+  const runAnalyze = (repo?: string, force?: boolean): void => {
     if (analyzing !== null) return;
     setAnalyzing(repo === undefined ? { scope: 'all' } : { scope: 'one', repo });
     setError(null);
     setResult(null);
-    postReleasesRun(repo)
+    postReleasesRun(repo, force === true ? { force: true } : undefined)
       .then((record) => {
         const scope = repo === undefined ? 'all' : 'one';
         setResult({
@@ -533,6 +575,8 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
           const notReady = isNotReadyMessage(record.errorMessage);
           setError(notReady ? t('subs.row.triggerFresh') : t('subs.analyze.failed', { message: record.errorMessage }));
         }
+        // 重新生成成功后，让抽屉按新的内容哈希重新拉取这一卷（key 变化触发重挂载）。
+        if (force === true && record.status !== 'failed') setDocReload((current) => current + 1);
         load();
       })
       .catch((failure: unknown) => {
@@ -635,32 +679,14 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     // 仅在「核心确实提供了明细」时才用「无 item = 未纳入」推断；旧核心整包不回 `items`
     // （归一为空数组）时不能据此全表置灰，否则会误伤所有可分析的仓库——退回点击后错误兜底。
     const notSubscribed = !canAnalyzeOne(item, hasItemDetail);
-    const checkbox = selecting
-      ? h(
-          'span',
-          { key: 'cb', role: 'cell', className: 'dshgt-subs-cbwrap' },
-          h('input', {
-            type: 'checkbox',
-            className: 'dshgt-subs-cb',
-            checked: selected.includes(row.name),
-            'aria-label': t('subs.sel.check', { repo: row.name }),
-            onClick: (event: any) => event.stopPropagation(),
-            onChange: () => toggleSelect(row.name),
-          }),
-        )
-      : null;
     return h(
       'div',
       {
         key: row.name,
         role: 'row',
         className: `dshgt-subs-row${rowAnalyzing ? ' is-analyzing' : ''}`,
-        onClick: () => {
-          if (selecting) toggleSelect(row.name);
-          else setOpenRepo(row.name);
-        },
+        onClick: () => setOpenRepo(row.name),
       },
-      checkbox,
       h(
         'span',
         { key: 'name', role: 'cell', className: 'dshgt-subs-ident', title: row.name },
@@ -761,13 +787,10 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
             )
           : h(
               'div',
-              { className: `dshgt-subs-table${selecting ? ' is-selecting' : ''}`, role: 'table', 'aria-label': t('subs.title') },
+              { className: 'dshgt-subs-table', role: 'table', 'aria-label': t('subs.title') },
               h(
                 'div',
                 { className: 'dshgt-subs-thead', role: 'row' },
-                selecting
-                  ? h('span', { key: 'cb', role: 'columnheader', className: 'dshgt-subs-cbwrap' }, h('span', { className: 'dshgt-hint' }, t('subs.sel.column')))
-                  : null,
                 header('name', 'subs.col.repo', false),
                 header('tag', 'subs.col.tag', true),
                 header('summary', 'subs.col.summary', true),
@@ -780,7 +803,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   return h(
     'div',
     { className: 'dshgt-view dshgt-subs' },
-    // 工具条：搜索 + 添加 + 选择 + 生成变更分析（主操作）
+    // 工具条：搜索 + 添加 + 生成变更分析（主操作）
     h(
       'div',
       { className: 'dshgt-subs-toolbar' },
@@ -821,17 +844,6 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         Btn,
         {
           small: true,
-          onClick: () => {
-            if (selecting) setSelected([]);
-            setSelecting(!selecting);
-          },
-        },
-        selecting ? t('subs.select.done') : t('subs.select'),
-      ),
-      h(
-        Btn,
-        {
-          small: true,
           variant: 'primary',
           disabled: blocked,
           onClick: () => runAnalyze(),
@@ -845,77 +857,6 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     note === null ? null : h(Alert, { kind: 'ok' }, note),
 
     tableBody,
-
-    selecting && rows.length > 0
-      ? h(
-          'div',
-          { className: 'dshgt-subs-selbar' },
-          h('span', null, t('subs.sel.count', { count: selected.length })),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dshgt-subs-linkbtn',
-              onClick: () => setSelected(sorted.map((row) => row.name)),
-            },
-            t('subs.sel.all', { count: sorted.length }),
-          ),
-          h(
-            'span',
-            { className: 'dshgt-subs-selbar-actions' },
-            h(
-              Btn,
-              {
-                small: true,
-                onClick: () => {
-                  setSelected([]);
-                  setSelecting(false);
-                },
-              },
-              t('subs.sel.clear'),
-            ),
-            h(
-              Btn,
-              { small: true, variant: 'danger', disabled: blocked || selected.length === 0, onClick: () => setConfirming(selected) },
-              t('subs.sel.remove'),
-            ),
-          ),
-        )
-      : null,
-
-    confirming === null
-      ? null
-      : h(
-          'div',
-          {
-            className: 'dshgt-modal-mask',
-            onClick: (event: any) => {
-              if (event.target === event.currentTarget) setConfirming(null);
-            },
-          },
-          h(
-            'div',
-            { className: 'dshgt-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('subs.confirm.title', { count: confirming.length }) },
-            h('h3', { style: { margin: 0, fontSize: 14 } }, t('subs.confirm.title', { count: confirming.length })),
-            h(
-              'ul',
-              { className: 'dshgt-subs-confirm-list' },
-              confirming.slice(0, 6).map((repo) => h('li', { key: repo }, repo)),
-            ),
-            confirming.length > 6 ? h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('subs.confirm.more', { count: confirming.length - 6 })) : null,
-            h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('subs.confirm.body')),
-            h(
-              'div',
-              { className: 'dshgt-footer', style: { justifyContent: 'flex-end' } },
-              h(Btn, { small: true, onClick: () => setConfirming(null) }, t('subs.confirm.cancel')),
-              h(
-                Btn,
-                { small: true, variant: 'danger', disabled: blocked, onClick: () => removeMany(confirming) },
-                t('subs.confirm.ok'),
-              ),
-            ),
-          ),
-        ),
 
     addOpen
       ? h(
@@ -993,10 +934,14 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     openRepo === null
       ? null
       : h(DocDrawer, {
-          key: openRepo,
+          key: `${openRepo}#${docReload}`,
           t,
           repo: openRepo,
           ...(drawerRow?.item?.status === undefined ? {} : { status: drawerRow.item.status }),
+          blocked,
+          regenerating: analyzing !== null && analyzing.scope === 'one' && analyzing.repo === openRepo,
+          canRegenerate: canAnalyzeOne(drawerRow?.item, hasItemDetail),
+          onRegenerate: () => runAnalyze(openRepo, true),
           onClose: () => setOpenRepo(null),
         }),
   );

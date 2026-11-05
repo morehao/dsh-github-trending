@@ -427,6 +427,50 @@ test('/releases/run 非法 repo → 400 CONFIG_INVALID', async () => {
   assert.equal((await response.json()).code, 'CONFIG_INVALID');
 });
 
+test('/releases/run force=true → 透传 --force 到核心，记录带 forced', async () => {
+  const isolated = await isolatedServer({
+    FAKE_REQUIRE_STAGES: '1',
+    FAKE_FORCE_ECHO: '1',
+    FAKE_VERSION: '0.9.3',
+    FAKE_RELEASES: '1,1,0',
+  });
+  try {
+    const response = await fetch(`${isolated.base}/releases/run`, {
+      method: 'POST',
+      headers: HEADER,
+      body: JSON.stringify({ repo: 'vercel/next.js', force: true }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.release.status, 'ok');
+    assert.equal(payload.release.forced, true);
+  } finally {
+    isolated.close();
+  }
+});
+
+test('/releases/run 未传 force → 记录无 forced', async () => {
+  const isolated = await isolatedServer({ FAKE_REQUIRE_STAGES: '1', FAKE_VERSION: '0.9.3', FAKE_RELEASES: '1,1,0' });
+  try {
+    const response = await fetch(`${isolated.base}/releases/run`, {
+      method: 'POST',
+      headers: HEADER,
+      body: JSON.stringify({ repo: 'vercel/next.js' }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.release.forced, undefined);
+  } finally {
+    isolated.close();
+  }
+});
+
+test('/releases/run 非布尔 force → 400 CONFIG_INVALID', async () => {
+  const response = await fetch(`${base}/releases/run`, { method: 'POST', headers: HEADER, body: JSON.stringify({ force: 'yes' }) });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, 'CONFIG_INVALID');
+});
+
 test('/releases/run 并发（已有运行在跑）→ 409', async () => {
   const isolated = await isolatedServer({ FAKE_SLEEP: '1200', FAKE_REQUIRE_STAGES: '1' });
   try {

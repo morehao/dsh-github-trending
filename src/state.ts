@@ -141,6 +141,8 @@ export interface ReleaseRunRecord {
   coreVersion?: string;
   /** 单仓手动触发时记录该仓库（owner/repo）；全量运行缺省。仅展示用。 */
   scopeRepo?: string;
+  /** 本次是否为「强制重新生成」（忽略缓存、重新调模型）；仅在用户显式点「重新生成」时为 true。 */
+  forced?: boolean;
 }
 
 /** 发版运行记录上限：一周一次的话正好留半年，够复盘又不会让 state.json 膨胀。 */

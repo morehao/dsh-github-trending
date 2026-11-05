@@ -654,3 +654,23 @@ test('runReleases(repo)：全量运行仍推进 lastReleaseWeek（不回归）',
   const state = store.readState();
   assert.equal(state.lastReleaseWeek, scheduleModule.isoWeekKey(new Date(record.finishedAt), 'Asia/Shanghai'));
 });
+
+test('runReleases(force)：手动触发 force=true 时记录带 forced', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_FORCE_ECHO: '1', FAKE_VERSION: '0.9.3', FAKE_RELEASES: '1,1,0' },
+  });
+  const record = await runner.runReleases({ trigger: 'manual', repo: 'vercel/next.js', force: true });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.forced, true);
+  assert.equal(store.readReleaseRuns()[0].forced, true);
+});
+
+test('runReleases(force)：调度触发即使传 force 也不生效（记录无 forced）', async () => {
+  const { runner, store } = makeRunner({
+    scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_FORCE_ECHO: '1', FAKE_VERSION: '0.9.3', FAKE_RELEASES: '1,1,0' },
+  });
+  const record = await runner.runReleases({ trigger: 'schedule', force: true });
+  assert.equal(record.status, 'ok');
+  assert.equal(record.forced, undefined);
+  assert.equal(store.readReleaseRuns()[0].forced, undefined);
+});

@@ -328,7 +328,7 @@ export class Runner {
    * `state.releaseRuns`（不碰 history.json）、自己**不**合并订阅 pending 队列
    * （`--stages releases` 让核心跳过那一步，合并只在完整 run 里发生）。
    */
-  async runReleases(options: { trigger: 'manual' | 'schedule'; repo?: string }): Promise<ReleaseRunRecord> {
+  async runReleases(options: { trigger: 'manual' | 'schedule'; repo?: string; force?: boolean }): Promise<ReleaseRunRecord> {
     const env = this.deps.env ?? process.env;
     const store = this.deps.store;
     const settings = store.readSettings();
@@ -356,6 +356,8 @@ export class Runner {
     // 单仓意图（options.repo）在 try/catch 都要用到：catch 里记录失败也要带上 scopeRepo。
     // 实际是否传 --repo 取决于核心版本闸门（见 try 内 effectiveRepo）。
     const requestedRepo = options.repo !== undefined && options.repo !== '' ? options.repo : undefined;
+    // force 只允许手动触发（显式「重新生成」）；调度路径永不 force，避免定时任务反复重调模型。
+    const effectiveForce = options.trigger === 'manual' && options.force === true;
 
     try {
       const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
@@ -397,6 +399,7 @@ export class Runner {
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
         stages: ['releases'],
         ...(effectiveRepo === undefined ? {} : { repo: effectiveRepo }),
+        ...(effectiveForce ? { force: true } : {}),
         repoCount,
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
@@ -411,6 +414,7 @@ export class Runner {
         logFile,
         cancelled: controller.signal.aborted,
         ...(requestedRepo === undefined ? {} : { scopeRepo: requestedRepo }),
+        ...(effectiveForce ? { forced: true } : {}),
       });
     } catch (error) {
       const aborted = controller.signal.aborted || (error instanceof IpcError && error.code === 'CORE_CANCELLED');
@@ -491,6 +495,7 @@ export class Runner {
     logFile: string;
     cancelled: boolean;
     scopeRepo?: string;
+    forced?: boolean;
   }): ReleaseRunRecord {
     const { outcome, settings } = input;
     // 契约里 skipped 的信封 ok 也是 true，所以 skipped 必须先于 ok 判断，否则永远判不出「跳过」。
@@ -529,6 +534,7 @@ export class Runner {
         : { errorCode: outcome.error.code, errorMessage: redact(outcome.error.message) }),
       ...(outcome.coreVersion === '' ? {} : { coreVersion: outcome.coreVersion }),
       ...(input.scopeRepo === undefined ? {} : { scopeRepo: input.scopeRepo }),
+      ...(input.forced === true ? { forced: true } : {}),
     };
     this.persistReleaseRun(record, settings, input.logFile, { advanceWeek: input.scopeRepo === undefined });
     return record;

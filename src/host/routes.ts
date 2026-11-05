@@ -250,7 +250,15 @@ async function dispatch(
       }
       repo = body.repo.trim();
     }
-    const release = await deps.runner.runReleases({ trigger: 'manual', ...(repo === undefined ? {} : { repo }) });
+    // force：忽略摘要缓存、强制重新生成（用户显式点「重新生成」时传）。仅手动触发，调度永不设置。
+    let force: boolean | undefined;
+    if (body.force !== undefined) {
+      if (typeof body.force !== 'boolean') {
+        throw new IpcError('CONFIG_INVALID', `force 必须是布尔值：${String(body.force)}`);
+      }
+      force = body.force;
+    }
+    const release = await deps.runner.runReleases({ trigger: 'manual', ...(repo === undefined ? {} : { repo }), ...(force === undefined ? {} : { force }) });
     return { release };
   }
 
