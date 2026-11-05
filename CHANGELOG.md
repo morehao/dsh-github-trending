@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Chores
+
+- **core**: 升级 `dsh.core.version` 0.9.2 → 0.9.3。核心侧修复了 `branchGrouping: per-date` 下发版订阅（release-only）运行整次失败的问题：release-only 无 digest、`d.Date` 为空，per-date 分支名退化成裸前缀 `trending/`，被 git 拒绝（`fatal: 'trending/' is not a valid branch name`）。0.9.3 为 per-date 覆盖增加 `d.Date != ""` 守卫，release-only 保持 per-period 分支名（`trending/weekly/<date>`）。插件侧无行为变更（wire 仍 ipc=3 / digest=2）。
+
 ## [v0.9.5] - 2026-11-04
 
 ### Fixes
