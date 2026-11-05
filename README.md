@@ -35,25 +35,25 @@ GitHub 趋势榜的 **DeepSeek Harness 插件**：按日 / 周 / 月周期定时
 
 一屏回答「下次什么时候跑、四项就绪检查是否齐、上次交付了什么」。顶部是插件身份条（版本 / 包名 / 检查更新 / GitHub，两个图标紧跟包名），点包名打开「关于」弹层；右侧常驻下次运行与就绪 N/4。
 
-![概览](docs/images/overview.png)
+![概览](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/overview.png)
 
 ### 榜单
 
 按周期（日榜 / 周榜 / 月榜）回看历史榜单，直接渲染 Markdown（标题、列表、表格、链接），也可切「原文」。只有保留了预览副本的期数能读；失败 / 无变更 / 试跑 / 旧记录各有空状态。
 
-![榜单](docs/images/digest.png)
+![榜单](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/digest.png)
 
 ### 运行记录
 
 最近 30 次运行，按成功 / 失败 / 试跑筛选；展开某条看交付物（提交、内容哈希、分支、PR 链接）与只读日志，页脚给累计 token。
 
-![运行记录](docs/images/runs.png)
+![运行记录](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/runs.png)
 
 ### 设置
 
 内容来源 / 模型 / 仓库 / 认证 / 榜单 / 调度 六个分区，每个分区独立保存与校验；某分区有未保存改动时左侧对应项显示黄点。
 
-![设置](docs/images/settings.png)
+![设置](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/settings.png)
 
 ### GitHub 认证
 
@@ -71,7 +71,7 @@ GitHub 趋势榜的 **DeepSeek Harness 插件**：按日 / 周 / 月周期定时
 
 （可选）订阅一组仓库，每周把每个仓库当周新增的 Release 合成一段中文摘要，与榜单同分支、同 PR 一起提交；订阅列表随数据仓版本化，可审计、可复现。
 
-![订阅](docs/images/subscriptions.png)
+![订阅](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/subscriptions.png)
 
 ## 安装
 

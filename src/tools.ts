@@ -2,7 +2,9 @@
  * 两个对外工具：`trending_run` / `trending_history`（规格 §8）。
  *
  * 工具名是**稳定对外接口**：一旦发布不再改名；需要新能力时新增工具。
- * 参数方言用宿主 `dsh-tools` 的「内联 required: true」，输出用标准 JSON Schema。
+ * 参数与输出都用宿主 `dsh-tools` 的 author DSL：必填写成属性上的 `required: true`，
+ * 根对象不允许 `required: string[]`，每个 object 节点必须显式 `additionalProperties`。
+ * （写成标准 JSON Schema 会被 `defineTool` 拒绝，工具注册静默失败。）
  */
 import { isPeriod } from './config.js';
 import type { Runner } from './host/runner.js';
@@ -14,7 +16,7 @@ const RUN_OUTPUT_SCHEMA = {
   additionalProperties: true,
   properties: {
     id: { type: 'string' },
-    ok: { type: 'boolean' },
+    ok: { type: 'boolean', required: true },
     skipped: { type: 'boolean' },
     dryRun: { type: 'boolean' },
     forced: { type: 'boolean' },
@@ -28,9 +30,8 @@ const RUN_OUTPUT_SCHEMA = {
     errorMessage: { type: 'string' },
     errorHint: { type: 'string' },
     warnings: { type: 'array', items: { type: 'string' } },
-    markdown: { type: 'string' },
+    markdown: { type: 'string', required: true },
   },
-  required: ['ok', 'markdown'],
 } as const;
 
 const HISTORY_OUTPUT_SCHEMA = {
@@ -61,9 +62,8 @@ const HISTORY_OUTPUT_SCHEMA = {
         },
       },
     },
-    markdown: { type: 'string' },
+    markdown: { type: 'string', required: true },
   },
-  required: ['markdown'],
 } as const;
 
 function formatDuration(ms: number): string {
