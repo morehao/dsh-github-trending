@@ -356,8 +356,31 @@ interface AnalyzeResult {
   message?: string;
 }
 
+/** 某仓库是否已落盘到订阅文档（`items` 里有明细）。缺省 = 仅写在 `.git/pending`、尚未纳入订阅。 */
+function isAnalyzeable(item: SubscriptionItem | undefined): boolean {
+  return item !== undefined && item.status !== undefined;
+}
+
+/**
+ * 单仓「触发分析」是否可以点（决定置灰）。
+ *
+ * - 核心未提供明细（`hasItemDetail=false`，旧核心）：无法判断是否纳入，一律放行，靠点击后
+ *   核心错误兜底——不能因为拿不到明细就把整张表灰掉。
+ * - 核心有明细：`repos` 里有、`items` 里没有的仓库说明只写进了 `.git/pending`、尚未落盘，
+ *   核心 `--stages releases` 会报 `repo ... is not in the subscription list`，故不可点。
+ * - 已落盘（有明细）的仓库，无论 `baseline` / `no_change` / `ok` 都可正常单仓分析。
+ */
+export function canAnalyzeOne(item: SubscriptionItem | undefined, hasItemDetail: boolean): boolean {
+  if (!hasItemDetail) return true;
+  return isAnalyzeable(item);
+}
+
 export function SubscriptionsView(props: SubscriptionsProps): any {
   const { t } = props;
+  // 全局运行态（含定时 / 榜单 run，权威来自 `/state.status.running`，随 store 每 5 s 轮询）。
+  // 「发起分析」与「改订阅」都必须让位于任何正在进行的运行——否则点下去只会换回 409。
+  const running = props.store?.state?.status?.running ?? null;
+  const runningBusy = running !== null;
   const [list, setList] = React.useState<SubscriptionList | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
@@ -396,6 +419,15 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     return () => controller.abort();
   }, [load]);
 
+  // 一次运行（本页分析 / 定时 / 榜单 run）结束的瞬间：重新拉取列表。
+  // 运行期间 `.git/pending` 可能已随 run 落盘进 `subscriptions.yaml`，若只靠挂载时加载，
+  // 那行会一直停在「未纳入订阅」的置灰态——这里用 running 由真转假作为刷新钩子，消除陈旧灰。
+  const wasRunning = React.useRef(false);
+  React.useEffect(() => {
+    if (wasRunning.current && !runningBusy) load();
+    wasRunning.current = runningBusy;
+  }, [runningBusy, load]);
+
   // 成功回执到点自动收起；换了一条提示就重新计时，旧计时器因值不同不会误清新提示。
   React.useEffect(() => {
     if (note === null) return undefined;
@@ -417,6 +449,9 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   }, [result]);
 
   const rows = mergeRows(list);
+  // 核心是否提供了逐仓库明细（`items`）。旧核心不回 items，此时无法区分「未纳入」与「无明细」，
+  // 不能据此置灰；有新明细时「repos 里有、items 里没有」才等于「已加入 pending、尚未落盘」。
+  const hasItemDetail = (list?.items?.length ?? 0) > 0;
   const needle = query.trim().toLowerCase();
   const matched = needle === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(needle));
   const sorted = sortRows(matched, sort);
@@ -533,7 +568,10 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
   const canAdd = REPO_PATTERN.test(addValue.trim());
   const alreadySubscribed = canAdd && rows.some((row) => row.name.toLowerCase() === addValue.trim().toLowerCase());
   const drawerRow = openRepo === null ? undefined : rows.find((row) => row.name === openRepo);
+  // 本页是否有分析在途（乐观锁）；配合全局 runningBusy 才算「此刻不能发起新分析」。
   const globalBusy = analyzing !== null;
+  // 任何运行在跑（本页分析 / 定时 / 榜单）——所有「会写数据仓或触发核心」的按钮都要让位。
+  const blocked = globalBusy || runningBusy || busy !== null;
 
   // 分析结果横幅：成功类与 skipped 结论都会自动收起（见上方 effect，skipped 用更长 TTL）；
   // skipped 另带「×」可提前关闭；失败已在 `error` state 里另作常驻展示。
@@ -589,9 +627,14 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
     const item = row.item;
     const tone = toneOf(item?.status);
     const rowAnalyzing = analyzing !== null && analyzing.scope === 'one' && analyzing.repo === row.name;
-    // baseline ＝ 从未跑过发版检查（新加 / 待首次分析）：单仓触发必被核心拒绝
-    // （--stages releases 不合并 pending），因此禁用按钮并给提示，不放必败请求。
-    const fresh = item?.status === 'baseline';
+    // 单仓分析的真实前置：该仓库必须已落盘到订阅文档（`items` 里有明细）。
+    // 只写在 `.git/pending`、尚未随 run 落盘的新加仓库，核心 `--stages releases` 会报
+    // `repo ... is not in the subscription list`，所以禁用并说明真实原因，不放必败请求。
+    // 注意：`baseline`（已落盘、该周无 section）**可以**正常分析，不再据此置灰。
+    //
+    // 仅在「核心确实提供了明细」时才用「无 item = 未纳入」推断；旧核心整包不回 `items`
+    // （归一为空数组）时不能据此全表置灰，否则会误伤所有可分析的仓库——退回点击后错误兜底。
+    const notSubscribed = !canAnalyzeOne(item, hasItemDetail);
     const checkbox = selecting
       ? h(
           'span',
@@ -657,12 +700,12 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
               {
                 type: 'button',
                 className: 'dshgt-subs-act gen',
-                'aria-label': fresh ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
-                title: fresh ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
-                disabled: globalBusy || busy !== null || fresh,
+                'aria-label': notSubscribed ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
+                title: notSubscribed ? t('subs.row.triggerFresh') : t('subs.row.triggerRepo', { repo: row.name }),
+                disabled: blocked || notSubscribed,
                 onClick: (event: any) => {
                   event.stopPropagation();
-                  if (!fresh) runAnalyze(row.name);
+                  if (!notSubscribed) runAnalyze(row.name);
                 },
               },
               t('subs.row.trigger'),
@@ -686,7 +729,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
             type: 'button',
             className: 'dshgt-subs-act rm',
             'aria-label': t('subs.row.removeRepo', { repo: row.name }),
-            disabled: busy !== null,
+            disabled: blocked,
             onClick: (event: any) => {
               event.stopPropagation();
               removeOne(row.name);
@@ -765,7 +808,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         Btn,
         {
           small: true,
-          disabled: busy !== null,
+          disabled: blocked,
           onClick: () => {
             setAddOpen(true);
             setAddValue('');
@@ -790,7 +833,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
         {
           small: true,
           variant: 'primary',
-          disabled: globalBusy || busy !== null,
+          disabled: blocked,
           onClick: () => runAnalyze(),
         },
         analyzing !== null && analyzing.scope === 'all' ? t('subs.analyzing') : t('subs.toolbar.analyze'),
@@ -833,7 +876,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
             ),
             h(
               Btn,
-              { small: true, variant: 'danger', disabled: busy !== null || selected.length === 0, onClick: () => setConfirming(selected) },
+              { small: true, variant: 'danger', disabled: blocked || selected.length === 0, onClick: () => setConfirming(selected) },
               t('subs.sel.remove'),
             ),
           ),
@@ -867,7 +910,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
               h(Btn, { small: true, onClick: () => setConfirming(null) }, t('subs.confirm.cancel')),
               h(
                 Btn,
-                { small: true, variant: 'danger', disabled: busy !== null, onClick: () => removeMany(confirming) },
+                { small: true, variant: 'danger', disabled: blocked, onClick: () => removeMany(confirming) },
                 t('subs.confirm.ok'),
               ),
             ),
@@ -906,7 +949,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
               },
               onKeyDown: (event: any) => {
                 if (event.isComposing === true) return;
-                if (event.key === 'Enter' && canAdd && !alreadySubscribed && busy === null) addRepo(addValue.trim());
+                if (event.key === 'Enter' && canAdd && !alreadySubscribed && !blocked) addRepo(addValue.trim());
                 if (event.key === 'Escape') {
                   setAddOpen(false);
                   setAddValue('');
@@ -937,7 +980,7 @@ export function SubscriptionsView(props: SubscriptionsProps): any {
                 {
                   small: true,
                   variant: 'primary',
-                  disabled: busy !== null || !canAdd || alreadySubscribed,
+                  disabled: blocked || !canAdd || alreadySubscribed,
                   onClick: () => canAdd && !alreadySubscribed && addRepo(addValue.trim()),
                 },
                 busy === 'add' ? t('subs.adding') : t('subs.add.confirm'),
