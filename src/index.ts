@@ -172,8 +172,10 @@ export function apply(
       tools.register(mod.defineTool(createTrendingHistoryTool(store, scheduler)));
       log('tools.registered', { tools: ['trending_run', 'trending_history'] });
     } catch (error) {
-      ctx.logger?.warn?.(
-        `[dsh-github-trending] 工具注册跳过：${error instanceof Error ? error.message : String(error)}`,
+      // 工具注册失败不能静默：历史上 schema 不被 defineTool 接受时只留一条 warn，
+      // 结果两个工具从未出现而没人发现。用 error 级别并把原文带出来。
+      ctx.logger?.error?.(
+        `[dsh-github-trending] 工具注册失败：${error instanceof Error ? error.message : String(error)}`,
       );
     }
   })();

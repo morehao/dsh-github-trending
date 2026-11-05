@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.9.9] - 2026-11-05
+
+### Fixes
+
+- **tools**: `trending_run` / `trending_history` 的 `output.schema` 改用宿主 `dsh-tools` 的 author DSL 写法（必填内联为属性上的 `required: true`，根对象不再使用 `required: string[]`）。此前 `defineTool` 抛错被 `try/catch` 吞掉，两个工具实际从未注册；现在会正常注册，注册失败也改为 `error` 级别日志。
+- **i18n**: 适配 dsh 0.2.2 新增的 ja / es / fr / de / ru / pt；`activeLang` 改为「`zh*` → 中文，其余 → 英文」，不再把所有非 en 语言当成中文；拿不到 locale 时仍默认中文。
+
+### Chores
+
+- README 截图改为绝对 URL，`locale/*.json` 增加 `meta.detail`，适配 0.2.2 的 Plugins 长描述页。
+- 升级 `@morehao/dsh-plugin-kit` 到 0.5.1（自更新复用宿主 `listVersions` / `updateBundle`）。
+
 ## [v0.9.8] - 2026-11-05
 
 ### Features

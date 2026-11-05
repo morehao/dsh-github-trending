@@ -35,31 +35,31 @@ Open the workbench from the sidebar **GitHub Trending** or `Settings → GitHub 
 
 Answers "when will it run next, are the four readiness checks all green, what was delivered last time" at a glance. The top shows the plugin identity bar (version / package name / GitHub / check for updates); click the package name to open About. The right side keeps the next run and readiness N/4 always visible.
 
-![Overview](docs/images/overview.png)
+![Overview](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/overview.png)
 
 ### Digest
 
 Browse past digests by period (daily / weekly / monthly). Markdown is rendered directly (headings, lists, tables, links), and you can switch to **Raw**. Only issues whose preview copy was kept can be read; failed / unchanged / dry-run / old records each have their own empty state.
 
-![Digest](docs/images/digest.png)
+![Digest](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/digest.png)
 
 ### Runs
 
 The last 30 runs, filterable by success / failure / dry-run. Expand a run to see its deliverables (commit, content hash, branch, PR link) and a read-only log; the footer shows cumulative tokens.
 
-![Runs](docs/images/runs.png)
+![Runs](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/runs.png)
 
 ### Settings
 
 Six sections — Content source / Model / Repository / Auth / Digest / Schedule — each saved and validated independently; an unsaved section shows a yellow dot next to its item on the left.
 
-![Settings](docs/images/settings.png)
+![Settings](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/settings.png)
 
 ### Subscriptions
 
 (Optional) Subscribe to a set of repositories; each week the new Releases from each of them are merged into one Chinese summary and committed alongside the digest on the same branch and PR. The subscription list is versioned with the data repo, auditable and reproducible.
 
-![Subscriptions](docs/images/subscriptions.png)
+![Subscriptions](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/subscriptions.png)
 
 ## Installation
 

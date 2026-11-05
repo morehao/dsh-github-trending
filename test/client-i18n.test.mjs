@@ -30,3 +30,20 @@ test('语言切换与占位符替换', async () => {
   const fallback = mod.buildTranslate(undefined);
   assert.equal(fallback('settings.save'), '保存设置');
 });
+
+test('activeLang：0.2.2 新增语言回落英文，中文族仍中文', async () => {
+  const mod = await loadI18n();
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'ja' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'de' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'fr' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'ru' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'es' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'pt' }) }), 'en');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'zh-Hans' }) }), 'zh');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'zh' }) }), 'zh');
+  assert.equal(mod.activeLang({ getLocale: () => ({ active: 'en' }) }), 'en');
+  assert.equal(mod.activeLang(undefined), 'zh');
+  // 0.2.1 的旧形态 locale.lang 也继续支持
+  assert.equal(mod.activeLang({ lang: 'zh-CN' }), 'zh');
+  assert.equal(mod.activeLang({ lang: 'en' }), 'en');
+});

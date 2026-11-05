@@ -1147,7 +1147,10 @@ export interface LocaleLike {
 export function activeLang(locale: LocaleLike | undefined | null): Lang {
   try {
     const code = locale?.getLocale?.().active ?? locale?.lang;
-    return code === 'en' ? 'en' : 'zh';
+    // 拿不到 locale 时保持历史默认：中文。
+    if (code === undefined || code === '') return 'zh';
+    // 中文族（zh / zh-Hans / zh-CN…）走 zh；其余（含 0.2.2 新增的 ja/es/fr/de/ru/pt）回落 en。
+    return code === 'zh' || code.startsWith('zh-') ? 'zh' : 'en';
   } catch {
     return 'zh';
   }
