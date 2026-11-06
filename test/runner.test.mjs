@@ -59,6 +59,7 @@ function makeRunner(overrides = {}) {
     store,
     get: () => undefined,
     env,
+    ...(overrides.hostLanguage === undefined ? {} : { hostLanguage: overrides.hostLanguage }),
     ...(overrides.logger === undefined ? {} : { logger: overrides.logger }),
   });
   return { runner, store, repo, env };
@@ -554,7 +555,7 @@ test('runReleases：只跑发版阶段并落一条 releaseRuns 记录，不写 h
   assert.equal(record.commit, 'deadbeef');
   assert.equal(record.prUrl, 'https://example.invalid/pr/1');
   assert.equal(record.branch, 'trending/2026-10-30');
-  assert.equal(record.coreVersion, '0.3.0-fake');
+  assert.equal(record.coreVersion, '0.12.0');
 
   const state = store.readState();
   assert.equal(state.lastReleaseAt, record.finishedAt);
@@ -618,7 +619,7 @@ test('runReleases：订阅列表读不到也照跑（repoCount 按 0），auto �
   const { runner, store } = makeRunner({ scenario: { FAKE_REQUIRE_STAGES: '1', FAKE_SUBSCRIBE_FAIL: '1', FAKE_RELEASES: '1,1,0' } });
   const record = await runner.runReleases({ trigger: 'manual' });
   assert.equal(record.status, 'ok');
-  assert.equal(record.coreVersion, '0.3.0-fake');
+  assert.equal(record.coreVersion, '0.12.0');
   assert.equal(store.readHistory().length, 0);
 });
 
@@ -673,4 +674,45 @@ test('runReleases(force)：调度触发即使传 force 也不生效（记录无 
   assert.equal(record.status, 'ok');
   assert.equal(record.forced, undefined);
   assert.equal(store.readReleaseRuns()[0].forced, undefined);
+});
+
+test('outputLanguage：显式 en 写进核心 YAML，且核心产出英文摘要', async () => {
+  const { runner } = makeRunner({
+    settings: { outputLanguage: 'en' },
+    scenario: { FAKE_ECHO_LANGUAGE: '1' },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.ok, true);
+  // 假核心把配置里读到的 language.outputLanguage 回显到 warnings
+  assert.ok(summary.warnings.includes('outputLanguage=en'), `warnings=${JSON.stringify(summary.warnings)}`);
+});
+
+test('outputLanguage：空串 + 宿主 en → 跟随宿主写 en', async () => {
+  const { runner } = makeRunner({
+    settings: { outputLanguage: '' },
+    hostLanguage: () => 'en-US',
+    scenario: { FAKE_ECHO_LANGUAGE: '1' },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.ok(summary.warnings.includes('outputLanguage=en'), `warnings=${JSON.stringify(summary.warnings)}`);
+});
+
+test('outputLanguage：空串 + 宿主 fr → 回落 zh', async () => {
+  const { runner } = makeRunner({
+    settings: { outputLanguage: '' },
+    hostLanguage: () => 'fr',
+    scenario: { FAKE_ECHO_LANGUAGE: '1' },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.ok(summary.warnings.includes('outputLanguage=zh'), `warnings=${JSON.stringify(summary.warnings)}`);
+});
+
+test('outputLanguage：显式 zh 覆盖宿主 en', async () => {
+  const { runner } = makeRunner({
+    settings: { outputLanguage: 'zh' },
+    hostLanguage: () => 'en-US',
+    scenario: { FAKE_ECHO_LANGUAGE: '1' },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.ok(summary.warnings.includes('outputLanguage=zh'), `warnings=${JSON.stringify(summary.warnings)}`);
 });

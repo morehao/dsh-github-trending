@@ -45,7 +45,7 @@ test('缓存命中：download=cached、source=cache（不联网）', async () =>
 test('覆盖路径：download=override，release 为空', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-override-'));
   const fake = path.join(dir, 'core');
-  writeFileSync(fake, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'9.9.9',ipcSchema:3,digestSchema:2,contractVersion:'0.2.0'})+'\\n')\n`);
+  writeFileSync(fake, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'9.9.9',ipcSchema:4,digestSchema:3,contractVersion:'0.7.0'})+'\\n')\n`);
   chmodSync(fake, 0o755);
   const status = await core.inspectCore(settingsFor({ corePath: fake }), { env: env(), fresh: true });
   assert.equal(status.state, 'ready');
@@ -53,4 +53,33 @@ test('覆盖路径：download=override，release 为空', async () => {
   assert.equal(status.download.state, 'override');
   assert.equal(status.release, undefined);
   assert.equal(status.source, 'settings');
+});
+
+test('最低核心版本 0.12.0：低于门槛判 incompatible 并给下载引导', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-oldcore-'));
+  const fake = path.join(dir, 'core');
+  // wire 看起来兼容（4/3/0.7.0），但版本号 0.11.0 < 0.12.0 → 仍应判 incompatible
+  writeFileSync(
+    fake,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'0.11.0',ipcSchema:4,digestSchema:3,contractVersion:'0.7.0'})+'\\n')\n`,
+  );
+  chmodSync(fake, 0o755);
+  const status = await core.inspectCore(settingsFor({ corePath: fake }), { env: env(), fresh: true });
+  assert.equal(status.state, 'incompatible');
+  assert.equal(status.code, 'CORE_INCOMPATIBLE');
+  assert.match(status.message ?? '', /0\.12\.0/);
+  assert.match(status.hint ?? '', /下载|升级|0\.12\.0/);
+});
+
+test('最低核心版本 0.12.0：恰好 0.12.0 判 ready', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-newcore-'));
+  const fake = path.join(dir, 'core');
+  writeFileSync(
+    fake,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({version:'0.12.0',ipcSchema:4,digestSchema:3,contractVersion:'0.7.0'})+'\\n')\n`,
+  );
+  chmodSync(fake, 0o755);
+  const status = await core.inspectCore(settingsFor({ corePath: fake }), { env: env(), fresh: true });
+  assert.equal(status.state, 'ready');
+  assert.equal(status.version, '0.12.0');
 });

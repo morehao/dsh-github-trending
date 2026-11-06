@@ -14,7 +14,7 @@ import { createRoutes, ROUTE_PREFIX } from './host/routes.js';
 import { ensureGithubFlow, type GithubAuthDeps } from './host/github-auth.js';
 import { createUpdateService } from './host/update.js';
 import { createTrendingHistoryTool, createTrendingRunTool } from './tools.js';
-
+import { hostLocalePreference } from './host/host-locale.js';
 export const name = 'dsh-github-trending';
 
 /** 唯一硬依赖：没有 HTTP 载体就没有设置页与运行页。 */
@@ -82,6 +82,9 @@ export function apply(
     get,
     env,
     logger: log,
+    // 宿主语言偏好读取器：默认从 `ctx.get('settings')` 现取（惰性，不阻塞加载）；
+    // 下面再用 ctx.inject(['settings'], …) 在服务就绪时补一个更可靠的读取器。
+    hostLanguage: hostLocalePreference(get('settings')),
     onFinished: (summary) =>
       log('run.finished', { id: summary.id, ok: summary.ok, skipped: summary.skipped, files: summary.files }),
   });
@@ -121,6 +124,19 @@ export function apply(
     });
   } else {
     registerAuth();
+  }
+  // 宿主语言偏好：`settings` 服务可能晚于 apply 就绪（和 authorization 一样），用 inject
+  // 懒取。读 namespace `locale` 的 `preference`；读不到 → undefined → 解析回落 `zh`。
+  const applyHostSettings = (resolve: (name: string) => unknown): void => {
+    const settingsService = resolve('settings');
+    if (settingsService !== undefined) runner.setHostLanguage(hostLocalePreference(settingsService));
+  };
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['settings'], (scope: PluginContext) => {
+      applyHostSettings((name) => (typeof scope.get === 'function' ? scope.get(name) : undefined));
+    });
+  } else {
+    applyHostSettings(get);
   }
   const update = createUpdateService({
     get,

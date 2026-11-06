@@ -270,6 +270,8 @@ export interface SettingsShape {
   output: { dir: string };
   schedule: { enabled: boolean; time: string; timezone: string; periods: Period[] };
   corePath: string;
+  /** 摘要输出语言；`''` = 跟随宿主（宿主 locale → 中英外回落 zh）。缺省按 '' 处理。 */
+  outputLanguage?: string;
   /** 核心出站网络代理；空串 = 不使用。旧设置可能没有该字段。 */
   network?: { proxy: string };
 }
@@ -279,6 +281,15 @@ export interface StatePayload {
   settings: SettingsShape;
   core: CoreStatus;
   coexistence: CoexistenceStatus;
+  /** 摘要输出语言解析结果；Host 尚未提供时缺省（设置页用 settings.outputLanguage 兜底）。 */
+  language?: {
+    /** 宿主偏好的归一标签（如 `zh` / `en`；未知时为空串）。 */
+    hostLanguage: string;
+    /** 最终下发给核心的语言（支持集内，如 zh / en）。 */
+    resolvedLanguage: string;
+    /** 该值的来源：显式设置 / 宿主 locale / 兜底 zh。 */
+    outputLanguageSource: 'explicit' | 'host' | 'fallback';
+  };
   schedule: {
     enabled: boolean;
     time: string;

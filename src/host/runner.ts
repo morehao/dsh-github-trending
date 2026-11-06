@@ -27,6 +27,8 @@ import {
   type Store,
 } from '../state.js';
 import { inspectCore, type CoreStatus } from './core.js';
+import { resolveOutputLanguage, type ResolvedOutputLanguage } from './host-language.js';
+import type { HostLanguageReader } from './host-locale.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
 import { startProxy, type ProxyHandle } from './proxy.js';
@@ -90,6 +92,8 @@ export interface RunnerDeps {
   store: Store;
   get: (name: string) => unknown;
   env?: NodeJS.ProcessEnv;
+  /** 宿主语言偏好读取器（读 namespace 'locale' 的 preference）；缺省/读不到 → 回落 zh。 */
+  hostLanguage?: HostLanguageReader;
   /** 运行结束（成功或失败）后回调，用于刷新调度/界面缓存。 */
   onFinished?: (summary: RunSummary) => void;
   /** 预览副本这类「可失败但不阻断运行」的事件走这里，不写进 warnings。 */
@@ -167,9 +171,31 @@ export class Runner {
   /** 批量运行（一次触发跑多个周期）期间为 true，挡住外部并发触发。 */
   private batching = false;
   private readonly deps: RunnerDeps;
+  /** 宿主语言偏好读取器（可被 setHostLanguage 在 settings 服务就绪后替换）。 */
+  private hostLanguageReader: HostLanguageReader;
 
   constructor(deps: RunnerDeps) {
     this.deps = deps;
+    this.hostLanguageReader = deps.hostLanguage ?? (() => undefined);
+  }
+
+  /** settings 服务晚到时替换语言偏好读取器（幂等，懒注册）。 */
+  setHostLanguage(reader: HostLanguageReader): void {
+    this.hostLanguageReader = reader;
+  }
+
+  /**
+   * 解析本次运行的输出语言：显式 settings > 宿主 locale > zh（中英外回落 zh）。
+   * 每次运行都现读宿主偏好，用户改宿主语言后无需重启插件。
+   */
+  resolveOutputLanguage(settings: Settings): ResolvedOutputLanguage {
+    let hostPref: string | undefined;
+    try {
+      hostPref = this.hostLanguageReader();
+    } catch {
+      hostPref = undefined;
+    }
+    return resolveOutputLanguage(settings.outputLanguage, hostPref);
   }
 
   get running(): { id: string; startedAt: string } | undefined {
@@ -247,6 +273,7 @@ export class Runner {
         period,
         dryRun,
         trigger: options.trigger === 'schedule' ? 'schedule' : 'manual',
+        resolvedOutputLanguage: this.resolveOutputLanguage(settings).language,
         ...(effectiveForce ? { force: true } : {}),
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,

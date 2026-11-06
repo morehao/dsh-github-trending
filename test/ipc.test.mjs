@@ -19,7 +19,7 @@ const HASH = `sha256:${'a'.repeat(64)}`;
 
 function runResult(patch = {}) {
   return {
-    ipcSchema: 3,
+    ipcSchema: 4,
     ok: true,
     command: 'run',
     startedAt: '2026-10-30T00:00:00Z',
@@ -121,9 +121,9 @@ test('非契约形状一律 IPC_INVALID：不猜字段、不接受旧 runOutput 
 
 test('parseVersionInfo 拒绝缺字段的输出', () => {
   expectCode(() => ipc.parseVersionInfo('{"version":"1"}'), 'IPC_INVALID');
-  const info = ipc.parseVersionInfo(JSON.stringify({ version: '0.3.0', ipcSchema: 3, digestSchema: 2, contractVersion: '0.2.0' }));
+  const info = ipc.parseVersionInfo(JSON.stringify({ version: '0.3.0', ipcSchema: 4, digestSchema: 3, contractVersion: '0.7.0' }));
   assert.equal(info.version, '0.3.0');
-  assert.equal(info.contractVersion, '0.2.0');
+  assert.equal(info.contractVersion, '0.7.0');
 });
 
 test('parseRunResult 透传 skipReason（契约允许额外字段）', () => {
@@ -196,7 +196,7 @@ test('parseRunResult 畸形 usage（缺必需字段）被契约校验拦下 → 
 });
 
 test('parseSubscribeResult：list 从信封前逐行取仓库，信封只带 ok', () => {
-  const out = 'vercel/next.js\noven-sh/bun\n' + JSON.stringify({ ipcSchema: 3, ok: true, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [] });
+  const out = 'vercel/next.js\noven-sh/bun\n' + JSON.stringify({ ipcSchema: 4, ok: true, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [] });
   const result = ipc.parseSubscribeResult(out);
   assert.equal(result.ok, true);
   assert.deepEqual(result.repos, ['vercel/next.js', 'oven-sh/bun']);
@@ -206,7 +206,7 @@ test('parseSubscribeResult：list 从信封前逐行取仓库，信封只带 ok'
 });
 
 test('parseSubscribeResult：失败信封带 error，repos 为空', () => {
-  const out = JSON.stringify({ ipcSchema: 3, ok: false, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [], error: { code: 'CONFIG_INVALID', message: 'bad', retriable: false } });
+  const out = JSON.stringify({ ipcSchema: 4, ok: false, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [], error: { code: 'CONFIG_INVALID', message: 'bad', retriable: false } });
   const result = ipc.parseSubscribeResult(out);
   assert.equal(result.ok, false);
   assert.equal(result.error.code, 'CONFIG_INVALID');
@@ -221,7 +221,7 @@ test('parseSubscribeResult：空输出 / 非信封结尾 → IPC_INVALID', () =>
 
 // ——— 契约 0.4.0：payload 进信封（subscriptions / subscriptionDoc） ———
 
-const SUB_ENVELOPE = { ipcSchema: 3, ok: true, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [] };
+const SUB_ENVELOPE = { ipcSchema: 4, ok: true, command: 'subscribe', startedAt: 'x', finishedAt: 'y', skipped: false, files: [] };
 
 test('parseSubscribeResult：信封里的 subscriptions（repos + items）优先于逐行兜底', () => {
   const out = JSON.stringify({

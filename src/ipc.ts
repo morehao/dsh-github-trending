@@ -2,11 +2,11 @@
  * 契约类型与运行时守卫。
  *
  * 类型与运行时校验全部来自独立契约包 `@morehao/trendradar-contract`（wire:
- * `ipcSchema=3` / `digestSchema=2`）。本文件只放插件理解契约所必需的两件事：
+ * `ipcSchema=4` / `digestSchema=3`）。本文件只放插件理解契约所必需的两件事：
  * 核心 `version --json` 的握手形状，以及把核心 `run --json` 的 `RunResult`
  * 归一化成插件内部的 `RunOutcome`。
  *
- * 只接受一种结果形状：契约包定义的 `RunResult`（`ipcSchema=3` / `command=run`），
+ * 只接受一种结果形状：契约包定义的 `RunResult`（`ipcSchema=4` / `command=run`），
  * 用它自带的 ajv 校验器把关。旧核心那份只有 `files`/`digest` 的 `runOutput`
  * 不再兼容——协议版本不匹配会在握手阶段被拦下，这里绝不「猜字段」。
  */
@@ -45,14 +45,55 @@ export type {
   SubscriptionVolume,
 } from '@morehao/trendradar-contract';
 
-/** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v3.json` 的 wire 整数）。 */
-export const IPC_SCHEMA_VERSION = 3 as const;
+/** 插件实现所对应的 IPC 契约版本（契约包 `ipc.v4.json` 的 wire 整数）。 */
+export const IPC_SCHEMA_VERSION = 4 as const;
 
 /** 插件能接受的 digest 契约版本（与核心 `version --json` 的 digestSchema 比对）。 */
-export const SUPPORTED_DIGEST_SCHEMA = 2 as const;
+export const SUPPORTED_DIGEST_SCHEMA = 3 as const;
 
 /** 契约包 `contractVersion` 的主版本；0.x 期间同主版本即视为同一契约线。 */
 export const SUPPORTED_CONTRACT_MAJOR = 0;
+
+/**
+ * 插件要求的最低核心版本（`trendradar`）。
+ *
+ * 0.12.0 起核心支持 `language.outputLanguage` 与 `digest.summary`/`summaryLang`，
+ * 并在 wire 上递增到 ipcSchema=4 / digestSchema=3。低于 0.12.0 的核心既缺字段、
+ * 协议也对不上，直接判 `CORE_INCOMPATIBLE` 并给下载引导，不做「尽力兼容」。
+ * 这是「`dsh.core.version` 之外」的第二道显式闸门：即便有人用
+ * `TRENDING_DIGEST_CORE` 指向一个旧二进制、且它恰好报了看起来兼容的 wire，
+ * 版本号本身仍会被这里拦下（与 `dsh.core.version` 同源语义）。
+ */
+export const MIN_CORE_VERSION = '0.12.0';
+
+/**
+ * 比较两个 `x.y.z` 形态的版本（忽略预发布后缀，缺失段按 0）。
+ * 返回 <0 / 0 / >0，语义同 `Array.prototype.sort` 的比较器。
+ */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string): number[] => {
+    const core = v.trim().replace(/^v/, '').split('-')[0] ?? '';
+    const parts = core.split('.').map((seg) => {
+      const n = Number.parseInt(seg, 10);
+      return Number.isFinite(n) ? n : 0;
+    });
+    while (parts.length < 3) parts.push(0);
+    return parts;
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** 给定核心版本是否满足最低要求（解析不出就当不满足）。 */
+export function isCoreVersionSupported(version: string | undefined): boolean {
+  if (typeof version !== 'string' || version.trim() === '') return false;
+  return compareVersions(version, MIN_CORE_VERSION) >= 0;
+}
 
 /** 核心 `version --json` 的输出。 */
 export interface VersionInfo {
@@ -233,7 +274,7 @@ function parseDigest(value: unknown, files: FileArtifact[]): DigestArtifact | un
 /**
  * 把核心 `run --json` 的 stdout 归一化成 `RunOutcome`。
  *
- * 唯一接受的形状是契约 `RunResult`（`ipcSchema=2` / `command=run`），并用契约包
+ * 唯一接受的形状是契约 `RunResult`（`ipcSchema=4` / `command=run`），并用契约包
  * 自带的 ajv 校验器校验。任何其它形状直接 `IPC_INVALID`——结果信封读错会把失败
  * 当成功写进状态。
  */
@@ -244,7 +285,7 @@ export function parseRunResult(text: string, options: ParseRunOptions): RunOutco
   // 在契约校验前把 null 归一成 []，不触碰任何产物内容。
   if (value.files === null || value.files === undefined) value.files = [];
   if (value.command !== 'run' || value.ipcSchema !== IPC_SCHEMA_VERSION || !validators.runResult(value)) {
-    throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=3 / command=run）');
+    throw new IpcError('IPC_INVALID', '核心 run --json 不是契约 RunResult（ipcSchema=4 / command=run）');
   }
   const result = value as unknown as RunResult;
   const error = normalizeError(result.error);
@@ -313,7 +354,7 @@ function parseSubscriptionList(value: unknown): { repos: string[]; items?: Subsc
  * 契约 0.4.0 起 payload 进了结果信封：`{command:"subscribe", subscriptions?, subscriptionDoc?}`。
  * 这里**优先**读信封；旧核心（0.6.x 及以前）把 `list` 的结果逐行打到信封之前、信封里只有
  * `ok/error`，因此保留逐行兜底——两种都能读，但绝不「猜字段」：
- *   - 信封不是 `ipcSchema=2` 的对象 → `IPC_INVALID`；
+ *   - 信封不是 `ipcSchema=4` 的对象 → `IPC_INVALID`；
  *   - `subscriptions` 存在但形状不对 → `IPC_INVALID`（不是空列表）；
  *   - `subscriptionDoc` 存在但不满足契约 → `IPC_INVALID`（界面不能拿到半份文档）。
  */
@@ -330,7 +371,7 @@ export function parseSubscribeResult(text: string): SubscribeOutcome {
     throw new IpcError('IPC_INVALID', `核心 subscribe 未以结果信封结尾：${detail}`);
   }
   if (!isRecord(envelope) || envelope.ipcSchema !== IPC_SCHEMA_VERSION || typeof envelope.ok !== 'boolean') {
-    throw new IpcError('IPC_INVALID', '核心 subscribe --json 不是契约信封（ipcSchema=2 / ok）');
+    throw new IpcError('IPC_INVALID', '核心 subscribe --json 不是契约信封（ipcSchema=4 / ok）');
   }
   const error = normalizeError(envelope.error);
   const list = envelope.subscriptions === undefined ? undefined : parseSubscriptionList(envelope.subscriptions);

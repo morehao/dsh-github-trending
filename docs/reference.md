@@ -2,7 +2,7 @@
 
 面向需要深入配置、排障或二次开发的读者。快速了解与安装见 [README](../README.md)。
 
-> 版本：0.7.9。核心版本由 `package.json` 的 `dsh.core.version`（当前 `0.8.3`）固定。
+> 版本：0.9.13。核心版本由 `package.json` 的 `dsh.core.version`（当前 `0.12.0`，最低要求也是 `0.12.0`）固定。
 
 ## 目录
 
@@ -67,6 +67,7 @@
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量与失败重试（映射核心 `summarize.*`） |
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`：是否抓取 GitHub topics / README 作为增强上下文；`repo`/`readme` 建议配只读 `GITHUB_READ_TOKEN` |
 | `summarize.readmeChars` | `800` | README 摘录长度（enrich=readme 时） |
+| `outputLanguage` | `''` | 摘要输出语言：`''`=跟随宿主（宿主 locale → 中英外回落 `zh`）、`zh`、`en`（主标签在支持集内即合法，如 `en-US`）；需核心 ≥ 0.12.0，写入核心 `language.outputLanguage` |
 | `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 是否含预发布 / 草稿（订阅阶段常开，不提供 `enabled` 开关） |
 | `releases.fallbackToTags` / `baselineOnFirstRun` | `true` / `true` | 无 Release 时回退 Tag / 首次只记基线 |
 | `releases.backfillLatest` | `3` | 首次订阅仓库基线补发最近 N 个版本（摘要进文档作为起点；`0`=只记基线、不补发→首次变更分析为空） |
@@ -166,6 +167,6 @@
 2. **密钥传输**：POSIX 上配置经 **FIFO** 交给核心（文件系统里不出现明文）；Windows 无 FIFO，退化为 0600 临时文件并在读完后立即删除。
 3. **GitHub token** 经子进程环境变量传给核心（核心只认 `GITHUB_TOKEN`/`GH_TOKEN`）；不进 argv、不进配置、不进日志。
 4. **调度**用插件自己的 60 s tick（宿主 `schedule` 是会话本地提醒，覆盖不到无人值守场景）。按 `schedule.periods` 分别触发：日榜每天、周榜周日（ISO 周末）、月榜月末；去重键含周期与本地日期，同一周期当天只成功一次。
-5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。核心版本由 `package.json` 的 `dsh.core.version` 固定（用 `node scripts/set-core-version.mjs <x.y.z>` 写入）。
+5. **二进制改为下载**（2026-10-30 决策 B）：不再随包发 npm 平台分包。首次运行需要能访问 GitHub Release；断网环境请用 `TRENDING_DIGEST_CORE` 指向本地核心。插件要求核心 ≥ `0.12.0`（低于此判 `CORE_INCOMPATIBLE` 并给下载引导）；核心版本由 `package.json` 的 `dsh.core.version` 固定（用 `node scripts/set-core-version.mjs <x.y.z>` 写入）。
 6. **核心版本固定**：`package.json` 的 `dsh.core.version` 是首次运行下载哪个核心 Release 的唯一来源；下载失败会给出下载地址与错误码，不会退回旧内容。
 7. **预览副本是派生数据**：不是第二份真相；仓库里的 canonical 文件才是。它来自核心回传的 `RunResult.digest`，不是插件二次读取仓库。旧记录没有 `preview` 元数据，日报里只能看到对应的空状态；升级到 ipc v3 后重跑对应期数即可刷新（不承诺自动回填）。

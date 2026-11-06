@@ -101,8 +101,8 @@ test('分段合并只覆盖目标分区，字段归位正确', () => {
   assert.equal(config.sectionOfField('output.dir'), 'repo');
   assert.equal(config.sectionOfField('github.tokenRef'), 'auth');
   assert.equal(config.sectionOfField('trending.languages'), 'scope');
-  assert.equal(config.sectionOfField('schedule.timezone'), 'schedule');
-  assert.equal(config.sectionOfField('schedule.periods'), 'schedule');
+  assert.equal(config.sectionOfField('schedule.timezone'), 'scope');
+  assert.equal(config.sectionOfField('schedule.periods'), 'scope');
 });
 
 test('周期枚举：since 支持 monthly，非法值回落 daily', () => {
@@ -305,11 +305,13 @@ test('toCoreConfig：auto 并发/预算按订阅数解析，显式数字永远�
 });
 
 test('summarize / releases 分区归位与分段合并互不牵连', () => {
-  assert.equal(config.sectionOfField('summarize.enrich'), 'summarize');
+  // 摘要（summarize.*）与调度、观测库一起归「榜单(scope)」分区；releases 仍是独立分区。
+  assert.equal(config.sectionOfField('summarize.enrich'), 'scope');
+  assert.equal(config.sectionOfField('outputLanguage'), 'scope');
   assert.equal(config.sectionOfField('releases.perRepoLimit'), 'releases');
   const stored = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 3 }, releases: { perRepoLimit: 4 } });
   const incoming = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/a' }, summarize: { batchSize: 9 }, releases: { perRepoLimit: 9, includePrerelease: true } });
-  const merged = config.mergeSettingsSection(stored, incoming, 'summarize');
+  const merged = config.mergeSettingsSection(stored, incoming, 'scope');
   assert.equal(merged.summarize.batchSize, 9);
   assert.equal(merged.releases.perRepoLimit, 4); // 其它分区保持已保存值
   assert.equal(merged.releases.includePrerelease, false);
@@ -376,4 +378,40 @@ test('observe 归入 scope 分区并随分段合并保留', () => {
   // 保存其它分区（如 model）时，observe 保持 stored 的值不被牵连。
   const mergedModel = config.mergeSettingsSection(stored, incoming, 'model');
   assert.deepEqual(mergedModel.observe, stored.observe);
+});
+
+test('outputLanguage：默认空串（跟随宿主），归一化与校验', () => {
+  // 默认与归一化
+  assert.equal(config.DEFAULT_SETTINGS.outputLanguage, '');
+  assert.equal(config.normalizeSettings({}).outputLanguage, '');
+  assert.equal(config.normalizeSettings({ outputLanguage: 'EN' }).outputLanguage, 'en');
+  assert.equal(config.normalizeSettings({ outputLanguage: '  zh  ' }).outputLanguage, 'zh');
+  // 垃圾类型 → ''（跟随宿主）
+  assert.equal(config.normalizeSettings({ outputLanguage: 42 }).outputLanguage, '');
+
+  const base = { model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x' } };
+  // 空串合法
+  assert.equal(
+    config.validateSettings(config.normalizeSettings(base)).some((p) => p.field === 'outputLanguage'),
+    false,
+  );
+  // zh / en / en-US 主标签在支持集 → 合法
+  for (const value of ['zh', 'en', 'en-US', 'zh-CN']) {
+    const problems = config.validateSettings(config.normalizeSettings({ ...base, outputLanguage: value }));
+    assert.equal(problems.some((p) => p.field === 'outputLanguage'), false, `${value} 应合法`);
+  }
+  // fr 不在支持集 → CONFIG_INVALID，并列出可选项
+  const bad = config.validateSettings(config.normalizeSettings({ ...base, outputLanguage: 'fr' }));
+  const problem = bad.find((p) => p.field === 'outputLanguage');
+  assert.ok(problem);
+  assert.equal(problem.code, 'CONFIG_INVALID');
+  assert.match(problem.message, /zh/);
+  assert.match(problem.message, /en/);
+});
+
+test('toCoreConfig 把解析后的 outputLanguage 写进 language.outputLanguage', () => {
+  const settings = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm' }, repo: { path: '/tmp/x' } });
+  assert.equal(config.toCoreConfig(settings, 'k').language.outputLanguage, '');
+  assert.equal(config.toCoreConfig(settings, 'k', undefined, undefined, 0, 'en').language.outputLanguage, 'en');
+  assert.equal(config.toCoreConfig(settings, 'k', undefined, undefined, 0, 'zh').language.outputLanguage, 'zh');
 });

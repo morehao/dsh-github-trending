@@ -53,6 +53,8 @@ export interface RunCoreOptions {
   repo?: string;
   /** 订阅仓库数：用于把配置里的 `auto` 并发/预算解析成数字（发版运行传入）。 */
   repoCount?: number;
+  /** 解析后的摘要输出语言（显式 > 宿主 > zh，见 host-language.ts）；写进核心 `language.outputLanguage`。 */
+  resolvedOutputLanguage?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   onStderr?: (line: string) => void;
@@ -122,7 +124,7 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
   const startedAt = nowIso();
   const started = Date.now();
   const channel = await openConfigChannel();
-  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period, options.repoCount))}\n`;
+  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period, options.repoCount, options.resolvedOutputLanguage))}\n`;
   const secrets = [options.apiKey, options.token, ...(options.secrets ?? [])];
 
   const args = buildCoreArgs(channel.path, {
