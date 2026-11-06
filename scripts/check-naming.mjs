@@ -54,7 +54,7 @@ if (!core) {
 const CONTRACT = '@morehao/trendradar-contract';
 const contractSpec = pkg.dependencies?.[CONTRACT];
 if (typeof contractSpec !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(contractSpec)) {
-  fail(`dependencies["${CONTRACT}"] 必须是精确版本（如 0.2.0），实际 ${contractSpec ?? '(缺失)'}`);
+  fail(`dependencies["${CONTRACT}"] 必须是精确版本（如 0.7.0），实际 ${contractSpec ?? '(缺失)'}`);
 } else {
   const installed = JSON.parse(await read(`node_modules/${CONTRACT}/package.json`)).version;
   if (installed !== contractSpec) {
@@ -64,12 +64,17 @@ if (typeof contractSpec !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.t
   const wire = (file) => versionMap[file]?.current;
   const ipcSource = await read('src/ipc.ts');
   const ipcMatch = /export const IPC_SCHEMA_VERSION = (\d+) as const/.exec(ipcSource);
+  const digestMatch = /export const SUPPORTED_DIGEST_SCHEMA = (\d+) as const/.exec(ipcSource);
   if (ipcMatch === null) {
     fail('src/ipc.ts 缺少 IPC_SCHEMA_VERSION 常量');
-  } else if (wire('ipc.v3.json') !== Number(ipcMatch[1])) {
-    fail(`契约包 ipcSchema=${wire('ipc.v3.json')} 与插件 IPC_SCHEMA_VERSION=${ipcMatch[1]} 不一致`);
+  } else if (wire('ipc.v4.json') !== Number(ipcMatch[1])) {
+    fail(`契约包 ipcSchema=${wire('ipc.v4.json')} 与插件 IPC_SCHEMA_VERSION=${ipcMatch[1]} 不一致`);
   }
-  if (wire('digest.v2.json') !== 2) fail(`契约包 digestSchema 应为 2，实际 ${wire('digest.v2.json')}`);
+  if (digestMatch === null) {
+    fail('src/ipc.ts 缺少 SUPPORTED_DIGEST_SCHEMA 常量');
+  } else if (wire('digest.v3.json') !== Number(digestMatch[1])) {
+    fail(`契约包 digestSchema=${wire('digest.v3.json')} 与插件 SUPPORTED_DIGEST_SCHEMA=${digestMatch[1]} 不一致`);
+  }
   const contractVersion = String(wire('version-info.v2.json'));
   if (contractVersion.split('.')[0] !== '0') {
     fail(`契约包 contractVersion=${contractVersion} 主版本应为 0（与插件实现同一契约线）`);

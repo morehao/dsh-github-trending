@@ -83,6 +83,7 @@
 | `summarize.batchSize` / `maxRetries` | `10` / `1` | 摘要批量 / 失败重试 |
 | `summarize.enrich` | `none` | `none` / `repo` / `readme`（是否抓 topics / README 增强） |
 | `summarize.readmeChars` | `800` | README 摘录长度 |
+| `outputLanguage` | `''` | 摘要输出语言：`''`=跟随宿主（中英外回落 `zh`）/ `zh` / `en`；需核心 ≥ 0.12.0 |
 | `releases.includePrerelease` / `includeDrafts` | `false` / `false` | 含预发布 / 草稿（订阅阶段常开，无 `enabled` 开关） |
 | `releases.perRepoLimit` / `maxNotesChars` | `10` / `4000` | 文档列出的版本条数 / notes 截断 |
 | `releases.summaryMaxChars` / `docMaxLines` | `1200` / `600` | 每仓每周摘要字数 / 文档行数预算（超了开新卷） |

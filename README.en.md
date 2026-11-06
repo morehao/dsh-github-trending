@@ -51,7 +51,16 @@ The last 30 runs, filterable by success / failure / dry-run. Expand a run to see
 
 ### Settings
 
-Six sections — Content source / Model / Repository / Auth / Digest / Schedule — each saved and validated independently; an unsaved section shows a yellow dot next to its item on the left.
+Six sections — Content source / Model / Repository / Auth / Digest (includes schedule, summary & usage) / Subscriptions — each saved and validated independently; an unsaved section shows a yellow dot next to its item on the left.
+
+### Summary language
+
+The **Summary language** dropdown under "Summary & usage" controls which language generated digests / release summaries use:
+
+- **Follow host (default)**: reads the host UI language (`zh` → Chinese, `en` → English); **anything other than Chinese/English falls back to Chinese**.
+- **中文 / English**: explicitly set, taking precedence over the host language.
+
+Resolution order is "explicit setting > host language > Chinese fallback". This needs core **≥ 0.12.0**; with an older core the settings page shows "takes effect after upgrading the core", but the dropdown is still usable — it applies automatically once upgraded.
 
 ![Settings](https://raw.githubusercontent.com/morehao/dsh-github-trending/main/docs/images/settings.png)
 

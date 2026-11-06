@@ -10,6 +10,19 @@ import path from 'node:path';
 
 export type Provider = string;
 export type CommitMode = 'branch' | 'direct';
+
+/**
+ * 摘要输出语言支持集（首期 zh/en）。核心 `language.outputLanguage` 接受 BCP47，
+ * 但插件只暴露这里列出的语种；显式值必须落在这个集合内（见 `validateSettings`）。
+ * `''` = 跟随宿主语言（宿主 locale 读不到 / 非中英时回落 `zh`，见 `host-language.ts`）。
+ */
+export const SUPPORTED_OUTPUT_LANGUAGES: readonly string[] = ['zh', 'en'];
+
+/** 语言标签是否是「主标签在支持集内」的合法 BCP47（大小写不敏感，如 `en-US` 主标签 `en`）。 */
+export function isSupportedOutputLanguage(value: string): boolean {
+  const primary = value.trim().toLowerCase().split(/[-_]/)[0] ?? '';
+  return SUPPORTED_OUTPUT_LANGUAGES.includes(primary);
+}
 /**
  * 三种可用方式：本机 `gh` 登录态、手动 PAT、浏览器 GitHub 登录（读核心凭据记录）。
  * 历史的 `device` 在归一化时迁移为 `gh`；`browser` 无记录时会降级到 ref/env 兜底。
@@ -195,6 +208,13 @@ export interface Settings {
   /** 缓存缺失时是否自动从 Release 下载核心（首次运行需要联网）。 */
   coreAutoDownload: boolean;
   /**
+   * 摘要输出语言（核心 `language.outputLanguage`）。
+   * `''` = 跟随宿主语言（宿主 locale 的 preference，读不到或非中英时回落 `zh`）；
+   * 非空时必须是 `SUPPORTED_OUTPUT_LANGUAGES` 里的主标签（见 `validateSettings`）。
+   * 显式值优先，宿主语言次之，最后回落到 `zh`——见 `src/host/host-language.ts`。
+   */
+  outputLanguage: string;
+  /**
    * 核心进程的出站网络代理（如 http://127.0.0.1:7890）。GUI 宿主往往不继承
    * shell 的 http(s)_proxy，国内直连 GitHub 会超时；这里显式注入到核心子进程的
    * HTTP_PROXY/HTTPS_PROXY/ALL_PROXY（含大小写两份）。空串 = 不使用代理。
@@ -264,6 +284,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily', 'weekly', 'monthly'] },
   corePath: '',
   coreAutoDownload: true,
+  outputLanguage: '',
   network: { proxy: '' },
 };
 
@@ -286,10 +307,11 @@ export function sectionOfField(field: string): SettingsSection | undefined {
   if (field.startsWith('repo.') || field.startsWith('output.') || field.startsWith('pr.')) return 'repo';
   if (field.startsWith('github.')) return 'auth';
   if (field.startsWith('trending.')) return 'scope';
-  if (field.startsWith('summarize.')) return 'summarize';
+  if (field.startsWith('summarize.')) return 'scope';
+  if (field === 'outputLanguage') return 'scope';
   if (field.startsWith('observe.')) return 'scope';
   if (field.startsWith('releases.')) return 'releases';
-  if (field.startsWith('schedule.')) return 'schedule';
+  if (field.startsWith('schedule.')) return 'scope';
   if (field === 'corePath' || field === 'coreAutoDownload' || field === 'network.proxy') return 'source';
   return undefined;
 }
@@ -318,11 +340,18 @@ export function mergeSettingsSection(stored: Settings, incoming: Settings, secti
       next.github = incoming.github;
       break;
     case 'scope':
+      // 设置页「榜单」tab 同时承载榜单范围、调度、摘要与用量、观测库，这几组字段的
+      // 保存都走 scope 分段（与 client 的 sectionSlice('scope') 对齐）。分别赋值成
+      // 各自的子对象，避免整块 incoming 覆盖带来未知字段。
       next.trending = incoming.trending;
       next.observe = incoming.observe;
+      next.summarize = incoming.summarize;
+      next.schedule = incoming.schedule;
+      next.outputLanguage = incoming.outputLanguage;
       break;
     case 'summarize':
       next.summarize = incoming.summarize;
+      next.outputLanguage = incoming.outputLanguage;
       break;
     case 'releases':
       next.releases = incoming.releases;
@@ -477,6 +506,8 @@ export function normalizeSettings(input: unknown): Settings {
     },
     corePath: str(raw.corePath, DEFAULT_SETTINGS.corePath).trim(),
     coreAutoDownload: bool(raw.coreAutoDownload, DEFAULT_SETTINGS.coreAutoDownload),
+    // 缺失/空串/非字符串一律归一为 ''（= 跟随宿主）；合法性留给 validateSettings。
+    outputLanguage: str(raw.outputLanguage, DEFAULT_SETTINGS.outputLanguage).trim().toLowerCase(),
     network: {
       proxy: str((raw.network as Record<string, unknown> | undefined)?.proxy, DEFAULT_SETTINGS.network.proxy).trim(),
     },
@@ -568,6 +599,14 @@ export function validateSettings(settings: Settings, providers: readonly string[
   // summarize.*
   if (!isEnrich(summarize.enrich)) {
     problems.push({ field: 'summarize.enrich', code: 'CONFIG_INVALID', message: 'enrich 必须是 none / repo / readme' });
+  }
+  // outputLanguage：空串 = 跟随宿主，允许；非空时必须是支持语种（主标签在支持集内）。
+  if (settings.outputLanguage !== '' && !isSupportedOutputLanguage(settings.outputLanguage)) {
+    problems.push({
+      field: 'outputLanguage',
+      code: 'CONFIG_INVALID',
+      message: `摘要语言只支持 ${SUPPORTED_OUTPUT_LANGUAGES.join(' / ')}（或留空跟随宿主），收到「${settings.outputLanguage}」`,
+    });
   }
   if (!Number.isInteger(summarize.batchSize) || summarize.batchSize <= 0) {
     problems.push({ field: 'summarize.batchSize', code: 'CONFIG_INVALID', message: 'batchSize 必须是正整数' });
@@ -661,6 +700,8 @@ export interface CoreConfig {
     authorEmail?: string;
   };
   pr: { enabled: boolean; titleTemplate: string; labels: string[]; autoMerge: boolean };
+  /** 摘要输出语言（核心 `language.outputLanguage`，空=zh 由核心自己兜底；这里始终写解析后的值）。 */
+  language: { outputLanguage: string };
   trending: { languages: string[]; since: string };
   summarize: {
     batchSize: number;
@@ -719,12 +760,16 @@ export function toCoreConfig(
   baseURLOverride?: string,
   period?: Period,
   repoCount = 0,
+  resolvedOutputLanguage?: string,
 ): CoreConfig {
   const releases = settings.releases;
   const repoTotal = Number.isFinite(repoCount) && repoCount > 0 ? Math.floor(repoCount) : 0;
   const concurrency =
     releases.concurrency === 'auto' ? Math.min(8, Math.max(4, Math.ceil(repoTotal / 10))) : releases.concurrency;
   const budgetSeconds = releases.budgetSeconds === 'auto' ? Math.min(300, 30 + 3 * repoTotal) : releases.budgetSeconds;
+  // resolvedOutputLanguage 由 runner 每次运行解析（显式 > 宿主 > zh）；缺省回落到空串，
+  // 核心把空串当 zh（与旧核心「无该字段 → 默认 zh」的行为一致）。
+  const outputLanguage = resolvedOutputLanguage ?? '';
   const config: CoreConfig = {
     model: {
       provider: settings.model.provider,
@@ -748,6 +793,7 @@ export function toCoreConfig(
       labels: settings.pr.labels,
       autoMerge: settings.pr.autoMerge,
     },
+    language: { outputLanguage },
     trending: {
       languages: settings.trending.languages,
       since: period ?? settings.trending.since,

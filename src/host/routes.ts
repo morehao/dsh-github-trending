@@ -445,6 +445,10 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
   const modelCredential = await describeRef(credentials, settings.model.apiKeyRef, env);
   const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
 
+  // 摘要输出语言解析：显式 > 宿主 locale > zh（中英外回落 zh）。hostLanguage 是宿主偏好的
+  // 归一标签（未归一成功为空串），供设置页「跟随宿主({hostLang})」展示；source 说明这个值从哪来。
+  const resolvedLang = deps.runner.resolveOutputLanguage(settings);
+
   // 对账 pendingPr：外部已合并/关闭的 PR 不该继续以「未合并」示人；清掉陈旧记录。
   let pendingPr = state.pendingPr ?? null;
   let pendingPrState: string | undefined;
@@ -472,6 +476,13 @@ async function statePayload(deps: RouteDeps, settings: Settings): Promise<Record
     settings,
     core,
     coexistence,
+    // 摘要输出语言：hostLanguage = 宿主偏好的归一标签（空=未知）；resolvedLanguage = 最终下发的语言；
+    // outputLanguageSource 说明 resolvedLanguage 的来源（explicit / host / fallback）。
+    language: {
+      hostLanguage: resolvedLang.hostLanguage,
+      resolvedLanguage: resolvedLang.language,
+      outputLanguageSource: resolvedLang.source,
+    },
     schedule: deps.scheduler.describe(state),
     status: {
       running: deps.runner.running ?? null,

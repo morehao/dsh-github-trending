@@ -54,7 +54,13 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
     case 'auth':
       return { github: settings.github };
     case 'scope':
-      return { trending: settings.trending, schedule: settings.schedule, summarize: settings.summarize, observe: settings.observe };
+      return {
+        trending: settings.trending,
+        schedule: settings.schedule,
+        summarize: settings.summarize,
+        observe: settings.observe,
+        outputLanguage: settings.outputLanguage,
+      };
     case 'releases':
       return { releases: settings.releases };
   }
@@ -79,6 +85,8 @@ function applySection(target: SettingsShape, source: SettingsShape, section: Sec
 export function SettingsView(props: { t: Translate; store: StoreValue; onClose?: () => void; pickDirectory?: () => Promise<string | undefined>; initialSection?: SectionId; onOpenSubscriptions?: () => void }): any {
   const { t, store } = props;
   const state = store.state;
+  // 摘要输出语言解析结果（Host /state.language）；缺失时设置页用 settings.outputLanguage 兜底。
+  const language = state?.language;
   const [draft, setDraft] = React.useState<SettingsShape | null>(null);
   const [dirtySections, setDirtySections] = React.useState<Record<SectionId, boolean>>({ ...EMPTY_DIRTY });
   const [savingSection, setSavingSection] = React.useState<SectionId | null>(null);
@@ -724,6 +732,30 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       { label: t('summarize.readmeChars'), help: t('summarize.readmeChars.help') },
       h(Input, { mono: true, width: 90, value: String(draft.summarize.readmeChars), onInput: (value: string) => update((next) => { next.summarize.readmeChars = Math.round(Number(value) || 0); }) }),
     ),
+    // 摘要语言：首项「跟随宿主({hostLang})」（值 ''），其余为支持语言。
+    // 核心版本过旧时给一条提示，但下拉仍可用（保存不依赖核心在线）。
+    (() => {
+      const hostLang = language?.hostLanguage !== undefined && language.hostLanguage !== '' ? language.hostLanguage : t('summaryLang.unknownHost');
+      const current = draft.outputLanguage ?? '';
+      // 旧状态可能没有 outputLanguage：'' 视为跟随宿主。
+      const missingCore = state?.core?.state === 'incompatible';
+      return [
+        h(
+          Row,
+          { label: t('summaryLang.label'), help: t('summaryLang.help') },
+          h(Select, {
+            value: current,
+            options: [
+              { value: '', label: t('summaryLang.followHost', { hostLang }) },
+              { value: 'zh', label: t('summaryLang.zh') },
+              { value: 'en', label: t('summaryLang.en') },
+            ],
+            onChange: (value: string) => update((next) => { next.outputLanguage = value; }),
+          }),
+        ),
+        missingCore ? h(Alert, { kind: 'warn' }, h('div', null, t('summaryLang.coreTooOld'))) : null,
+      ];
+    })(),
     draft.summarize.enrich === 'none' ? null : h(Alert, { kind: 'warn' }, h('div', null, t('summarize.enrichNote'))),
     // 本地 star 观测库（核心 observe.*）：旧设置里可能还没有该字段，先取默认再编辑。
     // 观测库让「今日新增」来自本地每日快照的差分；关闭即回到「增量只来自趋势页」的旧行为。

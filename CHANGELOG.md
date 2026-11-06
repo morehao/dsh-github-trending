@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.9.13] - 2026-11-06
+
+### Features
+
+- **summary language**: 新增「摘要语言」（`settings.outputLanguage`）设置，控制日报 / 订阅摘要的输出语言。默认 `''` = **跟随宿主**（读宿主 locale 的 `preference`：`zh`→中文、`en`→英文；**中英之外一律回落中文**）；也可显式选 **中文 / English**。解析顺序为「显式设置 > 宿主语言 > 中文兜底」，每次运行现读宿主偏好（改宿主语言无需重启）。运行时把解析结果写入核心 YAML 的 `language: { outputLanguage: <resolved> }`。设置页「摘要与用量」tab 提供下拉（首项「跟随宿主({hostLang})」），核心过旧时提示升级但下拉仍可用。
+- **state**: `/state` 增 `language: { hostLanguage, resolvedLanguage, outputLanguageSource }`（`explicit` / `host` / `fallback`）。
+
+### Chores / Breaking
+
+- **core**: 最低核心版本要求抬到 **0.12.0**，`dsh.core.version` 0.11.0 → 0.12.0。核心低于 0.12.0 判 `CORE_INCOMPATIBLE` 并给下载引导。核心 0.12.0 起支持 `language.outputLanguage` 与 `digest.summary`/`summaryLang`。
+- **contract**: `@morehao/trendradar-contract` 升级到 **0.7.0**（wire：`ipcSchema=4` / `digestSchema=3` / `contractVersion=0.7.0`）。摘要字段 `summaryZh` → `summary` + `summaryLang`。
+- 版本号 `0.9.12` → `0.9.13`。
+
 ## [v0.9.12] - 2026-11-06
 
 ### Fixes

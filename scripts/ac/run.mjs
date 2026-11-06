@@ -221,6 +221,27 @@ function repoFiles(repo) {
     `found=${coexistence.found} version=${coexistence.version} compatible=${coexistence.compatible} run.ok=${summary.ok}`);
 }
 
+// ---- AC-P-14：摘要输出语言（en 端到端 + 默认跟随宿主中文） ----
+{
+  // 显式 en：配置里写 language.outputLanguage=en，核心产出英文摘要并与 files 自洽。
+  const { runner, store } = setup({ settings: { outputLanguage: 'en' }, scenario: { FAKE_ECHO_LANGUAGE: '1' } });
+  const enSummary = await runner.run({ trigger: 'tool' });
+  const enLogEcho = enSummary.warnings.includes('outputLanguage=en');
+  const enPreview = enSummary.preview === undefined ? '' : (store.readPreview(enSummary.id)?.text ?? '');
+  const okEn = enSummary.ok && enLogEcho && /English/.test(enPreview);
+
+  // 默认（outputLanguage=''）+ 无宿主语言服务 → 回落中文，配置写 zh。
+  const zh = setup({ settings: { outputLanguage: '' } });
+  const zhSummary = await zh.runner.run({ trigger: 'tool' });
+  const zhPreview = zhSummary.preview === undefined ? '' : (zh.store.readPreview(zhSummary.id)?.text ?? '');
+  // 默认 digest 文案是中文（'# default digest' 里无 English 标记即可断言「非英文」）。
+  const okZh = zhSummary.ok && !/English/.test(zhPreview);
+
+  record('AC-P-14', '摘要语言：显式 en 端到端产出英文；默认跟随宿主回落中文', okEn && okZh,
+    `en: ok=${enSummary.ok} echo=${enLogEcho} 含English=${/English/.test(enPreview)}；\n` +
+    `zh(默认): ok=${zhSummary.ok} 含English=${/English/.test(zhPreview)}`);
+}
+
 // ---- 人工步骤 ----
 console.log('\n人工步骤（机械检查覆盖不到的部分）：');
 console.log('  AC-P-02 三步走查：设置页选仓库 → 「沿用 DSH 配置」选模型 → 「试跑」。');

@@ -78,6 +78,23 @@ function repoPathFromConfig(config) {
   }
 }
 
+/**
+ * 从配置里取 `language.outputLanguage`（模拟核心 0.12.0 读该字段）。
+ * 匹配 YAML 里 `language:` 块下的 `outputLanguage: "..."`。取不到返回 ''。
+ */
+function outputLanguageFromConfig(config) {
+  const block = /^\s*language:\s*\n((?:[ \t]+.*\n?)*)/m.exec(config);
+  const scope = block === null ? config : block[1];
+  const match = /^\s*outputLanguage:\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(scope);
+  if (match === null) return '';
+  try {
+    const value = JSON.parse(match[1]);
+    return typeof value === 'string' ? value : '';
+  } catch {
+    return '';
+  }
+}
+
 function contentOf(spec) {
   if (typeof spec.content === 'string') return spec.content;
   if (typeof spec.size === 'number' && spec.size > 0) return 'x'.repeat(spec.size);
@@ -140,11 +157,19 @@ function artifactsFor(config, skipped) {
 }
 
 /** 本次回传的 digest：默认取第一个有内容的 artifact，保证 text/bytes/sha 三者自洽。 */
-function digestFor(sources) {
+function digestFor(sources, outputLanguage) {
   if (process.env.FAKE_DIGEST === '0') return undefined;
   const source = sources.find((item) => item.content !== undefined) ?? sources[0];
   if (source === undefined) return undefined;
-  const text = process.env.FAKE_DIGEST_TEXT !== undefined ? process.env.FAKE_DIGEST_TEXT : (source.content ?? '');
+  // 模拟核心按 `language.outputLanguage` 产出对应语言的摘要：en 时把正文换成英文标记，
+  // 让 AC/测试能断言「显式/宿主 en → 英文摘要；其余 → 中文摘要」。
+  const baseText =
+    process.env.FAKE_DIGEST_TEXT !== undefined
+      ? process.env.FAKE_DIGEST_TEXT
+      : outputLanguage === 'en'
+        ? '# GitHub Trending (English)\n\nWeekly digest generated in English.\n'
+        : (source.content ?? '');
+  const text = baseText;
   const buffer = Buffer.from(text, 'utf8');
   return {
     path: process.env.FAKE_DIGEST_PATH ?? source.wire.path,
@@ -157,11 +182,11 @@ function digestFor(sources) {
 if (command === 'version') {
   process.stdout.write(
     JSON.stringify({
-      version: process.env.FAKE_VERSION ?? '0.3.0-fake',
+      version: process.env.FAKE_VERSION ?? '0.12.0',
       commit: 'test',
-      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '3'),
-      digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '2'),
-      contractVersion: process.env.FAKE_CONTRACT_VERSION ?? '0.6.0',
+      ipcSchema: Number(process.env.FAKE_IPC_SCHEMA ?? '4'),
+      digestSchema: Number(process.env.FAKE_DIGEST_SCHEMA ?? '3'),
+      contractVersion: process.env.FAKE_CONTRACT_VERSION ?? '0.7.0',
       supportedProviders: ['openai-compatible', 'deepseek'],
     }) + '\n',
   );
@@ -216,9 +241,26 @@ if (command === 'run') {
   }
   const hasKey = /apiKey:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
+  const outputLanguage = outputLanguageFromConfig(config);
   const sources = artifactsFor(config, skipped);
+  // 模拟核心按 `language.outputLanguage` 产出对应语言：en 且未显式覆盖正文/产物时，把默认
+  // 产物正文换成英文标记，保证 files 与 digest 的 text/bytes/sha256 自洽（否则会被插件判 IPC_INVALID）。
+  if (
+    outputLanguage === 'en' &&
+    process.env.FAKE_DIGEST_TEXT === undefined &&
+    process.env.FAKE_ARTIFACTS === undefined &&
+    process.env.FAKE_ARTIFACT_CONTENT === undefined
+  ) {
+    const enText = '# GitHub Trending (English)\n\nWeekly digest generated in English.\n';
+    for (const source of sources) {
+      source.content = enText;
+      const buf = Buffer.from(enText, 'utf8');
+      source.wire.bytes = buf.length;
+      source.wire.sha256 = `sha256:${createHash('sha256').update(buf).digest('hex')}`;
+    }
+  }
   const files = sources.map((item) => item.wire);
-  const digest = digestFor(sources);
+  const digest = digestFor(sources, outputLanguage);
   // 契约 0.4.0：可选 usage / releases 块；给了就按各自 schema 生成（releases 的
   // checked/changed 必填）。用 FAKE_USAGE_* / FAKE_RELEASES_* 控制。
   const usageSpec = process.env.FAKE_USAGE;
@@ -258,7 +300,7 @@ if (command === 'run') {
   }
   process.stdout.write(
     JSON.stringify({
-      ipcSchema: 3,
+      ipcSchema: 4,
       ok: true,
       command: 'run',
       startedAt: now,
@@ -282,6 +324,7 @@ if (command === 'run') {
       warnings: [
         ...(process.env.FAKE_ECHO_TRIGGER === '1' ? [`trigger=${process.env.TRENDRADAR_TRIGGER ?? ''}`] : []),
         ...(process.env.FAKE_FORCE_ECHO === '1' ? [`force=${argv.includes('--force') ? '1' : '0'}`] : []),
+        ...(process.env.FAKE_ECHO_LANGUAGE === '1' ? [`outputLanguage=${outputLanguage || '(empty)'}`] : []),
       ],
     }) + '\n',
   );
@@ -327,7 +370,7 @@ if (command === 'subscribe') {
   const now = new Date().toISOString();
   // 契约 0.4.0：payload 进信封（subscriptions / subscriptionDoc）。
   const envelope = (ok, errorCode, errorMessage, payload = {}) => {
-    const out = { ipcSchema: 3, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [], ...payload };
+    const out = { ipcSchema: 4, ok, command: 'subscribe', startedAt: now, finishedAt: now, skipped: false, files: [], ...payload };
     if (!ok) out.error = { code: errorCode, message: errorMessage, retriable: false };
     process.stdout.write(JSON.stringify(out) + '\n');
     process.exit(ok ? 0 : 1);

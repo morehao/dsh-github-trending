@@ -2,7 +2,7 @@
  * 发版订阅：经**核心 subscribe IPC 命令**管理订阅列表（不自己写仓库）。
  *
  * 时序（core 0.7.0 / contract 0.4.0）：
- *   - 插件把 `RunRequest{ipcSchema:2, command:"subscribe", action, repo?, volume?, configPath}`
+ *   - 插件把 `RunRequest{ipcSchema:4, command:"subscribe", action, repo?, volume?, configPath}`
  *     JSON 写进核心 **stdin**（`subscribe --json`）；
  *   - `configPath` 指向插件生成的临时配置（与 run 同源 `toCoreConfig`），保证
  *     subscribe 与 run 解析出同一个 `<output.dir>/subscriptions.yaml`；
@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { effectiveBaseURL, toCoreConfig, toYaml, validateSettings, type Settings } from '../config.js';
-import { IpcError, parseSubscribeResult, type SubscribeAction, type SubscribeOutcome } from '../ipc.js';
+import { IPC_SCHEMA_VERSION, IpcError, parseSubscribeResult, type SubscribeAction, type SubscribeOutcome } from '../ipc.js';
 import { locateCore } from '../core/locate.js';
 import { spawnCollect as execCapture, sanitizedEnv } from '@morehao/dsh-plugin-kit/exec';
 import type { Store } from '../state.js';
@@ -108,7 +108,7 @@ export async function runSubscribe(
   const { file, dir } = writeTempConfig(settings);
   try {
     const request = {
-      ipcSchema: 2,
+      ipcSchema: IPC_SCHEMA_VERSION,
       command: 'subscribe',
       action: input.action,
       ...(input.action === 'list' ? {} : { repo: (input.repo ?? '').trim() }),

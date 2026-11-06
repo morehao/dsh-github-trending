@@ -101,7 +101,7 @@ test('/state 返回设置、核心状态、调度与历史', async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.settings.repo.path, repo);
   assert.equal(payload.core.state, 'ready');
-  assert.equal(payload.core.version, '0.3.0-fake');
+  assert.equal(payload.core.version, '0.12.0');
   assert.equal(payload.schedule.enabled, true);
   // 发版行程与榜单行程并列：默认周一 08:00 上海，且带下一次触发时间。
   assert.equal(payload.schedule.releaseEnabled, true);
@@ -114,6 +114,11 @@ test('/state 返回设置、核心状态、调度与历史', async () => {
   assert.deepEqual(payload.status.releaseRuns, []);
   assert.equal(payload.github.configured, false);
   assert.equal(payload.plugin.repository, 'https://github.com/morehao/dsh-github-trending');
+  // 摘要输出语言解析：默认跟随宿主（此场景无宿主 settings 服务 → 回落 zh）。
+  assert.equal(typeof payload.language, 'object');
+  assert.equal(payload.language.resolvedLanguage, 'zh');
+  assert.equal(payload.language.outputLanguageSource, 'fallback');
+  assert.equal(typeof payload.language.hostLanguage, 'string');
 });
 
 test('/config 校验并保存；非法时 400 且不落盘', async () => {

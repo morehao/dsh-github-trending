@@ -8,7 +8,7 @@ import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
 
 import type { Settings } from '../config.js';
-import { IpcError, IPC_SCHEMA_VERSION, SUPPORTED_DIGEST_SCHEMA } from '../ipc.js';
+import { IpcError, IPC_SCHEMA_VERSION, MIN_CORE_VERSION, SUPPORTED_DIGEST_SCHEMA, isCoreVersionSupported } from '../ipc.js';
 import { spawnCollect as execCapture } from '@morehao/dsh-plugin-kit/exec';
 import { inspectRelease, locateCore, type CoreLocation } from '../core/locate.js';
 import { readCoreRelease, type ReleaseDescriptor } from '../core/release.js';
@@ -138,6 +138,28 @@ export async function inspectCore(settings: Settings, options: { env?: NodeJS.Pr
   try {
     const core = await locateCore({ settings, env, allowDownload: false });
     const result = await handshake(core, { timeoutMs: 5000 });
+    // 最低核心版本闸门（0.12.0）：即便 wire 对得上，版本号低于门槛（如 TRENDING_DIGEST_CORE
+    // 指向的旧二进制恰好报了兼容 wire）也判 incompatible，并给「下载新核心」引导。
+    if (!isCoreVersionSupported(result.version.version)) {
+      const status: CoreStatus = {
+        ...base,
+        state: 'incompatible',
+        path: core.path,
+        source: core.source,
+        version: result.version.version,
+        commit: result.version.commit,
+        ipcSchema: result.version.ipcSchema,
+        digestSchema: result.version.digestSchema,
+        supportedProviders: result.supportedProviders,
+        code: 'CORE_INCOMPATIBLE',
+        message: `核心版本 ${result.version.version} 过旧：本插件要求 trendradar ≥ ${MIN_CORE_VERSION}（支持摘要输出语言）。`,
+        hint: `请在设置页「核心」点「下载核心」升级到 ${MIN_CORE_VERSION}，或把 TRENDING_DIGEST_CORE 指向 ≥ ${MIN_CORE_VERSION} 的二进制。`,
+        checkedAt,
+        durationMs: result.durationMs,
+      };
+      cached = { key, at: Date.now(), status };
+      return status;
+    }
     const status: CoreStatus = {
       ...base,
       state: 'ready',

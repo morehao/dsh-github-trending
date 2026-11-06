@@ -16,28 +16,29 @@ const contractPkg = readJson(path.join(contractRoot, 'package.json'));
 const versionMap = readJson(path.join(contractRoot, 'version-map.json'));
 
 test('契约包依赖精确锁定，且安装版本与导出一致', () => {
-  const spec = pkg.dependencies?.[CONTRACT];
-  assert.match(String(spec), /^\d+\.\d+\.\d+$/, `dependencies["${CONTRACT}"] 必须是精确版本`);
+  const spec = String(pkg.dependencies?.[CONTRACT] ?? '');
+  assert.match(spec, /^\d+\.\d+\.\d+$/, `dependencies["${CONTRACT}"] 必须是精确版本`);
   assert.equal(spec, contractPkg.version, 'dependency 版本与已安装包版本不一致');
+  assert.equal(contractPkg.version, '0.7.0', '已安装契约包版本应为 0.7.0');
   assert.equal(contractVersion, contractPkg.version, '导出的 contractVersion 与包版本不一致');
 });
 
-test('wire 版本是 v3（ipcSchema=3 / digestSchema=2 / contractVersion 主版本 0）', () => {
-  assert.equal(rawSchema.ipc.$defs.RunResult.properties.ipcSchema.const, 3);
-  assert.equal(rawSchema.ipc.$defs.RunRequest.properties.ipcSchema.const, 3);
-  assert.equal(rawSchema.digest.properties.schema.const, 2);
-  assert.equal(rawSchema.versionInfo.properties.ipcSchema.const, 3);
-  assert.equal(rawSchema.versionInfo.properties.digestSchema.const, 2);
-  assert.equal(versionMap['ipc.v3.json'].current, 3);
-  assert.equal(versionMap['digest.v2.json'].current, 2);
-  assert.equal(String(versionMap['version-info.v2.json'].current).split('.')[0], '0');
+test('wire 版本是 v4（ipcSchema=4 / digestSchema=3 / contractVersion 0.7.0）', () => {
+  assert.equal(rawSchema.ipc.$defs.RunResult.properties.ipcSchema.const, 4);
+  assert.equal(rawSchema.ipc.$defs.RunRequest.properties.ipcSchema.const, 4);
+  assert.equal(rawSchema.digest.properties.schema.const, 3);
+  assert.equal(rawSchema.versionInfo.properties.ipcSchema.const, 4);
+  assert.equal(rawSchema.versionInfo.properties.digestSchema.const, 3);
+  assert.equal(versionMap['ipc.v4.json'].current, 4);
+  assert.equal(versionMap['digest.v3.json'].current, 3);
+  assert.equal(String(versionMap['version-info.v2.json'].current), '0.7.0');
 });
 
-test('RunResult.digest 是 ipc v3 的必填四字段（path/bytes/sha256/text）', () => {
+test('RunResult.digest 是 ipc v4 的必填四字段（path/bytes/sha256/text）', () => {
   const digest = rawSchema.ipc.$defs.DigestArtifact;
   assert.deepEqual([...digest.required].sort(), ['bytes', 'path', 'sha256', 'text']);
   const rr = {
-    ipcSchema: 3,
+    ipcSchema: 4,
     ok: true,
     command: 'run',
     startedAt: '2026-11-04T00:00:00Z',
@@ -52,7 +53,7 @@ test('RunResult.digest 是 ipc v3 的必填四字段（path/bytes/sha256/text）
     },
   };
   assert.equal(validators.runResult(rr), true);
-  assert.equal(validators.runResult({ ...rr, ipcSchema: 2 }), false, 'v2 信封必须被拒');
+  assert.equal(validators.runResult({ ...rr, ipcSchema: 3 }), false, 'v3 信封必须被拒（wire 已升到 4）');
   const { text, ...withoutText } = rr.digest;
   assert.equal(validators.runResult({ ...rr, digest: withoutText }), false, 'digest.text 必填');
 });
