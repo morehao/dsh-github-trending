@@ -139,6 +139,12 @@ export interface ReleasesSettings {
   includeDrafts: boolean;
   fallbackToTags: boolean;
   baselineOnFirstRun: boolean;
+  /**
+   * 首次订阅的仓库基线运行时补发最近 N 个版本（核心 `releases.backfillLatest`）。
+   * `0` = 不补发，只记录基线、不产文档（首次变更分析会为空）；`> 0` = 把最近 N 个
+   * 版本直接摘要进文档作为起点。之后每次照常做增量 diff——补发的版本会进游标，不重复总结。
+   */
+  backfillLatest: number;
   /** 文档**列出**多少个版本（核心 0.7.0 起不再限制抓取条数，摘要覆盖全周）。 */
   perRepoLimit: number;
   maxNotesChars: number;
@@ -244,6 +250,7 @@ export const DEFAULT_SETTINGS: Settings = {
     includeDrafts: false,
     fallbackToTags: true,
     baselineOnFirstRun: true,
+    backfillLatest: 3,
     perRepoLimit: 10,
     maxNotesChars: 4000,
     summaryMaxChars: 1200,
@@ -444,6 +451,7 @@ export function normalizeSettings(input: unknown): Settings {
       includeDrafts: bool(releases.includeDrafts, DEFAULT_SETTINGS.releases.includeDrafts),
       fallbackToTags: bool(releases.fallbackToTags, DEFAULT_SETTINGS.releases.fallbackToTags),
       baselineOnFirstRun: bool(releases.baselineOnFirstRun, DEFAULT_SETTINGS.releases.baselineOnFirstRun),
+      backfillLatest: Math.round(num(releases.backfillLatest, DEFAULT_SETTINGS.releases.backfillLatest)),
       perRepoLimit: Math.round(num(releases.perRepoLimit, DEFAULT_SETTINGS.releases.perRepoLimit)),
       maxNotesChars: Math.round(num(releases.maxNotesChars, DEFAULT_SETTINGS.releases.maxNotesChars)),
       summaryMaxChars: Math.round(num(releases.summaryMaxChars, DEFAULT_SETTINGS.releases.summaryMaxChars)),
@@ -590,6 +598,9 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (!Number.isInteger(releases.perRepoLimit) || releases.perRepoLimit < 1 || releases.perRepoLimit > 20) {
     problems.push({ field: 'releases.perRepoLimit', code: 'CONFIG_INVALID', message: 'perRepoLimit 必须是 1–20 的整数' });
   }
+  if (!Number.isInteger(releases.backfillLatest) || releases.backfillLatest < 0 || releases.backfillLatest > 20) {
+    problems.push({ field: 'releases.backfillLatest', code: 'CONFIG_INVALID', message: 'backfillLatest 必须是 0–20 的整数' });
+  }
   if (!Number.isInteger(releases.maxNotesChars) || releases.maxNotesChars < 500 || releases.maxNotesChars > 20000) {
     problems.push({ field: 'releases.maxNotesChars', code: 'CONFIG_INVALID', message: 'maxNotesChars 必须是 500–20000 的整数' });
   }
@@ -672,6 +683,8 @@ export interface CoreConfig {
     includeDrafts: boolean;
     fallbackToTags: boolean;
     baselineOnFirstRun: boolean;
+    /** 首次订阅仓库基线补发最近 N 个版本（核心 `releases.backfillLatest`）。 */
+    backfillLatest: number;
     perRepoLimit: number;
     maxNotesChars: number;
     summaryMaxChars: number;
@@ -761,6 +774,7 @@ export function toCoreConfig(
       includeDrafts: releases.includeDrafts,
       fallbackToTags: releases.fallbackToTags,
       baselineOnFirstRun: releases.baselineOnFirstRun,
+      backfillLatest: releases.backfillLatest,
       perRepoLimit: releases.perRepoLimit,
       maxNotesChars: releases.maxNotesChars,
       summaryMaxChars: releases.summaryMaxChars,

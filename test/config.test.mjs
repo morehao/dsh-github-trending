@@ -155,6 +155,7 @@ test('summarize / releases 归一化默认值与未知字段丢弃', () => {
   assert.equal('enabled' in defaults.releases, false);
   assert.equal(defaults.releases.period, 'weekly');
   assert.equal(defaults.releases.perRepoLimit, 10);
+  assert.equal(defaults.releases.backfillLatest, 3);
   assert.equal(defaults.releases.summaryMaxChars, 1200);
   assert.equal(defaults.releases.docMaxLines, 600);
   assert.equal(defaults.releases.concurrency, 'auto');
@@ -171,6 +172,10 @@ test('summarize / releases 归一化默认值与未知字段丢弃', () => {
   assert.equal(config.normalizeSettings({ releases: { concurrency: 3 } }).releases.concurrency, 3);
   assert.equal(config.normalizeSettings({ releases: { concurrency: '3' } }).releases.concurrency, 'auto');
   assert.equal(config.normalizeSettings({ releases: { budgetSeconds: 90.4 } }).releases.budgetSeconds, 90);
+  // backfillLatest：显式数字取整透传；垃圾/缺省回落默认 3。
+  assert.equal(config.normalizeSettings({ releases: { backfillLatest: 5 } }).releases.backfillLatest, 5);
+  assert.equal(config.normalizeSettings({ releases: { backfillLatest: 2.6 } }).releases.backfillLatest, 3);
+  assert.equal(config.normalizeSettings({ releases: { backfillLatest: 'x' } }).releases.backfillLatest, 3);
   assert.deepEqual(config.normalizeSettings({ releases: { schedule: { weekday: 3, time: '07:30', timezone: 'UTC' } } }).releases.schedule, {
     enabled: true,
     weekday: 3,
@@ -222,6 +227,12 @@ test('releases 校验：只支持 weekly，新字段越界都落 releases.* 路�
   assert.ok(fields.includes('releases.schedule.weekday'));
   assert.ok(fields.includes('releases.schedule.time'));
   assert.ok(fields.includes('releases.schedule.timezone'));
+  // backfillLatest：默认 3；0 与 20 合法，-1 / 21 越界报错。
+  assert.equal(validate({}).some((p) => p.field === 'releases.backfillLatest'), false);
+  assert.equal(validate({ backfillLatest: 0 }).some((p) => p.field === 'releases.backfillLatest'), false);
+  assert.equal(validate({ backfillLatest: 20 }).some((p) => p.field === 'releases.backfillLatest'), false);
+  assert.ok(validate({ backfillLatest: -1 }).some((p) => p.field === 'releases.backfillLatest'));
+  assert.ok(validate({ backfillLatest: 21 }).some((p) => p.field === 'releases.backfillLatest'));
   // 字段归位：全部落在 releases 分区（界面只回这一栏）。
   assert.equal(new Set(bad.map((p) => config.sectionOfField(p.field))).size, 1);
   assert.equal(config.sectionOfField('releases.schedule.weekday'), 'releases');
@@ -241,6 +252,7 @@ test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
     releases: {
       includePrerelease: true,
       perRepoLimit: 3,
+      backfillLatest: 5,
       maxNotesChars: 6000,
       summaryMaxChars: 900,
       docMaxLines: 300,
@@ -256,6 +268,7 @@ test('toCoreConfig 映射 summarize.* 与 releases.* 到核心 YAML', () => {
   assert.equal(core.releases.enabled, true);
   assert.equal(core.releases.includePrerelease, true);
   assert.equal(core.releases.perRepoLimit, 3);
+  assert.equal(core.releases.backfillLatest, 5);
   assert.equal(core.releases.maxNotesChars, 6000);
   assert.equal(core.releases.summaryMaxChars, 900);
   assert.equal(core.releases.docMaxLines, 300);
