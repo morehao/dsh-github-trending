@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.9.12] - 2026-11-06
+
+### Fixes
+
+- **release**: 新增 `scripts/make-tag-notes.mjs`，在**打 tag 之前**组装并校验发版注记正文（首行 `release: <tag>`、body 非空、拒绝「正文是单行文件路径」），与 `scripts/release-notes.mjs` 互为镜像；配 `scripts/smoke-tag-notes.mjs`（`check:tag-notes`）纳入 `npm run check`。此前注记正文若为空/首行不对，要等 CI「Create GitHub Release from tag annotation」失败才暴露，而 tag 已推送、不可改正文。v0.9.11 的 Release 因该问题缺失，由本版重新发版补齐。
+
+### Chores
+
+- 版本号 `0.9.11` → `0.9.12`（v0.9.11 的 tag 注记正文异常、无法修改，按约定以新版本重发）。
+
 ## [v0.9.11] - 2026-11-06
 
 ### Features

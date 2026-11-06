@@ -55,13 +55,17 @@ npm trust github @morehao/dsh-github-trending \
 ## 日常发版
 
 1. 改 `package.json` 的 `version`（本仓根即包根），走分支 + PR + 合并。
-2. 在 `main` 上打注记 tag（正文写变更说明，Release 会原样投影）：
+2. 在 `main` 上打注记 tag（正文写变更说明，Release 会原样投影）。**先用 `scripts/make-tag-notes.mjs` 组装并校验正文**，别手拼 `notes.txt`——手拼错了要等 CI 失败才发现，而 tag 已推送、不可改：
 
    ```bash
    git switch main && git pull --ff-only
-   git tag -a v0.1.2 -F notes.txt   # notes.txt 首行 `release: v0.1.2`，空行，然后正文
+   # summary.md 是中文摘要层；raw.md 是 changelog.sh 产出的原文层（可选）
+   node scripts/make-tag-notes.mjs --tag v0.1.2 --summary summary.md --raw raw.md --out notes.txt
+   git tag -a --cleanup=verbatim v0.1.2 -F notes.txt   # --cleanup=verbatim 不可省，否则 ### 小标题被当注释删掉
    git push origin v0.1.2
    ```
+
+   该脚本会校验首行 `release: <tag>`、body 非空，并拒绝「正文是单行文件路径」这类误传。
 
 3. 看 CI：`gh run list --workflow release.yml --limit 1`；成功后确认包与 Release：
 
@@ -121,6 +125,7 @@ gh release view v0.1.2 --json tagName,body --jq '{tag:.tagName,len:(.body|length
 | 命名/接线 | `check-naming.mjs` | 包名 / patch `name` / `export const name` 三处漂移；核心版本非法、契约依赖未锁定；`exports`/`files` 漏项 |
 | 打包白名单 | `check-pack.mjs` | tarball 混入 `.dsh/`、`src/`、`docs/`；缺 `lib/index.js`、`client.js` 或 locale |
 | Release 正文 | `smoke-release-notes.mjs` | 投影与 git-kit 读回管道不一致；轻量 tag / 空正文被当成功 |
+| 注记正文组装 | `smoke-tag-notes.mjs` | 首行/空正文/单行路径未拦住 → tag 推出去后不可改正文 |
 | 单测 | `npm test` | 105 个离线用例 |
 | AC-P | `scripts/ac/run.mjs` | 11 条验收的机械部分（安装、密钥、幂等、取消、canonical…） |
 
