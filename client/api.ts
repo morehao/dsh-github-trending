@@ -255,6 +255,8 @@ export interface SettingsShape {
     includeDrafts: boolean;
     fallbackToTags: boolean;
     baselineOnFirstRun: boolean;
+    /** 首次订阅仓库基线补发最近 N 个版本；`0` = 不补发。缺省按 3 处理。 */
+    backfillLatest?: number;
     perRepoLimit: number;
     maxNotesChars: number;
     period: Period;

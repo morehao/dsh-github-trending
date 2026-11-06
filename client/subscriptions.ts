@@ -429,7 +429,7 @@ function isAnalyzeable(item: SubscriptionItem | undefined): boolean {
 }
 
 /**
- * 单仓「触发分析」是否可以点（决定置灰）。
+ * 单仓「变更分析」是否可以点（决定置灰）。
  *
  * - 核心未提供明细（`hasItemDetail=false`，旧核心）：无法判断是否纳入，一律放行，靠点击后
  *   核心错误兜底——不能因为拿不到明细就把整张表灰掉。

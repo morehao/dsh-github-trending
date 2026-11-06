@@ -779,6 +779,11 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
     h(
       Row,
+      { label: t('releases.backfillLatest'), help: t('releases.backfillLatest.help') },
+      h(Input, { mono: true, width: 90, value: String(draft.releases.backfillLatest ?? 3), onInput: (value: string) => update((next) => { next.releases.backfillLatest = Math.round(Number(value) || 0); }) }),
+    ),
+    h(
+      Row,
       { label: t('releases.schedule.enabled'), help: t('releases.schedule.help') },
       h(Toggle, {
         checked: releaseSchedule.enabled,
