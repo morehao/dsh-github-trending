@@ -163,6 +163,55 @@ function renderBlock(block: Block, key: string, headingId?: string): any {
   }
 }
 
+/**
+ * 渲染元信息值：只把版本号 / owner/repo 这类片段做行内高亮，和正文同一套规则。
+ * 值本身是纯文本（时间、哈希等不解析成链接），所以这里直接当一个 text 节点喂给 renderInline。
+ */
+function renderMetaValue(value: string, key: string): any[] {
+  return renderInline([{ type: 'text', value }], `meta-${key}`);
+}
+
+/**
+ * 把 frontmatter 元信息渲染成两列「字段 | 值」表，与 GitHub 渲染同样式的纵向键值表。
+ * 顺序按 `order` 给定的白名单，未列出的字段（核心将来新增的）按原顺序追加在后，
+ * 不静默丢字段。值里的 `contentHash` 太宽，单独允许换行。
+ */
+export function renderMetaTable(meta: Record<string, string>, order: readonly string[]): any | null {
+  const keys = order.filter((key) => meta[key] !== undefined && meta[key] !== '');
+  for (const key of Object.keys(meta)) {
+    if (!order.includes(key) && meta[key] !== '') keys.push(key);
+  }
+  if (keys.length === 0) return null;
+  return h(
+    'div',
+    { className: 'dshgt-md dshgt-doc-meta-table' },
+    h(
+      'div',
+      { className: 'dshgt-md-tablewrap' },
+      h(
+        'table',
+        { className: 'dshgt-md-table dshgt-doc-meta' },
+        h(
+          'tbody',
+          null,
+          keys.map((key) =>
+            h(
+              'tr',
+              { key },
+              h('th', { scope: 'row', className: 'dshgt-doc-meta-key' }, key),
+              h(
+                'td',
+                { className: key === 'contentHash' ? 'dshgt-doc-meta-val dshgt-doc-meta-hash' : 'dshgt-doc-meta-val' },
+                renderMetaValue(meta[key] ?? '', key),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 export function renderMarkdown(markdown: string): RenderedMarkdown {
   const parsed = parseMarkdown(markdown);
   // 先给每个标题块分配去重后的锚点 id，同时收集 TOC；再按块渲染，把 id 挂到 heading 元素上。

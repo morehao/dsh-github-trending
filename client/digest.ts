@@ -19,7 +19,7 @@ import {
   type DigestStatus,
   type PeriodDay,
 } from './digest-core.js';
-import { renderMarkdown, type RenderedMarkdown } from './markdown.js';
+import { renderMarkdown, renderMetaTable, type RenderedMarkdown } from './markdown.js';
 
 export interface DigestProps {
   t: Translate;
@@ -412,7 +412,7 @@ export function DigestView(props: DigestProps): any {
                           React.Fragment,
                           null,
                           rendered.meta.degraded === 'true' ? degradedBadge(t) : null,
-                          metaLine(rendered),
+                          renderMetaTable(rendered.meta, META_KEYS),
                           h('div', { className: 'dshgt-md' }, rendered.nodes),
                         ),
                   ),
@@ -430,19 +430,3 @@ function degradedBadge(t: Translate): any {
   );
 }
 
-function metaLine(rendered: RenderedMarkdown): any {
-  const entries = META_KEYS.filter((key) => rendered.meta[key] !== undefined && rendered.meta[key] !== '');
-  if (entries.length === 0) return null;
-  return h(
-    'div',
-    { className: 'dshgt-doc-meta' },
-    entries.map((key) => {
-      const value = rendered.meta[key] ?? '';
-      if (key === 'contentHash') {
-        const short = value.replace(/^sha256:/, '').slice(0, 10);
-        return h('span', { key, title: value }, `${key}: ${short}`);
-      }
-      return h('span', { key }, `${key}: ${value}`);
-    }),
-  );
-}
