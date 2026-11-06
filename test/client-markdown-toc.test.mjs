@@ -109,3 +109,62 @@ test('renderMarkdown：正文里的版本号与 owner/repo 被包成高亮节点
   assert.ok(classes.includes('dshgt-md-ver'), 'version 应被高亮');
   assert.ok(classes.includes('dshgt-md-repo'), 'owner/repo 应被高亮');
 });
+
+test('renderMetaTable：frontmatter 按字段顺序渲染成两列键值表（值里的冒号不拆）', () => {
+  const meta = {
+    date: '2026-11-06',
+    period: 'daily',
+    languages: '[all, typescript, python]',
+    count: '67',
+    degraded: 'false',
+    contentHash: 'sha256:f59bc9e694d8fbb558ed5aa812e2c889e5d4855a74c4f4026c57db7fab72bf3a',
+    coreVersion: '0.10.0',
+    generatedAt: '2026-11-06T00:31:18Z',
+  };
+  const order = ['date', 'period', 'languages', 'count', 'degraded', 'coreVersion', 'contentHash', 'generatedAt'];
+  const table = markdown.renderMetaTable(meta, order);
+  assert.ok(table, '有 meta 时应渲染出表格');
+
+  const rows = [];
+  const walk = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === 'tr') rows.push(node);
+    (node.children || []).forEach(walk);
+  };
+  walk(table);
+  // 每个字段一行，且按 order 排列。
+  assert.deepEqual(
+    rows.map((tr) => tr.children[0].children[0]),
+    order,
+  );
+  // generatedAt 完整保留时间（含两个冒号）。
+  const genRow = rows.find((tr) => tr.children[0].children[0] === 'generatedAt');
+  const flattenText = (node) => {
+    if (typeof node === 'string') return node;
+    if (node === null || typeof node !== 'object') return '';
+    if (Array.isArray(node)) return node.map(flattenText).join('');
+    return flattenText(node.children || []);
+  };
+  assert.equal(flattenText(genRow.children[1]), '2026-11-06T00:31:18Z');
+});
+
+test('renderMetaTable：核心新增字段不被丢弃，追加在已知字段之后', () => {
+  const table = markdown.renderMetaTable({ date: '2026-11-06', contentHashAlgo: 'sha256' }, ['date']);
+  const rows = [];
+  const walk = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node.type === 'tr') rows.push(node);
+    (node.children || []).forEach(walk);
+  };
+  walk(table);
+  assert.deepEqual(
+    rows.map((tr) => tr.children[0].children[0]),
+    ['date', 'contentHashAlgo'],
+  );
+});
+
+test('renderMetaTable：meta 为空返回 null（不渲染空表）', () => {
+  assert.equal(markdown.renderMetaTable({}, ['date', 'count']), null);
+});

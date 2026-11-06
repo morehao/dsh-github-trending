@@ -310,7 +310,11 @@ export const CSS = `
 .dshgt-seg button{border:0;background:none;height:26px;padding:0 11px;border-radius:6px;font-family:inherit;font-size:12.5px;color:var(--gt-muted);cursor:pointer;}
 .dshgt-seg button.on{background:var(--gt-card);color:var(--gt-fg);font-weight:600;white-space:nowrap;}
 .dshgt-digest-doc{padding:26px 32px 22px;min-width:0;}
-.dshgt-doc-meta{display:flex;gap:12px;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--gt-muted);padding-bottom:12px;border-bottom:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);}
+.dshgt-doc-meta-table{margin:0 0 18px;}
+.dshgt-doc-meta.dshgt-md-table{min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;}
+.dshgt-doc-meta .dshgt-doc-meta-key{width:1%;white-space:nowrap;font-weight:600;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 4%,var(--gt-card));}
+.dshgt-doc-meta .dshgt-doc-meta-val{color:var(--gt-fg);word-break:break-word;overflow-wrap:anywhere;}
+.dshgt-doc-meta-hash{font-size:11.5px;}
 .dshgt-degraded-badge{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--gt-warn,#c08a00) 45%,var(--gt-border));border-radius:8px;font-size:12px;line-height:1.5;color:var(--gt-fg);background:color-mix(in srgb,var(--gt-warn,#c08a00) 12%,transparent);}
 .dshgt-degraded-icon{font-size:14px;line-height:1;}
 .dshgt-digest-raw{margin:0;padding:22px 28px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.75;white-space:pre-wrap;word-break:break-word;color:var(--gt-muted);background:color-mix(in srgb,var(--gt-fg) 2.5%,var(--gt-card));max-height:640px;overflow:auto;}

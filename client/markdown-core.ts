@@ -72,6 +72,9 @@ export function splitFrontmatter(markdown: string): { meta: Record<string, strin
   }
   if (end < 0) return { meta: {}, body: normalized };
   const meta: Record<string, string> = {};
+  // 逐行按「第一个冒号」拆 key/value：核心写出的 frontmatter 一律是一行一个字段
+  // （`date: …` / `generatedAt: …`），不会出现多行块标量。值里的冒号（如 ISO 时间
+  // `2026-11-06T00:31:18Z`）保留在原值内——正好和 GitHub 渲染一致：每个字段独占一行。
   for (const line of lines.slice(1, end)) {
     const colon = line.indexOf(':');
     if (colon <= 0) continue;
