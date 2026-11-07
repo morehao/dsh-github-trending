@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.9.14] - 2026-11-07
+
+### Chores
+
+- **core**: `dsh.core.version` 0.12.0 → **0.12.2**（首次运行自动下载/校验的核心版本）。带上游两个修复：发版订阅的 legacy 游标被滚动 tag 卡死、导致「变更分析」从不落盘（[trendradar#55](https://github.com/morehao/trendradar/pull/55)）；补发改按发布日期选取，滚动预发布不再混入并把发版文档的最新周段拉回旧日期（[trendradar#57](https://github.com/morehao/trendradar/pull/57)）。最低核心要求仍为 0.12.0。
+- 版本号 `0.9.13` → `0.9.14`。
+
 ## [v0.9.13] - 2026-11-06
 
 ### Features
