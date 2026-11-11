@@ -46,7 +46,7 @@ function cloneSettings(settings: SettingsShape): SettingsShape {
 function sectionSlice(settings: SettingsShape, section: SectionId): Record<string, unknown> {
   switch (section) {
     case 'source':
-      return { corePath: settings.corePath, network: settings.network };
+      return { corePath: settings.corePath, network: settings.network, run: settings.run };
     case 'model':
       return { model: settings.model };
     case 'repo':
@@ -507,6 +507,22 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
           next.network = { proxy: value };
         }),
       }),
+    ),
+    h(
+      Row,
+      { label: t('run.timeout'), help: t('run.timeout.help') },
+      h(Input, {
+        mono: true,
+        width: 120,
+        value: String(Math.round((draft.run?.timeoutMs ?? 300_000) / 1000)),
+        placeholder: t('run.timeout.placeholder'),
+        onInput: (value: string) => update((next) => {
+          // UI 用秒，存储用毫秒；非数字/空先原样保留，交给保存时的 validateSettings 拦。
+          const seconds = Number(value);
+          next.run = { timeoutMs: Number.isFinite(seconds) && value.trim() !== '' ? Math.round(seconds * 1000) : 0 };
+        }),
+      }),
+      h('span', { className: 'dshgt-hint' }, t('run.timeout.unit')),
     ),
     state.coexistence.found
       ? h(Alert, { kind: 'warn', title: t('coexist.title') }, h('div', { className: 'dshgt-mono', style: { fontSize: 12 } }, `${state.coexistence.path ?? ''} ${state.coexistence.version ?? ''}`), h('div', null, state.coexistence.message ?? ''), h('div', { className: 'dshgt-hint' }, t('coexist.hint')))
