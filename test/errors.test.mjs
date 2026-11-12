@@ -21,6 +21,22 @@ test('未知错误落到 INTERNAL', () => {
   assert.equal(errors.classifyStderr('something odd happened').code, 'INTERNAL');
 });
 
+test('observe 阶段的 403 限流归为 FETCH_RATE_LIMITED，而不是模型限流', () => {
+  // 核心的 warn 行没有 error: CODE: 前缀，只能靠文本归类。
+  const line = 'warn: observe: FetchStars failed, using page star counts: FETCH_RATE_LIMITED: status 403: http request failed: status=403, message=client error';
+  const classified = errors.classifyStderr(line);
+  assert.equal(classified.code, 'FETCH_RATE_LIMITED');
+  assert.equal(classified.inferred, true);
+  // 纯 403 文本（无 rate 字样）也应归到抓取限流，而不是模型限流或 INTERNAL。
+  assert.equal(errors.classifyStderr('status=403, message=client error').code, 'FETCH_RATE_LIMITED');
+});
+
+test('FETCH_RATE_LIMITED 的提示覆盖「已配 token 但核心未使用」的情形', () => {
+  const hint = errors.hintOf('FETCH_RATE_LIMITED');
+  assert.match(hint, /核心/);
+  assert.match(hint, /token/i);
+});
+
 test('redact 抹掉已知密钥与常见形态', () => {
   const secret = 'sk-abcdefghijklmnop';
   const token = 'ghp_1234567890abcdefghij';
