@@ -205,7 +205,7 @@ export function hintOf(code: string, message?: string, reason?: string): string 
     case 'FETCH_FAILED':
       return '抓取失败：检查网络或代理；核心会在内部重试一次。';
     case 'FETCH_RATE_LIMITED':
-      return 'GitHub 匿名限流：配一个 GitHub token 或稍后重试。';
+      return 'GitHub 抓取被限流（403 / rate limit）。如果你已经配了 GitHub token 仍出现：多半是核心抓取阶段没带上 token、走了匿名额度（匿名仅 60 次/小时，抓几十个仓库必然打满）。先确认设置里的 GitHub 认证状态为「已配置」；若已配置仍复现，属于核心侧抓取未使用 token 的问题，请升级核心，或稍后（额度按小时重置）再试。';
     default:
       return '查看核心日志（按运行 id 归档）定位失败原因。';
   }
@@ -235,6 +235,10 @@ const CORE_CODES = new Set<string>([
 const TEXT_RULES: Array<{ pattern: RegExp; code: AnyCode }> = [
   { pattern: /\b401\b|unauthori[sz]ed|invalid api[ -]?key|incorrect api key|authentication (failed|error)/i, code: 'MODEL_UNAUTHORIZED' },
   { pattern: /\b404\b|model[^\n]*not found|no such model/i, code: 'MODEL_NOT_FOUND' },
+  // GitHub 抓取被限流/封禁：403 优先于下面的 429/rate-limit 规则，否则会被误判成
+  // 模型限流（MODEL_RATE_LIMITED）。`warn: observe: ... FETCH_RATE_LIMITED: status 403`
+  // 这类行没有 `error: CODE:` 前缀，只能靠文本归类，必须在这里先命中。
+  { pattern: /FETCH_RATE_LIMITED|x-ratelimit|api rate limit exceeded|\b403\b/i, code: 'FETCH_RATE_LIMITED' },
   { pattern: /\b429\b|rate[ _-]?limit/i, code: 'MODEL_RATE_LIMITED' },
   { pattern: /timeout|timed out|deadline exceeded|context deadline/i, code: 'MODEL_TIMEOUT' },
   { pattern: /git not found|exec: "git"|git: command not found/i, code: 'GIT_NOT_INSTALLED' },
