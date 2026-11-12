@@ -60,7 +60,7 @@
     },
     "core": {
       "repo": "morehao/trendradar",
-      "version": "0.12.4"
+      "version": "0.12.5"
     },
     "client": {
       "platform": "web",
