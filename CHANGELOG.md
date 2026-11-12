@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.18] - 2026-11-12
+
+### Fixes
+
+- **errors**: observe 403 归类修正 + 适配核心 v0.12.5（0.9.18） (#162)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.17...v0.9.18
+
 ## [v0.9.17] - 2026-11-11
 
 ### Features
