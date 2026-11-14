@@ -19,11 +19,11 @@ test('契约包依赖精确锁定，且安装版本与导出一致', () => {
   const spec = String(pkg.dependencies?.[CONTRACT] ?? '');
   assert.match(spec, /^\d+\.\d+\.\d+$/, `dependencies["${CONTRACT}"] 必须是精确版本`);
   assert.equal(spec, contractPkg.version, 'dependency 版本与已安装包版本不一致');
-  assert.equal(contractPkg.version, '0.7.0', '已安装契约包版本应为 0.7.0');
+  assert.equal(contractPkg.version, '0.7.1', '已安装契约包版本应为 0.7.1');
   assert.equal(contractVersion, contractPkg.version, '导出的 contractVersion 与包版本不一致');
 });
 
-test('wire 版本是 v4（ipcSchema=4 / digestSchema=3 / contractVersion 0.7.0）', () => {
+test('wire 版本是 v4（ipcSchema=4 / digestSchema=3 / contractVersion 0.7.1）', () => {
   assert.equal(rawSchema.ipc.$defs.RunResult.properties.ipcSchema.const, 4);
   assert.equal(rawSchema.ipc.$defs.RunRequest.properties.ipcSchema.const, 4);
   assert.equal(rawSchema.digest.properties.schema.const, 3);
@@ -31,7 +31,7 @@ test('wire 版本是 v4（ipcSchema=4 / digestSchema=3 / contractVersion 0.7.0�
   assert.equal(rawSchema.versionInfo.properties.digestSchema.const, 3);
   assert.equal(versionMap['ipc.v4.json'].current, 4);
   assert.equal(versionMap['digest.v3.json'].current, 3);
-  assert.equal(String(versionMap['version-info.v2.json'].current), '0.7.0');
+  assert.equal(String(versionMap['version-info.v2.json'].current), '0.7.1');
 });
 
 test('RunResult.digest 是 ipc v4 的必填四字段（path/bytes/sha256/text）', () => {

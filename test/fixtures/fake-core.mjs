@@ -239,7 +239,9 @@ if (command === 'run') {
       process.exit(1);
     }
   }
-  const hasKey = /apiKey:\s*"[^"]+"/.test(config);
+  // 主模型 apiKey 是 YAML 标量（`apiKey: "…"`）；备选链以行内 JSON 数组序列化
+  // （`"apiKey":"…"`），两种形态都算「配置里带了可用密钥」。
+  const hasKey = /"?apiKey"?\s*:\s*"[^"]+"/.test(config);
   const now = new Date().toISOString();
   const outputLanguage = outputLanguageFromConfig(config);
   const sources = artifactsFor(config, skipped);

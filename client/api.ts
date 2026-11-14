@@ -141,6 +141,8 @@ export interface RunRecord {
   tokens?: number;
   /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
   releases?: ReleasesSummary;
+  /** 本次实际产出摘要的模型名（契约 0.7.1 `usage.usedModel`）；降级原文/旧核心时缺省。 */
+  usedModel?: string;
   legacy?: boolean;
 }
 
@@ -233,6 +235,20 @@ export interface SettingsShape {
     temperature: number;
     maxTokens: number;
     allowDegraded: boolean;
+    /**
+     * 备选模型链（核心 `ModelConfig.fallbacks`，与 src/config.ts 的 `ModelEntryView` 严格对齐）。
+     * 按序尝试，空数组/缺省 = 关闭；旧 state 可能没有该键，故可选。
+     */
+    fallbacks?: Array<{
+      provider: string;
+      mode: 'direct' | 'proxy';
+      hostProvider: string;
+      baseURL: string;
+      model: string;
+      apiKeyRef: string;
+      temperature: number;
+      maxTokens: number;
+    }>;
   };
   repo: { path: string; baseBranch: string; remote: string; commitMode: 'branch' | 'direct'; authorName: string; authorEmail: string };
   pr: { enabled: boolean; titleTemplate: string; autoMerge: boolean; labels: string[] };

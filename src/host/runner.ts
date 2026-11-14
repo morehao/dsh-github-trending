@@ -31,7 +31,7 @@ import { resolveOutputLanguage, type ResolvedOutputLanguage } from './host-langu
 import type { HostLanguageReader } from './host-locale.js';
 import { credentialServices, resolveGithubToken } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
-import { startProxy, type ProxyHandle } from './proxy.js';
+import { ProxyPool, type ProxyTarget } from './proxy.js';
 import { isoWeekKey, zonedDateString } from './schedule.js';
 import { runSubscribe } from './subscribe.js';
 
@@ -73,6 +73,8 @@ export interface RunSummary {
   tokens?: number;
   /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
   releases?: ReleasesSummary;
+  /** 本次实际产出摘要的模型名（契约 0.7.1 `usage.usedModel`）；旧核心/降级原文时缺省。 */
+  usedModel?: string;
   /** 核心从哪来：env/settings 覆盖、缓存、还是本次下载。 */
   coreSource?: 'settings' | 'env' | 'cache' | 'download';
   coreTag?: string;
@@ -141,13 +143,16 @@ function counterOf(value: unknown): number {
  *   两个来源都缺省则 `tokens` 缺省（历史显示 `—`）。
  * - `releases` 只在 outcome 带 `releases` 块时才有（旧核心或 enabled=false 都无）。
  */
-export function projectUsage(outcome: RunOutcome): { tokens?: number; releases?: ReleasesSummary } {
+export function projectUsage(outcome: RunOutcome): { tokens?: number; releases?: ReleasesSummary; usedModel?: string } {
   const usageTokens = outcome.usage?.totalTokens;
   const releasesTokens = outcome.releases?.usage?.totalTokens;
   let tokens: number | undefined;
   if (typeof usageTokens === 'number' || typeof releasesTokens === 'number') {
     tokens = (typeof usageTokens === 'number' ? usageTokens : 0) + (typeof releasesTokens === 'number' ? releasesTokens : 0);
   }
+  // 契约 0.7.1 起 usage 带 `usedModel`：本次实际产出摘要的模型名（主成功=主名、被备选接管=备选名、
+  // 全失败降级原文时缺省）。旧核心没有该字段，缺省即不展示。
+  const usedModel = typeof outcome.usage?.usedModel === 'string' && outcome.usage.usedModel !== '' ? outcome.usage.usedModel : undefined;
   const releases: ReleasesSummary | undefined =
     outcome.releases === undefined
       ? undefined
@@ -163,6 +168,7 @@ export function projectUsage(outcome: RunOutcome): { tokens?: number; releases?:
   return {
     ...(tokens === undefined ? {} : { tokens }),
     ...(releases === undefined ? {} : { releases }),
+    ...(usedModel === undefined ? {} : { usedModel }),
   };
 }
 
@@ -236,7 +242,7 @@ export class Runner {
     this.active = { id, controller, startedAt };
     const logFile = store.newLogPath(id);
     const startedMs = Date.now();
-    let proxy: ProxyHandle | undefined;
+    let proxyPool: ProxyPool | undefined;
 
     try {
       const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
@@ -256,7 +262,7 @@ export class Runner {
 
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
       const apiKey = model.apiKey;
-      proxy = model.proxy;
+      proxyPool = model.pool;
 
       const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
       if (github.token === undefined) {
@@ -266,8 +272,9 @@ export class Runner {
       const result = await runCore({
         core,
         version: handshakeResult.version,
-        settings,
+        settings: model.effectiveSettings,
         apiKey,
+        fallbackApiKeys: model.fallbackApiKeys,
         ...(github.token === undefined ? {} : { token: github.token }),
         date,
         period,
@@ -278,7 +285,7 @@ export class Runner {
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         timeoutMs: settings.run.timeoutMs,
-        secrets: [apiKey, github.token],
+        secrets: [apiKey, ...model.fallbackApiKeys, github.token],
         onStderr: (line) => store.appendLog(logFile, line),
       });
       const outcome: RunOutcome = result.outcome;
@@ -290,13 +297,13 @@ export class Runner {
         period,
         logFile,
         channel: result.channelKind,
-        proxy: proxy !== undefined,
+        proxy: proxyPool !== undefined,
         coreSource: core.source,
         ...(core.tag === undefined ? {} : { coreTag: core.tag }),
         ...(effectiveForce ? { forced: true } : {}),
       });
       // 预览直接来自 RunResult.digest（ipc v3）：不再读用户仓库，合并后切 base / 删分支都不影响。
-      const preview = this.capturePreview({ id, outcome, secrets: [apiKey, github.token] });
+      const preview = this.capturePreview({ id, outcome, secrets: [apiKey, ...model.fallbackApiKeys, github.token] });
       if (preview !== undefined) summary.preview = preview;
       this.record(summary, settings);
       return summary;
@@ -316,10 +323,10 @@ export class Runner {
       this.record(summary, settings);
       return summary;
     } finally {
-      if (proxy !== undefined) {
-        const port = proxy.port;
-        await proxy.close().catch(() => undefined);
-        this.deps.store.appendLog(logFile, `[proxy] 已关闭 127.0.0.1:${port}`);
+      if (proxyPool !== undefined) {
+        const proxyCount = proxyPool.size;
+        await proxyPool.closeAll();
+        this.deps.store.appendLog(logFile, `[proxy] 已关闭全部回环代理（${proxyCount} 个）`);
       }
       this.active = undefined;
     }
@@ -380,7 +387,7 @@ export class Runner {
     const startedMs = Date.now();
     this.active = { id, controller, startedAt };
     const logFile = store.newLogPath(id);
-    let proxy: ProxyHandle | undefined;
+    let proxyPool: ProxyPool | undefined;
     // 单仓意图（options.repo）在 try/catch 都要用到：catch 里记录失败也要带上 scopeRepo。
     // 实际是否传 --repo 取决于核心版本闸门（见 try 内 effectiveRepo）。
     const requestedRepo = options.repo !== undefined && options.repo !== '' ? options.repo : undefined;
@@ -404,7 +411,7 @@ export class Runner {
       const effectiveRepo = requestedRepo;
 
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
-      proxy = model.proxy;
+      proxyPool = model.pool;
 
       const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
       if (github.token === undefined) {
@@ -417,8 +424,9 @@ export class Runner {
       const result = await runCore({
         core,
         version: handshakeResult.version,
-        settings,
+        settings: model.effectiveSettings,
         apiKey: model.apiKey,
+        fallbackApiKeys: model.fallbackApiKeys,
         ...(github.token === undefined ? {} : { token: github.token }),
         // 按发版调度时区算「今天」：与 lastReleaseWeek 的去重口径必须是同一天历。
         date: this.releaseDate(settings),
@@ -432,7 +440,7 @@ export class Runner {
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         timeoutMs: settings.run.timeoutMs,
-        secrets: [model.apiKey, github.token],
+        secrets: [model.apiKey, ...model.fallbackApiKeys, github.token],
         onStderr: (line) => store.appendLog(logFile, line),
       });
       return this.recordReleaseRun({
@@ -449,10 +457,10 @@ export class Runner {
       const aborted = controller.signal.aborted || (error instanceof IpcError && error.code === 'CORE_CANCELLED');
       return this.recordReleaseFailure({ id, error, aborted, settings, startedAt, startedMs, logFile, ...(requestedRepo === undefined ? {} : { scopeRepo: requestedRepo }) });
     } finally {
-      if (proxy !== undefined) {
-        const port = proxy.port;
-        await proxy.close().catch(() => undefined);
-        this.deps.store.appendLog(logFile, `[proxy] 已关闭 127.0.0.1:${port}`);
+      if (proxyPool !== undefined) {
+        const proxyCount = proxyPool.size;
+        await proxyPool.closeAll();
+        this.deps.store.appendLog(logFile, `[proxy] 已关闭全部回环代理（${proxyCount} 个）`);
       }
       this.active = undefined;
     }
@@ -478,41 +486,116 @@ export class Runner {
   }
 
   /**
-   * 解析模型钥匙并（代理模式下）起回环代理。
+   * 解析模型钥匙并为每个 proxy 目标起回环代理（按 provider/model 复用）。
    *
-   * 榜单运行与发版运行共用这一段：代理的一次性 token 语义（空 key 会让核心静默降级成
-   * 英文/离线假模型）只写一次，避免两份实现漂移。
+   * 榜单运行与发版运行共用这一段，保证代理的一次性 token 语义只写一次。
+   *
+   * 备选链（设计 §4.4）：
+   *   - 主模型与每个 fallback 项**各自**的 `mode` 独立：direct 项按各自 `apiKeyRef` 独立解析
+   *     （主 key 失效不影响备选）；proxy 项按 `hostProvider || provider` 起／复用一个回环代理。
+   *   - 仅 direct 但取不到密钥的备选项：密钥为空串——核心拿到空 key 会判定该项不可用并回落下一项，
+   *     这正是「该备选本身没配置好」的期望行为，不阻断其它项。
+   *   - 返回 `effectiveSettings`：其中 proxy 备选的 `baseURL` 已被替换成对应回环代理地址，
+   *     因为它只存在于运行时、绝不在 settings 里持久化。
+   *   - 返回 `fallbackApiKeys`：与 fallbacks 同序；proxy 项塞代理一次性 token（核心用空 key
+   *     会被当「没凭据」而跳过该项，所以必须给非空 token）。
+   *
+   * 生命周期：所有代理都进 `pool`，由调用方在 finally 里 `pool.closeAll()`。
    */
   private async openModelChannel(input: {
     settings: Settings;
     credentials: ReturnType<typeof credentialServices>;
     env: NodeJS.ProcessEnv;
     logFile: string;
-  }): Promise<{ apiKey: string; baseURLOverride?: string; proxy?: ProxyHandle }> {
+  }): Promise<{
+    apiKey: string;
+    baseURLOverride?: string;
+    /** 注入了 proxy 备选 baseURL 的设置副本（供 toCoreConfig 用）；无 proxy 备选时与入参同一对象。 */
+    effectiveSettings: Settings;
+    fallbackApiKeys: string[];
+    pool?: ProxyPool;
+  }> {
     const { settings, env, logFile } = input;
     const modelKey = await resolveModelKey(settings, input.credentials, env);
-    if (modelKey.mode === 'direct' && (modelKey.apiKey === undefined || modelKey.apiKey === '')) {
-      throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
+    const fallbackApiKeys = [...modelKey.fallbackApiKeys];
+    const fallbacks = settings.model.fallbacks ?? [];
+
+    // 有任一目标需要回环代理（主模型 proxy，或任一备选 proxy）时才建池/取宿主 ctx.llm。
+    const needsProxy = modelKey.mode === 'proxy' || fallbacks.some((entry) => entry.mode === 'proxy');
+
+    if (!needsProxy) {
+      // 全 direct：主 key 可用则直接走。主 key 缺失但备选链里有可用 key 时，不在这里判死——
+      // 把空主 key 交给核心，核心会判主模型不可用并回落备选（正是兜底场景）。
+      if (modelKey.apiKey === undefined || modelKey.apiKey === '') {
+        if (!fallbackApiKeys.some((key) => key !== '')) {
+          throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
+        }
+        this.deps.store.appendLog(logFile, '[model] 主模型密钥缺失，交由核心按备选链回落');
+      }
+      return { apiKey: modelKey.apiKey ?? '', effectiveSettings: settings, fallbackApiKeys };
     }
-    if (modelKey.mode !== 'proxy') return { apiKey: modelKey.apiKey ?? '' };
+
+    if (modelKey.mode === 'direct' && (modelKey.apiKey === undefined || modelKey.apiKey === '')) {
+      // 主模型 direct 但没有 key：若备选链里有可用项，仍可交由核心回落——但主模型本身无 key 时
+      // 核心会把它当「不可用」并尝试备选，这正是兜底场景；这里不因主 key 缺失而整体失败。
+      // 只有当「主模型 direct 无 key 且没有任何可用备选」时才真正无路可走，交给核心报错更准确。
+      if (!fallbacks.some((entry, index) => entry.mode === 'proxy' || fallbackApiKeys[index] !== '')) {
+        throw new IpcError('MODEL_KEY_MISSING', `没有解析到模型密钥（引用 ${settings.model.apiKeyRef}）`);
+      }
+      this.deps.store.appendLog(logFile, '[model] 主模型密钥缺失，交由核心按备选链回落');
+    }
 
     const llm = this.deps.get('llm') as { stream?: unknown } | undefined;
     if (llm === undefined || typeof llm.stream !== 'function') {
       throw new IpcError('MODEL_KEY_MISSING', '该模型需要回环代理，但宿主没有可用的 ctx.llm 服务');
     }
-    const proxy = await startProxy({
-      llm: llm as unknown as Parameters<typeof startProxy>[0]['llm'],
-      provider: settings.model.hostProvider !== '' ? settings.model.hostProvider : settings.model.provider,
-      model: settings.model.model,
-      temperature: settings.model.temperature,
-      maxTokens: settings.model.maxTokens,
+    const pool = new ProxyPool(llm as unknown as ConstructorParameters<typeof ProxyPool>[0]);
+    const routeOf = (entry: { mode: 'direct' | 'proxy'; hostProvider: string; provider: string; model: string; temperature: number; maxTokens: number }): ProxyTarget => ({
+      // 代理转发到宿主 provider 路由：优先 hostProvider（proxy 模式下填的就是路由 id），退回落 provider。
+      provider: entry.hostProvider !== '' ? entry.hostProvider : entry.provider,
+      model: entry.model,
+      temperature: entry.temperature,
+      maxTokens: entry.maxTokens,
       timeoutMs: 120_000,
     });
-    this.deps.store.appendLog(logFile, `[proxy] 回环代理已启动：127.0.0.1:${proxy.port}（一次性 token，运行结束即关闭）`);
-    // 非空 key 是必须的：核心把空 key 当「没有凭据」，allowDegraded 时直接降级成假模型，
-    // 永远不会打到代理。用代理的 token——它接受 `Authorization: Bearer <token>` 并带宿主
-    // 真实凭据转发。没有这一步，摘要会静默变成英文。
-    return { apiKey: proxy.token, baseURLOverride: proxy.url, proxy };
+
+    // 1) 主模型 proxy：起/复用代理，主 key = 代理 token，baseURL 用代理地址。
+    let apiKey = modelKey.apiKey ?? '';
+    let baseURLOverride: string | undefined;
+    if (modelKey.mode === 'proxy') {
+      const primary = await pool.acquire(routeOf(settings.model));
+      apiKey = primary.token;
+      baseURLOverride = primary.url;
+      this.deps.store.appendLog(
+        logFile,
+        `[proxy] 主模型回环代理已启动：127.0.0.1:${primary.port}（一次性 token，运行结束即关闭）`,
+      );
+    }
+
+    // 2) 备选链 proxy 项：逐个起/复用代理，注入 baseURL 与代理 token。
+    let effectiveSettings = settings;
+    for (let index = 0; index < fallbacks.length; index += 1) {
+      const entry = fallbacks[index];
+      if (entry === undefined || entry.mode !== 'proxy') continue;
+      const handle = await pool.acquire(routeOf(entry));
+      fallbackApiKeys[index] = handle.token;
+      if (effectiveSettings === settings) effectiveSettings = { ...settings, model: { ...settings.model, fallbacks: [...fallbacks] } };
+      const list = effectiveSettings.model.fallbacks;
+      const target = list[index];
+      if (target !== undefined) list[index] = { ...target, baseURL: handle.url };
+      this.deps.store.appendLog(
+        logFile,
+        `[proxy] 备选 #${index + 1}（${entry.hostProvider || entry.provider}）回环代理已启动：127.0.0.1:${handle.port}`,
+      );
+    }
+
+    return {
+      apiKey,
+      ...(baseURLOverride === undefined ? {} : { baseURLOverride }),
+      effectiveSettings,
+      fallbackApiKeys,
+      pool,
+    };
   }
 
   /** 把 `run --json` 的发版阶段结果投影成一条发版运行记录并落盘。 */
@@ -789,6 +872,7 @@ export class Runner {
       ...(summary.preview === undefined ? {} : { preview: summary.preview }),
       ...(summary.tokens === undefined ? {} : { tokens: summary.tokens }),
       ...(summary.releases === undefined ? {} : { releases: summary.releases }),
+      ...(summary.usedModel === undefined ? {} : { usedModel: summary.usedModel }),
       coreVersion: summary.coreVersion,
       model: { provider: settings.model.provider, model: settings.model.model },
       languages: settings.trending.languages,

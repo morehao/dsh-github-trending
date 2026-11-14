@@ -66,6 +66,28 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
   }
 }
 
+type ModelShape = SettingsShape['model'];
+type ModelFallbackShape = NonNullable<ModelShape['fallbacks']>[number];
+
+/** 按 draft 主模型派生一条空白备选模型：provider/model 刻意留空，保存时会被归一剔除。 */
+function blankFallback(model: ModelShape): ModelFallbackShape {
+  return {
+    provider: '',
+    mode: model.mode,
+    hostProvider: model.hostProvider,
+    baseURL: '',
+    model: '',
+    apiKeyRef: '',
+    temperature: model.temperature,
+    maxTokens: model.maxTokens,
+  };
+}
+
+/** 备选模型链兜底：旧 settings.json 可能没有 fallbacks 字段，统一读成数组。 */
+function fallbacksOf(settings: SettingsShape): ModelFallbackShape[] {
+  return settings.model.fallbacks ?? [];
+}
+
 /** 操作回执：成功只是「刚才那步成功了」，到时自动收起；失败要留到用户下一次操作。 */
 type Notice = { kind: 'ok' | 'err'; text: string };
 
@@ -225,8 +247,27 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     }
   };
 
-  const save = async (section: SectionId): Promise<void> => {
-    if (draft === null) return;
+  // 备选模型链的增删改与排序：顺序即尝试顺序，按钮式上移/下移（简单可靠）。
+  // 空项由 Host 的 normalizeFallbacks 在保存时剔除；这里只管编辑体验。
+  const addFallback = (): void => update((next) => {
+    next.model.fallbacks = [...fallbacksOf(next), blankFallback(next.model)];
+  });
+  const removeFallback = (index: number): void => update((next) => {
+    next.model.fallbacks = fallbacksOf(next).filter((_entry, i) => i !== index);
+  });
+  const moveFallback = (index: number, delta: -1 | 1): void => update((next) => {
+    const items = [...fallbacksOf(next)];
+    const target = index + delta;
+    if (target < 0 || target >= items.length) return;
+    const [moved] = items.splice(index, 1);
+    items.splice(target, 0, moved);
+    next.model.fallbacks = items;
+  });
+  const patchFallback = (index: number, patch: Partial<ModelFallbackShape>): void => update((next) => {
+    next.model.fallbacks = fallbacksOf(next).map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
+  });
+
+  const save = async (section: SectionId): Promise<void> => {    if (draft === null) return;
     setSavingSection(section);
     setProblems([]);
     try {
@@ -590,6 +631,54 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       { label: t('model.params'), help: t('model.allowDegraded.help') },
       h(Toggle, { checked: draft.model.allowDegraded, label: t('model.allowDegraded'), onChange: (value: boolean) => update((next) => { next.model.allowDegraded = value; }) }),
     ),
+    h('h4', { className: 'dshgt-subhead' }, t('model.fallbacks.title')),
+    h('p', { className: 'dshgt-desc' }, t('model.fallbacks.hint')),
+    ...(() => {
+      const items = fallbacksOf(draft);
+      if (items.length === 0) {
+        return [
+          h(
+            Row,
+            { label: '' },
+            h('span', { className: 'dshgt-hint' }, t('model.fallbacks.empty')),
+            h(Btn, { small: true, onClick: addFallback }, `+ ${t('model.fallbacks.add')}`),
+          ),
+        ];
+      }
+      return items.map((entry, index) =>
+        h(
+          'div',
+          { key: index, className: 'dshgt-row dshgt-fallback-row', style: { alignItems: 'flex-start', borderTop: '1px solid var(--gt-border)', paddingTop: 8, marginTop: 4 } },
+          h('label', { className: 'dshgt-label' }, h('span', { className: 'dshgt-label-text' }, t('model.fallbacks.index', { index: index + 1 }))),
+          h(
+            'div',
+            { className: 'dshgt-row', style: { flex: 1, minWidth: 0, gap: 8 } },
+            h('span', { className: 'dshgt-hint' }, t('model.provider')),
+            h(Select, {
+              value: entry.provider,
+              options: [{ value: '', label: t('model.provider') }, ...providers.map((provider) => ({ value: provider, label: provider }))],
+              onChange: (value: string) => patchFallback(index, { provider: value }),
+            }),
+            h(Input, { mono: true, width: 240, value: entry.model, placeholder: t('model.model.placeholder'), onInput: (value: string) => patchFallback(index, { model: value }) }),
+            h(Input, { mono: true, width: 300, value: entry.baseURL, placeholder: t('model.baseURL.placeholder'), onInput: (value: string) => patchFallback(index, { baseURL: value }) }),
+            h('span', { className: 'dshgt-hint' }, t('model.temperature')),
+            h(Input, { mono: true, width: 64, value: String(entry.temperature), onInput: (value: string) => patchFallback(index, { temperature: Number(value) || 0 }) }),
+            h('span', { className: 'dshgt-hint' }, t('model.maxTokens')),
+            h(Input, { mono: true, width: 84, value: String(entry.maxTokens), onInput: (value: string) => patchFallback(index, { maxTokens: Math.round(Number(value) || 0) }) }),
+          ),
+          h(
+            'div',
+            { className: 'dshgt-row', style: { gap: 6 } },
+            h(Btn, { small: true, variant: 'ghost', disabled: index === 0, title: t('model.fallbacks.moveUp'), onClick: () => moveFallback(index, -1) }, '↑'),
+            h(Btn, { small: true, variant: 'ghost', disabled: index === items.length - 1, title: t('model.fallbacks.moveDown'), onClick: () => moveFallback(index, 1) }, '↓'),
+            h(Btn, { small: true, variant: 'ghost', title: t('model.fallbacks.remove'), onClick: () => removeFallback(index) }, t('model.fallbacks.remove')),
+          ),
+        ),
+      );
+    })(),
+    fallbacksOf(draft).length === 0
+      ? null
+      : h('div', { className: 'dshgt-row' }, h(Btn, { small: true, onClick: addFallback }, `+ ${t('model.fallbacks.add')}`)),
     preflight === null
       ? null
       : h(

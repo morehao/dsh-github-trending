@@ -260,6 +260,9 @@ export function RunsView(props: RunsProps): any {
               detailItem(t, 'run.usage.hash', h('span', { className: 'dshgt-mono' }, shortHash(record.contentHash))),
               detailItem(t, 'run.usage.branch', record.branch === undefined ? '—' : h('span', { className: 'dshgt-mono' }, record.branch)),
               detailItem(t, 'runs.detail.coreModel', `${record.coreVersion || '—'} · ${record.model?.model ?? '—'}`),
+              ...(record.usedModel === undefined
+                ? []
+                : [detailItem(t, 'runs.detail.usedModel', h('span', { className: 'dshgt-mono' }, record.usedModel))]),
               detailItem(t, 'runs.detail.date', record.date ?? '—'),
               detailItem(t, 'runs.detail.period', kindChip(t(`period.${record.period ?? 'daily'}`), record.period ?? 'daily')),
               detailItem(

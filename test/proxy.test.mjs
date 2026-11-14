@@ -87,3 +87,44 @@ test('foldMessages 把多轮并进单个 user，system 单独抽出', () => {
   assert.equal(folded.system, 'sys');
   assert.equal(folded.user, 'a\n\nb');
 });
+
+test('ProxyPool：不同 provider/model 各起代理，同目标复用；closeAll 全部释放', async () => {
+  const llm = stubLlm();
+  const pool = new proxy.ProxyPool(llm);
+  try {
+    const a = await pool.acquire({ provider: 'magpie', model: 'm1' });
+    // 同 provider+model → 复用同一个实例（同端口同 token）
+    const a2 = await pool.acquire({ provider: 'magpie', model: 'm1' });
+    assert.equal(a, a2);
+    assert.equal(a.port, a2.port);
+    // 同 provider 不同 model → 另起一个（不同端口）
+    const b = await pool.acquire({ provider: 'magpie', model: 'm2' });
+    assert.notEqual(a.port, b.port);
+    // 不同 provider 同 model → 也另起
+    const c = await pool.acquire({ provider: 'deepseek', model: 'm1' });
+    assert.notEqual(a.port, c.port);
+    assert.equal(pool.size, 3);
+    // 每个代理各自校验自己的 token，路由到正确的 provider/model
+    for (const [handle, provider, model] of [[a, 'magpie', 'm1'], [b, 'magpie', 'm2'], [c, 'deepseek', 'm1']]) {
+      const res = await fetch(`${handle.url}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${handle.token}` },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+      });
+      assert.equal(res.status, 200);
+    }
+    const routed = llm.calls.map((call) => `${call.provider}/${call.model}`);
+    assert.deepEqual(routed, ['magpie/m1', 'magpie/m2', 'deepseek/m1']);
+    // 用 A 的 token 打 B 的端口 → 401（一次性 token 不串味）
+    const crossed = await fetch(`${b.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${a.token}` },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(crossed.status, 401);
+  } finally {
+    await pool.closeAll();
+  }
+  // closeAll 后所有端口都释放
+  assert.equal(pool.size, 0);
+});

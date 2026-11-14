@@ -110,3 +110,60 @@ test('readDefaultSelection 读取宿主默认；applyDefaultSelection 无候选�
   assert.equal(next.model.model, 'yygu/deepseek-flash');
   assert.equal(next.model.baseURL, '');
 });
+
+test('备选链每项独立解析：主 ref 解析失败、备 ref 成功 → fallbackApiKeys 仍按序拿到备选密钥', async () => {
+  // 主 ref（MAIN）解析会抛错（模拟凭据服务故障），备选 UPDATE_OK 与 ENV_OK 仍要各自解析到。
+  const credentials = {
+    describe: async () => ({ configured: true, writable: true }),
+    resolve: async (ref) => {
+      if (ref === 'MAIN') throw new Error('credentials backend down');
+      if (ref === 'FALLBACK_A') return { value: 'sk-fallback-a', source: 'store' };
+      if (ref === 'FALLBACK_B') return { value: 'sk-fallback-b', source: 'store' };
+      return undefined;
+    },
+  };
+  const settings = config.normalizeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'main',
+      apiKeyRef: 'MAIN',
+      baseURL: 'https://api.deepseek.com/v1',
+      fallbacks: [
+        { provider: 'deepseek', mode: 'direct', model: 'fb-a', apiKeyRef: 'FALLBACK_A', baseURL: 'https://api.deepseek.com/v1' },
+        // 第二项走代理：不需要密钥，占位空串（保持索引对齐）
+        { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'magpie', model: 'fb-proxy' },
+        { provider: 'deepseek', mode: 'direct', model: 'fb-b', apiKeyRef: 'ENV_ONLY', baseURL: 'https://api.deepseek.com/v1' },
+      ],
+    },
+    repo: { path: '/tmp/x' },
+  });
+
+  const resolved = await quickfill.resolveModelKey(settings, credentials, { ENV_ONLY: 'sk-from-env' });
+  // 主 key 解析失败不抛、不连累备选：主 apiKey 缺省，但备选密钥全部就位且顺序与 fallbacks 一致。
+  assert.equal(resolved.mode, 'direct');
+  assert.equal(resolved.apiKey, undefined);
+  assert.deepEqual(resolved.fallbackApiKeys, ['sk-fallback-a', '', 'sk-from-env']);
+});
+
+test('resolveFallbackKeys：单项 resolve 抛错只影响该项，后续项照常解析', async () => {
+  const credentials = {
+    resolve: async (ref) => {
+      if (ref === 'BOOM') throw new Error('boom');
+      return { value: 'sk-ok', source: 'store' };
+    },
+  };
+  const settings = config.normalizeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'main',
+      apiKeyRef: 'M',
+      fallbacks: [
+        { provider: 'deepseek', model: 'a', apiKeyRef: 'BOOM', baseURL: 'https://api.deepseek.com/v1' },
+        { provider: 'deepseek', model: 'b', apiKeyRef: 'OK', baseURL: 'https://api.deepseek.com/v1' },
+      ],
+    },
+    repo: { path: '/tmp/x' },
+  });
+  const { keys } = await quickfill.resolveFallbackKeys(settings, credentials, {});
+  assert.deepEqual(keys, ['', 'sk-ok']);
+});

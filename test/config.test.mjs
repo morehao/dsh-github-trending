@@ -438,3 +438,128 @@ test('toCoreConfig 把解析后的 outputLanguage 写进 language.outputLanguage
   assert.equal(config.toCoreConfig(settings, 'k', undefined, undefined, 0, 'en').language.outputLanguage, 'en');
   assert.equal(config.toCoreConfig(settings, 'k', undefined, undefined, 0, 'zh').language.outputLanguage, 'zh');
 });
+
+test('fallbacks：默认空链，normalizeSettings 读数组并剔空项', () => {
+  // 默认无 fallbacks
+  assert.deepEqual(config.normalizeSettings({}).model.fallbacks, []);
+  assert.deepEqual(config.DEFAULT_SETTINGS.model.fallbacks, []);
+
+  // 读数组、逐项收敛；provider/model 皆空的项被丢弃
+  const settings = config.normalizeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      fallbacks: [
+        { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'openai', baseURL: 'https://a.example/v1', model: 'gpt-4o-mini', apiKeyRef: 'FB_KEY', temperature: 0.5, maxTokens: 1024 },
+        { provider: '', model: '' }, // 空项，丢弃
+        { provider: '  ', model: '   ' }, // 仅空白，丢弃
+        { provider: 'deepseek', model: 'deepseek-reasoner' }, // 缺省字段回落默认
+      ],
+    },
+  });
+  assert.equal(settings.model.fallbacks.length, 2);
+  const [first, second] = settings.model.fallbacks;
+  assert.deepEqual(first, {
+    provider: 'openai-compatible',
+    mode: 'proxy',
+    hostProvider: 'openai',
+    baseURL: 'https://a.example/v1',
+    model: 'gpt-4o-mini',
+    apiKeyRef: 'FB_KEY',
+    temperature: 0.5,
+    maxTokens: 1024,
+  });
+  // 缺省字段回落默认 mode=direct、温度/Token 用默认值
+  assert.equal(second.provider, 'deepseek');
+  assert.equal(second.model, 'deepseek-reasoner');
+  assert.equal(second.mode, 'direct');
+  assert.equal(second.baseURL, '');
+  assert.equal(second.apiKeyRef, '');
+  assert.equal(second.temperature, config.DEFAULT_SETTINGS.model.temperature);
+  assert.equal(second.maxTokens, config.DEFAULT_SETTINGS.model.maxTokens);
+
+  // 非数组 → 空链
+  assert.deepEqual(config.normalizeSettings({ model: { fallbacks: 'nope' } }).model.fallbacks, []);
+});
+
+test('fallbacks：toCoreConfig 非空链映射进 model.fallbacks，字段名对齐核心', () => {
+  const settings = config.normalizeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      fallbacks: [
+        { provider: 'openai-compatible', baseURL: 'https://a.example/v1', model: 'gpt-4o-mini', apiKeyRef: 'FB1', temperature: 0.3, maxTokens: 800 },
+        { provider: 'deepseek', model: 'deepseek-reasoner', apiKeyRef: 'FB2' }, // baseURL 留空 → 用 provider 默认端点
+      ],
+    },
+    repo: { path: '/tmp/x' },
+  });
+  const core = config.toCoreConfig(settings, 'MAIN_KEY', undefined, undefined, 0, undefined, ['KEY_ONE', 'KEY_TWO']);
+  assert.ok(Array.isArray(core.model.fallbacks));
+  assert.equal(core.model.fallbacks.length, 2);
+  // 插件 model→核心 name；apiKeyRef→核心 apiKey（由 fallbackApiKeys 注入）；yaml tag 严格为 provider/name/baseURL/apiKey/temperature/maxTokens
+  assert.deepEqual(core.model.fallbacks[0], {
+    provider: 'openai-compatible',
+    name: 'gpt-4o-mini',
+    baseURL: 'https://a.example/v1',
+    apiKey: 'KEY_ONE',
+    temperature: 0.3,
+    maxTokens: 800,
+  });
+  assert.equal(core.model.fallbacks[1].name, 'deepseek-reasoner');
+  // 空 baseURL 回落 provider 默认端点
+  assert.equal(core.model.fallbacks[1].baseURL, 'https://api.deepseek.com/v1');
+  assert.equal(core.model.fallbacks[1].apiKey, 'KEY_TWO');
+  // 未传 fallbackApiKeys 时 apiKey 为空串（绝不编造密钥）
+  const noKeys = config.toCoreConfig(settings, 'MAIN_KEY');
+  assert.equal(noKeys.model.fallbacks[0].apiKey, '');
+});
+
+test('fallbacks：空链时 toCoreConfig 不输出 fallbacks 键（兼容旧核心二进制）', () => {
+  const settings = config.normalizeSettings({ model: { provider: 'deepseek', model: 'deepseek-chat' }, repo: { path: '/tmp/x' } });
+  const core = config.toCoreConfig(settings, 'k');
+  assert.equal('fallbacks' in core.model, false);
+  // 序列化成 YAML 也不出现 fallbacks 键
+  const yaml = config.toYaml(core);
+  assert.equal(yaml.includes('fallbacks'), false);
+
+  // 全部是空项（会被剔掉）→ 仍视为空链
+  const blanked = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: '', model: '' }] } });
+  assert.equal('fallbacks' in config.toCoreConfig(blanked, 'k').model, false);
+});
+
+test('fallbacks：非法项被 validateSettings 报 CONFIG_INVALID（同构校验）', () => {
+  const providers = ['deepseek', 'openai-compatible'];
+  // 缺 model
+  const noModel = config.validateSettings(
+    config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: 'deepseek', model: '' }] }, repo: { path: '/tmp/x' } }),
+    providers,
+  );
+  assert.ok(noModel.some((p) => p.field === 'model.fallbacks.0.model' && p.code === 'CONFIG_INVALID'));
+
+  // provider 不在支持集 → MODEL_PROVIDER_UNSUPPORTED，带下标
+  const badProvider = config.validateSettings(
+    config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: 'anthropic', model: 'x', baseURL: 'https://a.example/v1' }] }, repo: { path: '/tmp/x' } }),
+    providers,
+  );
+  const providerProblem = badProvider.find((p) => p.field === 'model.fallbacks.0.provider');
+  assert.ok(providerProblem);
+  assert.equal(providerProblem.code, 'MODEL_PROVIDER_UNSUPPORTED');
+
+  // direct 模式下 openai-compatible 无默认端点、又没填 baseURL → 需要显式 baseURL
+  const noBase = config.validateSettings(
+    config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: 'openai-compatible', model: 'x' }] }, repo: { path: '/tmp/x' } }),
+    providers,
+  );
+  assert.ok(noBase.some((p) => p.field === 'model.fallbacks.0.baseURL' && p.code === 'CONFIG_INVALID'));
+
+  // 合法项不报错
+  const ok = config.validateSettings(
+    config.normalizeSettings({
+      model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: 'deepseek', model: 'deepseek-reasoner' }, { provider: 'openai-compatible', mode: 'proxy', model: 'gpt-4o', baseURL: 'https://a.example/v1' }] },
+      repo: { path: '/tmp/x' },
+    }),
+    providers,
+  );
+  assert.equal(ok.some((p) => p.field.startsWith('model.fallbacks.')), false);
+});

@@ -220,6 +220,82 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   return handle;
 }
 
+/**
+ * 一次运行内的回环代理池：主模型与备选链可能走不同 provider 路由 / 不同模型。
+ *
+ * 语义（设计 §4.4）：
+ *   - **按目标复用**：目标 = `provider + model`。完全相同的目标（同路由同模型）复用同一个
+ *     代理实例（同一个一次性 token / 端口），不重复起服务；任一维度不同则各起一个。
+ *   - **生命周期绑单次运行**：`closeAll()` 关闭池内**全部**代理；由 runner 在 finally 调用。
+ *   - **一次性 token 语义不变**：每个实例仍是随机 token、随运行结束失效。
+ *   - 只绑 `127.0.0.1`（见 `startProxy`）。
+ *
+ * 密钥红线：token 只存在内存里的 `ProxyHandle`，不落盘、不进 argv；日志里只出现端口。
+ */
+export interface ProxyTarget {
+  provider: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+}
+
+export class ProxyPool {
+  private readonly llm: LlmLike;
+  private readonly byKey = new Map<string, Promise<ProxyHandle>>();
+  private readonly handles: ProxyHandle[] = [];
+
+  constructor(llm: LlmLike) {
+    this.llm = llm;
+  }
+
+  /** 复用的键：provider 与 model 都相同才视为「同一路由」，可直接共享一个代理。 */
+  private static keyOf(target: ProxyTarget): string {
+    return `${target.provider}\u0000${target.model}`;
+  }
+
+  /**
+   * 取（或首次启动）某个目标的代理。并发调用同一目标只会 `startProxy` 一次
+   * （缓存的是 Promise）。启动失败会从缓存里移除，允许后续重试。
+   */
+  async acquire(target: ProxyTarget): Promise<ProxyHandle> {
+    const key = ProxyPool.keyOf(target);
+    const existing = this.byKey.get(key);
+    if (existing !== undefined) return existing;
+    const started = startProxy({
+      llm: this.llm,
+      provider: target.provider,
+      model: target.model,
+      ...(target.temperature === undefined ? {} : { temperature: target.temperature }),
+      ...(target.maxTokens === undefined ? {} : { maxTokens: target.maxTokens }),
+      ...(target.timeoutMs === undefined ? {} : { timeoutMs: target.timeoutMs }),
+    }).then(
+      (handle) => {
+        this.handles.push(handle);
+        return handle;
+      },
+      (error: unknown) => {
+        // 启动失败不留残键，让上层能感知失败后按需重试。
+        this.byKey.delete(key);
+        throw error;
+      },
+    );
+    this.byKey.set(key, started);
+    return started;
+  }
+
+  get size(): number {
+    return this.handles.length;
+  }
+
+  /** 关闭池内全部代理；单个关闭失败不影响其余（每个都已吞掉异常）。幂等。 */
+  async closeAll(): Promise<void> {
+    await Promise.all(this.handles.map((handle) => handle.close().catch(() => undefined)));
+    this.handles.length = 0;
+    this.byKey.clear();
+  }
+}
+
 function authorized(request: http.IncomingMessage, token: string): boolean {
   const header = request.headers.authorization;
   if (typeof header !== 'string') return false;

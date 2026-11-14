@@ -716,3 +716,69 @@ test('outputLanguage：显式 zh 覆盖宿主 en', async () => {
   const summary = await runner.run({ trigger: 'tool' });
   assert.ok(summary.warnings.includes('outputLanguage=zh'), `warnings=${JSON.stringify(summary.warnings)}`);
 });
+
+test('备选链：主 ref 解析失败、备 ref 成功 → 运行不中断，备选密钥经通道送达核心', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-fbkey-'));
+  const store = new stateModule.Store({ dir });
+  const repo = makeRepo();
+  store.writeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'main',
+      apiKeyRef: 'PRIMARY_MISSING',
+      baseURL: 'https://api.deepseek.com/v1',
+      fallbacks: [
+        { provider: 'deepseek', mode: 'direct', model: 'fb', apiKeyRef: 'FALLBACK_KEY', baseURL: 'https://api.deepseek.com/v1' },
+      ],
+    },
+    repo: { path: repo },
+  });
+  const env = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    TRENDING_DIGEST_CORE: fakeCore({}),
+    // 主 ref 刻意不给：解析结果为空；备选 ref 给真值。
+    FALLBACK_KEY: 'sk-fallback-key',
+  };
+  const runner = new runnerModule.Runner({ store, get: () => undefined, env });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.proxy, false);
+  // 假核心只要配置里出现任一非空 apiKey 就返回 HASH_WITH_KEY——证明备选密钥确实落到了配置通道。
+  assert.equal(summary.contentHash, HASH_WITH_KEY);
+});
+
+test('proxy/direct 混用：主模型 proxy + 备选 proxy 各起一个代理，运行结束全部关闭', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dshgt-mixed-'));
+  const store = new stateModule.Store({ dir });
+  const repo = makeRepo();
+  store.writeSettings({
+    model: {
+      provider: 'openai-compatible',
+      mode: 'proxy',
+      hostProvider: 'magpie',
+      model: 'primary-model',
+      baseURL: '',
+      apiKeyRef: 'UNUSED',
+      fallbacks: [
+        // 第二个代理目标：不同路由、不同模型 → 必须另起一个代理
+        { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'corp-sso', model: 'backup-model' },
+        // direct 项不该起代理（这里没有 key，核心会回落，但代理数不受影响）
+        { provider: 'deepseek', mode: 'direct', model: 'fb-direct', apiKeyRef: 'FB_DIRECT_KEY', baseURL: 'https://api.deepseek.com/v1' },
+      ],
+    },
+    repo: { path: repo },
+  });
+  const llm = { stream: async function* () {} };
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CORE: fakeCore({}) };
+  const runner = new runnerModule.Runner({ store, get: (name) => (name === 'llm' ? llm : undefined), env });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.ok, true);
+  assert.equal(summary.proxy, true);
+  const log = existsSync(summary.logFile) ? readFileSync(summary.logFile, 'utf8') : '';
+  // 两个 proxy 目标各起一次（主模型 + 备选 corp-sso），direct 备选不起代理
+  assert.match(log, /主模型回环代理已启动/);
+  assert.match(log, /备选 #1（corp-sso）回环代理已启动/);
+  // finally 里关闭全部回环代理
+  assert.match(log, /已关闭全部回环代理（2 个）/);
+});

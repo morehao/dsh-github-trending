@@ -61,6 +61,31 @@ export interface ModelSettings {
   temperature: number;
   maxTokens: number;
   allowDegraded: boolean;
+  /**
+   * 备选模型链（核心 `ModelConfig.fallbacks`）。按序尝试；空数组 = 不启用（默认）。
+   * 每一项是「完整且独立」的模型配置（provider/baseURL/apiKeyRef 各自解析），
+   * 与主模型同构；插件侧额外带 `mode`/`hostProvider`（核心不认，只用于凭据与代理路由）。
+   */
+  fallbacks: ModelEntryView[];
+}
+
+/**
+ * 备选模型链上的一环（插件侧视图）。字段与主模型 `ModelSettings` 对齐，
+ * 但**不含** `allowDegraded`：降级只在整条链全败后由主模型的 allowDegraded 决定
+ * （设计 §8 Q4），链上单项不单独持有降级开关。
+ * 映射到核心 YAML 时：`model`→核心 `name`、`apiKeyRef`→核心 `apiKey`（密钥运行时注入）。
+ */
+export interface ModelEntryView {
+  provider: Provider;
+  /** `direct` / `proxy`，语义同主模型；`proxy` 时由插件为该项单独注入回环代理地址。 */
+  mode: 'direct' | 'proxy';
+  /** `mode=proxy` 时该项转发到哪个宿主 provider 路由（核心不认）。 */
+  hostProvider: string;
+  baseURL: string;
+  model: string;
+  apiKeyRef: string;
+  temperature: number;
+  maxTokens: number;
 }
 
 export interface RepoSettings {
@@ -251,6 +276,7 @@ export const DEFAULT_SETTINGS: Settings = {
     temperature: 0.2,
     maxTokens: 2048,
     allowDegraded: true,
+    fallbacks: [],
   },
   repo: {
     path: '',
@@ -418,6 +444,35 @@ function periodList(_value: unknown, _fallback: Period[]): Period[] {
 }
 
 /**
+ * 备选模型链归一：读数组、逐项收敛成 `ModelEntryView`。
+ * 空项判定：`provider` 与 `model` 都为空（trim 后）视为无效项，直接丢弃——
+ * 设置页里刚点「添加」还没填的空白行不会被当成一条会跑的真实备选。
+ * 只做形态收敛，不做合法性判断（provider 支持集、proxy 需 baseURL 等留给 validateSettings）。
+ */
+function normalizeFallbacks(value: unknown): ModelEntryView[] {
+  if (!Array.isArray(value)) return [];
+  const items: ModelEntryView[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const raw = entry as Record<string, unknown>;
+    const provider = str(raw.provider, '').trim();
+    const model = str(raw.model, '').trim();
+    if (provider === '' && model === '') continue; // 空项丢弃
+    items.push({
+      provider,
+      mode: str(raw.mode, 'direct') === 'proxy' ? 'proxy' : 'direct',
+      hostProvider: str(raw.hostProvider, '').trim(),
+      baseURL: str(raw.baseURL, '').trim(),
+      model,
+      apiKeyRef: str(raw.apiKeyRef, '').trim(),
+      temperature: num(raw.temperature, DEFAULT_SETTINGS.model.temperature),
+      maxTokens: num(raw.maxTokens, DEFAULT_SETTINGS.model.maxTokens),
+    });
+  }
+  return items;
+}
+
+/**
  * 把任意来源的对象（磁盘上的旧版本、HTTP 请求体、CLI 导入）收敛成完整设置。
  * 未知字段一律丢弃：settings.json 只有以下形状，避免旧版本字段悄悄生效。
  */
@@ -453,6 +508,7 @@ export function normalizeSettings(input: unknown): Settings {
       temperature: num(model.temperature, DEFAULT_SETTINGS.model.temperature),
       maxTokens: num(model.maxTokens, DEFAULT_SETTINGS.model.maxTokens),
       allowDegraded: bool(model.allowDegraded, DEFAULT_SETTINGS.model.allowDegraded),
+      fallbacks: normalizeFallbacks(model.fallbacks),
     },
     repo: {
       path: str(repo.path, DEFAULT_SETTINGS.repo.path).trim(),
@@ -623,6 +679,43 @@ export function validateSettings(settings: Settings, providers: readonly string[
     problems.push({ field: 'model.maxTokens', code: 'CONFIG_INVALID', message: 'maxTokens 必须是正整数' });
   }
 
+  // 备选模型链：每项与主模型同构校验（provider 支持集、model 非空、proxy 需 baseURL、
+  // 温度/Token 范围）。字段路径带下标（`model.fallbacks.<i>.*`），方便界面定位到具体一行。
+  (model.fallbacks ?? []).forEach((entry, index) => {
+    const at = `model.fallbacks.${index}`;
+    if (entry.provider.trim() === '') {
+      problems.push({ field: `${at}.provider`, code: 'CONFIG_INVALID', message: '缺少 provider' });
+    } else if (!providers.includes(entry.provider)) {
+      problems.push({
+        field: `${at}.provider`,
+        code: 'MODEL_PROVIDER_UNSUPPORTED',
+        message: `核心不支持 provider「${entry.provider}」；可用：${providers.join(' / ')}`,
+      });
+    }
+    if (entry.model.trim() === '') {
+      problems.push({ field: `${at}.model`, code: 'CONFIG_INVALID', message: '必须填模型 ID' });
+    }
+    // 与主模型一致：proxy 模式下端点由插件运行时注入回环代理，baseURL 允许留空。
+    if (entry.mode === 'proxy') {
+      if (entry.baseURL !== '' && !/^https?:\/\//.test(entry.baseURL)) {
+        problems.push({ field: `${at}.baseURL`, code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+      }
+    } else {
+      const baseURL = entry.baseURL || PROVIDER_BASE_URLS[entry.provider] || '';
+      if (baseURL === '') {
+        problems.push({ field: `${at}.baseURL`, code: 'CONFIG_INVALID', message: '该 provider 需要显式 baseURL' });
+      } else if (!/^https?:\/\//.test(baseURL)) {
+        problems.push({ field: `${at}.baseURL`, code: 'CONFIG_INVALID', message: 'baseURL 必须是 http(s) 地址' });
+      }
+    }
+    if (entry.temperature < 0 || entry.temperature > 2) {
+      problems.push({ field: `${at}.temperature`, code: 'CONFIG_INVALID', message: 'temperature 必须在 0–2 之间' });
+    }
+    if (!Number.isInteger(entry.maxTokens) || entry.maxTokens <= 0) {
+      problems.push({ field: `${at}.maxTokens`, code: 'CONFIG_INVALID', message: 'maxTokens 必须是正整数' });
+    }
+  });
+
   if (repo.path.trim() === '') {
     problems.push({ field: 'repo.path', code: 'CONFIG_INVALID', message: '必须选择归档仓库目录' });
   } else if (!path.isAbsolute(repo.path)) {
@@ -713,6 +806,21 @@ export function effectiveBaseURL(model: ModelSettings): string {
   return model.baseURL !== '' ? model.baseURL : PROVIDER_BASE_URLS[model.provider] ?? '';
 }
 
+/**
+ * 核心 `ModelEntry` 的对象形状（备选模型链一环，随后序列化成 YAML）。
+ * yaml tag 与核心 `internal/config/config.go` 的 `ModelEntry` 严格对齐：
+ * `provider / name / baseURL / apiKey / temperature / maxTokens`。
+ * 插件侧 `model`→核心 `name`、`apiKeyRef`→核心 `apiKey`（密钥运行时注入）。
+ */
+export interface CoreModelEntry {
+  provider: string;
+  name: string;
+  baseURL: string;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
+}
+
 /** 核心 `config.Config` 的对象形状（随后序列化成 YAML）。 */
 export interface CoreConfig {
   model: {
@@ -723,6 +831,8 @@ export interface CoreConfig {
     temperature: number;
     maxTokens: number;
     allowDegraded: boolean;
+    /** 备选模型链（核心 `ModelConfig.Fallbacks`）；空链**不写**该键，兼容旧核心二进制。 */
+    fallbacks?: CoreModelEntry[];
   };
   repo: {
     path: string;
@@ -793,6 +903,7 @@ export function toCoreConfig(
   period?: Period,
   repoCount = 0,
   resolvedOutputLanguage?: string,
+  fallbackApiKeys: readonly string[] = [],
 ): CoreConfig {
   const releases = settings.releases;
   const repoTotal = Number.isFinite(repoCount) && repoCount > 0 ? Math.floor(repoCount) : 0;
@@ -802,6 +913,18 @@ export function toCoreConfig(
   // resolvedOutputLanguage 由 runner 每次运行解析（显式 > 宿主 > zh）；缺省回落到空串，
   // 核心把空串当 zh（与旧核心「无该字段 → 默认 zh」的行为一致）。
   const outputLanguage = resolvedOutputLanguage ?? '';
+  // 备选模型链：仅当至少有一项时才写 `model.fallbacks`（空链不写该键 → 兼容旧核心二进制，
+  // 旧核心的 yaml.Unmarshal 非严格、忽略未知字段，但空数组也没必要下发）。
+  // 每项的 `apiKey` 只能来自宿主凭据，绝不来自 settings.json：由调用方（runner）按序
+  // 解析各自 `apiKeyRef` 后经 `fallbackApiKeys` 传入；缺省为空串（与主模型 apiKey 走参数一致）。
+  const fallbacks: CoreModelEntry[] = (settings.model.fallbacks ?? []).map((entry, index) => ({
+    provider: entry.provider,
+    name: entry.model,
+    baseURL: entry.baseURL !== '' ? entry.baseURL : PROVIDER_BASE_URLS[entry.provider] ?? '',
+    apiKey: fallbackApiKeys[index] ?? '',
+    temperature: entry.temperature,
+    maxTokens: entry.maxTokens,
+  }));
   const config: CoreConfig = {
     model: {
       provider: settings.model.provider,
@@ -811,6 +934,7 @@ export function toCoreConfig(
       temperature: settings.model.temperature,
       maxTokens: settings.model.maxTokens,
       allowDegraded: settings.model.allowDegraded,
+      ...(fallbacks.length > 0 ? { fallbacks } : {}),
     },
     repo: {
       path: settings.repo.path,

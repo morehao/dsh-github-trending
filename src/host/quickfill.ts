@@ -224,18 +224,77 @@ export function applyCandidate(settings: Settings, candidate: LlmProviderCandida
   return { ...settings, model };
 }
 
-/** 运行前解析模型密钥：`direct` 走凭据，`proxy` 不需要密钥。 */
+/**
+ * 备选链每项解析出的密钥（与 `settings.model.fallbacks` 严格同序、等长）。
+ * `proxy` 项不需要密钥（回环代理自己持有真实凭据），固定给空串占位，
+ * 保证 `fallbackApiKeys[i]` 永远对应 `fallbacks[i]`。
+ */
+export interface FallbackKeyResolution {
+  /** 与 fallbacks 等长的密钥数组；无法解析的项为 ''。 */
+  keys: string[];
+  /** 成功取到密钥的来源（仅 direct 且解析成功者），用于运行记录/排障，不含明文。 */
+  sources: Array<string | undefined>;
+}
+
+/**
+ * 为备选链每个 direct 项**独立**解析 `apiKeyRef`。
+ *
+ * 关键约束（设计与 issue 明确要求）：主 key 失效**不连累**备选。
+ * 因此这里逐个 `try/catch`，任何一项解析失败（抛错或取不到值）都只把该项记为 ''，
+ * 继续解析后面的项，绝不因一项失败短路整条链。
+ * `resolveRef` 自身已把服务异常降级成 `{}`，这里再加一层 try 只防「服务实现意外同步抛」。
+ */
+export async function resolveFallbackKeys(
+  settings: Settings,
+  credentials: CredentialServices | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<FallbackKeyResolution> {
+  const fallbacks = settings.model.fallbacks ?? [];
+  const keys: string[] = [];
+  const sources: Array<string | undefined> = [];
+  for (const entry of fallbacks) {
+    if (entry.mode === 'proxy') {
+      // 代理项不持有明文密钥：运行时由回环代理的 token 顶替（runner 负责塞进 fallbackApiKeys）。
+      keys.push('');
+      sources.push(undefined);
+      continue;
+    }
+    try {
+      const resolved = await resolveRef(credentials, entry.apiKeyRef, env);
+      keys.push(resolved.value ?? '');
+      sources.push(resolved.source);
+    } catch {
+      // 单项失败只影响该项：后续项照常解析。
+      keys.push('');
+      sources.push(undefined);
+    }
+  }
+  return { keys, sources };
+}
+
+/**
+ * 运行前解析模型密钥：`direct` 走凭据，`proxy` 不需要密钥。
+ *
+ * 同时为备选链每项独立解析密钥（见 `resolveFallbackKeys`），结果按序放进 `fallbackApiKeys`，
+ * 供 `toCoreConfig(..., fallbackApiKeys)` 注入到核心 `model.fallbacks[i].apiKey`。
+ * 主 key 解析失败**不阻断**备选解析：先独立算好备选密钥，再决定主 key。
+ */
 export async function resolveModelKey(
   settings: Settings,
   credentials: CredentialServices | undefined,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<{ apiKey?: string; mode: 'direct' | 'proxy'; source?: string }> {
-  if (settings.model.mode === 'proxy') return { mode: 'proxy' };
+): Promise<{ apiKey?: string; mode: 'direct' | 'proxy'; source?: string; fallbackApiKeys: string[] }> {
+  // 先解析备选链（与主模型互不依赖）：即便主 key 拿不到，备选密钥仍要就位。
+  const fallback = await resolveFallbackKeys(settings, credentials, env);
+  if (settings.model.mode === 'proxy') {
+    return { mode: 'proxy', fallbackApiKeys: fallback.keys };
+  }
   const resolved = await resolveRef(credentials, settings.model.apiKeyRef, env);
   return {
     mode: 'direct',
     ...(resolved.value === undefined ? {} : { apiKey: resolved.value }),
     ...(resolved.source === undefined ? {} : { source: resolved.source }),
+    fallbackApiKeys: fallback.keys,
   };
 }
 

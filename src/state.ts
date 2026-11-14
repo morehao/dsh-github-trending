@@ -86,6 +86,11 @@ export interface RunRecord {
   tokens?: number;
   /** 发版订阅阶段摘要（只存展示需要的字段）；未启用/旧核心则缺省。 */
   releases?: ReleasesSummary;
+  /**
+   * 本次实际产出摘要的模型名（来自契约 0.7.1 `usage.usedModel`）。
+   * 主模型成功时可与 `model.model` 相同；被备选模型接管时是备选名；降级原文/旧核心时缺省。
+   */
+  usedModel?: string;
   /** true = 契约 v1 时代留下的旧记录（contentHash 算法不同，不可与 v2 比较）。 */
   legacy?: boolean;
 }

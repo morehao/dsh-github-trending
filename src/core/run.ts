@@ -33,6 +33,12 @@ export interface RunCoreOptions {
   settings: Settings;
   /** 模型密钥；只进配置通道，不进 argv/env/日志。 */
   apiKey: string;
+  /**
+   * 备选模型链每一环的密钥（与 `settings.model.fallbacks` 同序、等长）。
+   * 由 runner 逐项独立解析后传入，注入到核心 `model.fallbacks[i].apiKey`；
+   * 只进配置通道，不进 argv/env/日志。
+   */
+  fallbackApiKeys?: readonly string[];
   /** GitHub token；核心只从 env 读（GITHUB_TOKEN/GH_TOKEN）。 */
   token?: string;
   date?: string;
@@ -127,8 +133,8 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
   // 单调时钟：不受系统睡眠/改表影响，用来判断「超时到底是真跑满了，还是进程被挂起」。
   const startedMono = performance.now();
   const channel = await openConfigChannel();
-  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period, options.repoCount, options.resolvedOutputLanguage))}\n`;
-  const secrets = [options.apiKey, options.token, ...(options.secrets ?? [])];
+  const yaml = `${toYaml(toCoreConfig(options.settings, options.apiKey, options.baseURLOverride, options.period, options.repoCount, options.resolvedOutputLanguage, options.fallbackApiKeys ?? []))}\n`;
+  const secrets = [options.apiKey, options.token, ...(options.fallbackApiKeys ?? []), ...(options.secrets ?? [])];
 
   const args = buildCoreArgs(channel.path, {
     dryRun: options.dryRun,
