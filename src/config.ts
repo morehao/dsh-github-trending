@@ -214,6 +214,72 @@ export interface ReleasesSettings {
   schedule: ReleaseScheduleSettings;
 }
 
+/**
+ * 推送渠道三取值（核心 `notify.channels`）。键名即渠道名，核心 YAML 也用它。
+ * 顺序即界面展示顺序：企微 / 钉钉 / 飞书。
+ */
+export type NotifyChannelKey = 'dingtalk' | 'lark' | 'wecom';
+export const NOTIFY_CHANNEL_KEYS: readonly NotifyChannelKey[] = ['dingtalk', 'lark', 'wecom'];
+
+/** 各渠道允许的 `msgtype`（核心按渠道校验，见设计 §4.1）。 */
+export const NOTIFY_MSGTYPES: Record<NotifyChannelKey, readonly string[]> = {
+  dingtalk: ['markdown', 'text'],
+  lark: ['post', 'text'],
+  wecom: ['markdown', 'text'],
+};
+
+/** 投递策略（核心 `notify.strategy`）：广播 / 全员必达 / 降级到首个成功渠道。 */
+export type NotifyStrategy = 'broadcast' | 'requireAll' | 'firstSuccess';
+export const NOTIFY_STRATEGIES: readonly NotifyStrategy[] = ['broadcast', 'requireAll', 'firstSuccess'];
+
+export function isNotifyStrategy(value: unknown): value is NotifyStrategy {
+  return value === 'broadcast' || value === 'requireAll' || value === 'firstSuccess';
+}
+
+/**
+ * 单个推送渠道配置（核心 `config.NotifyChannel`）。字段与核心 YAML 一一对应：
+ * `enabled / webhookURL / secret / msgtype`。`wecom` 无 `secret`（不支持加签），
+ * 归一化时对 `secret` 做形态保留即可，核心对该渠道忽略。
+ * 密钥（webhookURL / secret）沿用 trendradar 约定只写 `${VAR}` 引用，不写明文。
+ */
+export interface NotifyChannelSettings {
+  enabled: boolean;
+  webhookURL: string;
+  secret: string;
+  msgtype: string;
+}
+
+/** 推送内容分区开关（核心 `notify.sections`）：榜单一条 / 订阅一条。 */
+export interface NotifySectionsSettings {
+  trending: boolean;
+  releases: boolean;
+}
+
+/**
+ * 每日推送通知配置（核心 `notify.*`，core ≥ 0.8.9 / 契约 0.8.0）。
+ * 字段与核心 `config.NotifyConfig` **一一对应，字段名不翻译、不增不减**（AGENTS「唯一映射」）。
+ * `enabled=false` 时整段旁路（核心不产出、不推送），但插件仍写整段 YAML 保持形状稳定。
+ */
+export interface NotifySettings {
+  enabled: boolean;
+  sections: NotifySectionsSettings;
+  /** 跳过（merged / pr-closed / unchanged）时是否仍推已有内容。 */
+  onSkipped: boolean;
+  /** 订阅本次无任何变更时是否发一条「本周无变动」。 */
+  onEmptyReleases: boolean;
+  strategy: NotifyStrategy;
+  /** 三渠道配置；键即渠道名。 */
+  channels: Record<NotifyChannelKey, NotifyChannelSettings>;
+  /** 摘要里最多点名 N 个仓库，其余折叠成「其余 N 个」。 */
+  maxReposPerSection: number;
+  /** 正文硬上限字符数；`0` = 按渠道自动取默认上限。 */
+  maxBodyChars: number;
+  /** 单渠道单次请求超时秒数。 */
+  timeoutSeconds: number;
+  /** 模型总结摘要的目标字数（榜单/订阅各一条，分别约束）。 */
+  summaryMaxChars: number;
+}
+
 export interface ScheduleSettings {
   enabled: boolean;
   /** `HH:MM:SS`（本地墙钟，按 timezone 解释）。 */
@@ -237,6 +303,7 @@ export interface Settings {
   summarize: SummarizeSettings;
   observe: ObserveSettings;
   releases: ReleasesSettings;
+  notify: NotifySettings;
   output: OutputSettings;
   schedule: ScheduleSettings;
   /** 核心二进制覆盖；只在开发/排障时用，对应 TRENDING_DIGEST_CORE。 */
@@ -331,6 +398,22 @@ export const DEFAULT_SETTINGS: Settings = {
     period: 'weekly',
     schedule: { enabled: true, weekday: 1, time: '08:00:00', timezone: 'Asia/Shanghai' },
   },
+  notify: {
+    enabled: false,
+    sections: { trending: true, releases: true },
+    onSkipped: false,
+    onEmptyReleases: false,
+    strategy: 'broadcast',
+    channels: {
+      dingtalk: { enabled: false, webhookURL: '${DINGTALK_WEBHOOK}', secret: '${DINGTALK_SECRET}', msgtype: 'markdown' },
+      lark: { enabled: false, webhookURL: '${LARK_WEBHOOK}', secret: '${LARK_SECRET}', msgtype: 'post' },
+      wecom: { enabled: false, webhookURL: '${WECOM_WEBHOOK}', secret: '', msgtype: 'markdown' },
+    },
+    maxReposPerSection: 10,
+    maxBodyChars: 0,
+    timeoutSeconds: 15,
+    summaryMaxChars: 800,
+  },
   output: { dir: 'trending' },
   schedule: { enabled: true, time: '08:30:00', timezone: 'Asia/Shanghai', periods: ['daily', 'weekly', 'monthly'] },
   corePath: '',
@@ -350,7 +433,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 export const CORE_PROVIDERS = ['deepseek', 'openai-compatible'] as const;
 
 /** 设置页分区；分段保存时只提交并校验对应分区，互不牵连。 */
-export const SETTINGS_SECTIONS = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases', 'schedule'] as const;
+export const SETTINGS_SECTIONS = ['source', 'model', 'repo', 'auth', 'scope', 'summarize', 'releases', 'schedule', 'notify'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 /** 校验问题字段 → 所属分区（用于分段保存时只把本分区的问题回给界面）。 */
@@ -363,6 +446,7 @@ export function sectionOfField(field: string): SettingsSection | undefined {
   if (field === 'outputLanguage') return 'scope';
   if (field.startsWith('observe.')) return 'scope';
   if (field.startsWith('releases.')) return 'releases';
+  if (field.startsWith('notify.')) return 'notify';
   if (field.startsWith('schedule.')) return 'scope';
   if (field === 'corePath' || field === 'coreAutoDownload' || field === 'network.proxy' || field === 'run.timeoutMs') return 'source';
   return undefined;
@@ -408,6 +492,9 @@ export function mergeSettingsSection(stored: Settings, incoming: Settings, secti
       break;
     case 'releases':
       next.releases = incoming.releases;
+      break;
+    case 'notify':
+      next.notify = incoming.notify;
       break;
     case 'schedule':
       next.schedule = incoming.schedule;
@@ -482,6 +569,61 @@ function normalizeFallbacks(value: unknown): ModelEntryView[] {
     });
   }
   return items;
+}
+
+/**
+ * 单个渠道归一：`enabled / webhookURL / secret / msgtype` 四字段形态收敛。
+ * `msgtype` 非法/缺失 → 回落到该渠道默认（`DEFAULT_SETTINGS.notify.channels[key].msgtype`），
+ * 不做白名单强制（非法值留给 validateSettings 报字段路径，避免静默改写）。
+ * `webhookURL` / `secret` 原样保留字符串（含 `${VAR}` 引用），不做任何解析/替换——密钥不进插件。
+ */
+function normalizeNotifyChannel(
+  raw: Record<string, unknown>,
+  key: NotifyChannelKey,
+): NotifyChannelSettings {
+  const defaults = DEFAULT_SETTINGS.notify.channels[key];
+  return {
+    enabled: bool(raw.enabled, defaults.enabled),
+    webhookURL: str(raw.webhookURL, defaults.webhookURL).trim(),
+    secret: str(raw.secret, defaults.secret).trim(),
+    msgtype: str(raw.msgtype, defaults.msgtype).trim() || defaults.msgtype,
+  };
+}
+
+/**
+ * 推送通知归一：把任意来源对象收敛成完整 `NotifySettings`。
+ * 三渠道固定存在（缺哪个补默认），保证 `channels` 形状稳定、界面总能渲染三张卡。
+ */
+function normalizeNotify(value: unknown): NotifySettings {
+  const defaults = DEFAULT_SETTINGS.notify;
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  const sections = (raw.sections ?? {}) as Record<string, unknown>;
+  const channels = (raw.channels ?? {}) as Record<string, unknown>;
+  const channelOf = (key: NotifyChannelKey): NotifyChannelSettings =>
+    normalizeNotifyChannel(
+      (typeof channels[key] === 'object' && channels[key] !== null ? channels[key] : {}) as Record<string, unknown>,
+      key,
+    );
+  const strategy = str(raw.strategy, defaults.strategy);
+  return {
+    enabled: bool(raw.enabled, defaults.enabled),
+    sections: {
+      trending: bool(sections.trending, defaults.sections.trending),
+      releases: bool(sections.releases, defaults.sections.releases),
+    },
+    onSkipped: bool(raw.onSkipped, defaults.onSkipped),
+    onEmptyReleases: bool(raw.onEmptyReleases, defaults.onEmptyReleases),
+    strategy: isNotifyStrategy(strategy) ? strategy : defaults.strategy,
+    channels: {
+      dingtalk: channelOf('dingtalk'),
+      lark: channelOf('lark'),
+      wecom: channelOf('wecom'),
+    },
+    maxReposPerSection: Math.round(num(raw.maxReposPerSection, defaults.maxReposPerSection)),
+    maxBodyChars: Math.round(num(raw.maxBodyChars, defaults.maxBodyChars)),
+    timeoutSeconds: Math.round(num(raw.timeoutSeconds, defaults.timeoutSeconds)),
+    summaryMaxChars: Math.round(num(raw.summaryMaxChars, defaults.summaryMaxChars)),
+  };
 }
 
 /**
@@ -580,6 +722,7 @@ export function normalizeSettings(input: unknown): Settings {
         timezone: str(releasesSchedule.timezone, DEFAULT_SETTINGS.releases.schedule.timezone),
       },
     },
+    notify: normalizeNotify(raw.notify),
     output: {
       dir: str(output.dir, DEFAULT_SETTINGS.output.dir).trim() || DEFAULT_SETTINGS.output.dir,
     },
@@ -820,6 +963,59 @@ export function validateSettings(settings: Settings, providers: readonly string[
   if (!isValidTimezone(schedule.timezone)) {
     problems.push({ field: 'schedule.timezone', code: 'CONFIG_INVALID', message: '时区必须是 IANA 名称（如 Asia/Shanghai）' });
   }
+  // notify.*（核心 `notify` 段，core ≥ 0.8.9）。只在启用时做「至少一个分区 / 至少一个渠道」的结构校验，
+  // 关闭时整段旁路，不因未配置的渠道卡阻塞保存（用户可能只切总开关、还没填渠道）。
+  const { notify } = settings;
+  if (!isNotifyStrategy(notify.strategy)) {
+    problems.push({
+      field: 'notify.strategy',
+      code: 'CONFIG_INVALID',
+      message: '投递策略必须是 broadcast / requireAll / firstSuccess',
+    });
+  }
+  if (!Number.isInteger(notify.maxReposPerSection) || notify.maxReposPerSection < 1 || notify.maxReposPerSection > 50) {
+    problems.push({ field: 'notify.maxReposPerSection', code: 'CONFIG_INVALID', message: '最多点名仓库数必须是 1–50 的整数' });
+  }
+  // maxBodyChars：0 = 按渠道自动（允许）；>0 时落在 200–20000 的合理区间。
+  if (!Number.isInteger(notify.maxBodyChars) || notify.maxBodyChars < 0 || (notify.maxBodyChars > 0 && notify.maxBodyChars < 200) || notify.maxBodyChars > 20000) {
+    problems.push({ field: 'notify.maxBodyChars', code: 'CONFIG_INVALID', message: '正文上限必须是 0（按渠道自动）或 200–20000 的整数' });
+  }
+  if (!Number.isInteger(notify.timeoutSeconds) || notify.timeoutSeconds < 1 || notify.timeoutSeconds > 120) {
+    problems.push({ field: 'notify.timeoutSeconds', code: 'CONFIG_INVALID', message: '渠道超时必须是 1–120 的整数秒' });
+  }
+  if (!Number.isInteger(notify.summaryMaxChars) || notify.summaryMaxChars < 100 || notify.summaryMaxChars > 4000) {
+    problems.push({ field: 'notify.summaryMaxChars', code: 'CONFIG_INVALID', message: '摘要字数必须是 100–4000 的整数' });
+  }
+  // 逐渠道：msgtype 必须在允许集合内；启用的渠道 webhook 必须非空（不校验 ${VAR} 是否已解析——
+  // 插件不接触密钥与 .env，解析发生在核心，插件只保证形态上已填）。
+  for (const key of NOTIFY_CHANNEL_KEYS) {
+    const channel = notify.channels[key];
+    const allowed = NOTIFY_MSGTYPES[key];
+    if (!allowed.includes(channel.msgtype)) {
+      problems.push({
+        field: `notify.channels.${key}.msgtype`,
+        code: 'CONFIG_INVALID',
+        message: `${key} 的消息类型必须是 ${allowed.join(' / ')}`,
+      });
+    }
+    if (channel.enabled && channel.webhookURL.trim() === '') {
+      problems.push({
+        field: `notify.channels.${key}.webhookURL`,
+        code: 'CONFIG_INVALID',
+        message: `${key} 已启用但缺少 webhook 地址`,
+      });
+    }
+  }
+  // 启用总开关时：至少一个内容分区、至少一个渠道——否则「开了却什么都不发」，是典型的点了没反应。
+  if (notify.enabled) {
+    if (!notify.sections.trending && !notify.sections.releases) {
+      problems.push({ field: 'notify.sections', code: 'CONFIG_INVALID', message: '启用通知时至少要勾选一个推送内容（榜单或订阅）' });
+    }
+    const anyChannel = NOTIFY_CHANNEL_KEYS.some((key) => notify.channels[key].enabled);
+    if (!anyChannel) {
+      problems.push({ field: 'notify.channels', code: 'CONFIG_INVALID', message: '启用通知时至少要启用一个推送渠道' });
+    }
+  }
   return problems;
 }
 
@@ -898,6 +1094,23 @@ export interface CoreConfig {
     concurrency: number;
     budgetSeconds: number;
     period: 'weekly';
+  };
+  /**
+   * 推送通知（核心 `notify`，core ≥ 0.8.9）。字段与核心 `config.NotifyConfig` 严格对齐；
+   * 密钥（webhookURL/secret）只写 `${VAR}` 引用，核心侧解析。`enabled=false` 时整段仍写出，
+   * 形状稳定（核心看到 false 即旁路）。
+   */
+  notify: {
+    enabled: boolean;
+    sections: { trending: boolean; releases: boolean };
+    onSkipped: boolean;
+    onEmptyReleases: boolean;
+    strategy: NotifyStrategy;
+    channels: Record<NotifyChannelKey, { enabled: boolean; webhookURL: string; secret: string; msgtype: string }>;
+    maxReposPerSection: number;
+    maxBodyChars: number;
+    timeoutSeconds: number;
+    summaryMaxChars: number;
   };
   output: {
     dir: string;
@@ -1011,6 +1224,26 @@ export function toCoreConfig(
       budgetSeconds,
       // 核心只实现每周一次；非法值在校验阶段已拦下，这里不再透传枚举。
       period: 'weekly',
+    },
+    // 推送通知：字段与设置一一对应，原样透传（密钥仍走 ${VAR} 引用，插件不解析）。
+    notify: {
+      enabled: settings.notify.enabled,
+      sections: {
+        trending: settings.notify.sections.trending,
+        releases: settings.notify.sections.releases,
+      },
+      onSkipped: settings.notify.onSkipped,
+      onEmptyReleases: settings.notify.onEmptyReleases,
+      strategy: settings.notify.strategy,
+      channels: {
+        dingtalk: { ...settings.notify.channels.dingtalk },
+        lark: { ...settings.notify.channels.lark },
+        wecom: { ...settings.notify.channels.wecom },
+      },
+      maxReposPerSection: settings.notify.maxReposPerSection,
+      maxBodyChars: settings.notify.maxBodyChars,
+      timeoutSeconds: settings.notify.timeoutSeconds,
+      summaryMaxChars: settings.notify.summaryMaxChars,
     },
     output: {
       dir: settings.output.dir,

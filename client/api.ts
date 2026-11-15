@@ -15,6 +15,47 @@ import type {
 // 订阅相关类型直接来自契约包（type-only：运行时不加载契约包，bundle 仍只依赖 react）。
 export type { SubscriptionDoc, SubscriptionItem, SubscriptionList, SubscriptionStatus, SubscriptionVolume };
 
+/**
+ * 推送结果类型（契约 `RunResult.notify`，契约包 0.8.0 起提供）。
+ *
+ * 说明：本地 `@morehao/trendradar-contract` 尚未升到含 notify 的 0.8.0（WS-B 未合入），
+ * 故这里按已冻结的 §1.2 形状**手写最小 TS 类型**放 client 侧，不改契约包。等契约包升到
+ * 0.8.0 后可直接改用其生成类型（形状一致，字段名不翻译、不增不减）。字段全部宽松
+ * （可选/联合），确保旧核心或未合入时缺省也能安全读取。
+ */
+export type NotifyChannelStatus = 'sent' | 'failed' | 'disabled';
+export type NotifyMessageKind = 'trending' | 'releases';
+export type NotifySummarySource = 'model' | 'fallback';
+
+export interface NotifyChannelResult {
+  channel: string;
+  status: NotifyChannelStatus;
+  durationMs?: number;
+  error?: string;
+}
+
+export interface NotifyMessage {
+  kind: NotifyMessageKind;
+  period?: Period;
+  bodyChars: number;
+  summarySource: NotifySummarySource;
+  channels: NotifyChannelResult[];
+}
+
+export interface NotifyUsage {
+  calls: number;
+  totalTokens: number;
+  usageKnown: boolean;
+}
+
+export interface NotifyReport {
+  enabled: boolean;
+  attempted: boolean;
+  skipReason?: string;
+  messages: NotifyMessage[];
+  usage?: NotifyUsage;
+}
+
 export const API = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 
@@ -141,6 +182,8 @@ export interface RunRecord {
   tokens?: number;
   /** 发版订阅阶段摘要；未启用/旧核心则缺省。 */
   releases?: ReleasesSummary;
+  /** 本次推送结果（契约 0.8.0 `RunResult.notify`）；未配置通知/旧核心则缺省。 */
+  notify?: NotifyReport;
   /** 本次实际产出摘要的模型名（契约 0.7.1 `usage.usedModel`）；降级原文/旧核心时缺省。 */
   usedModel?: string;
   legacy?: boolean;
@@ -224,6 +267,35 @@ export interface ReleaseScheduleSettings {
   timezone: string;
 }
 
+/** 推送渠道三取值（与 `src/config.ts` 的 `NotifyChannelKey` 对齐）。 */
+export type NotifyChannelKey = 'dingtalk' | 'lark' | 'wecom';
+
+export interface NotifyChannelSettingsShape {
+  enabled: boolean;
+  /** 含 token 的完整地址；插件只存 `${VAR}` 引用，不落明文。 */
+  webhookURL: string;
+  /** 加签密钥（wecom 不支持，保持空串）；同样只存 `${VAR}` 引用。 */
+  secret: string;
+  msgtype: string;
+}
+
+/**
+ * 推送通知设置视图（与 `src/config.ts` 的 `NotifySettings` 逐字段对齐）。
+ * 旧设置可能没有该字段，消费方按 `DEFAULT` 兜底。
+ */
+export interface NotifySettingsShape {
+  enabled: boolean;
+  sections: { trending: boolean; releases: boolean };
+  onSkipped: boolean;
+  onEmptyReleases: boolean;
+  strategy: 'broadcast' | 'requireAll' | 'firstSuccess';
+  channels: Record<NotifyChannelKey, NotifyChannelSettingsShape>;
+  maxReposPerSection: number;
+  maxBodyChars: number;
+  timeoutSeconds: number;
+  summaryMaxChars: number;
+}
+
 export interface SettingsShape {
   model: {
     provider: string;
@@ -285,6 +357,11 @@ export interface SettingsShape {
     /** 插件侧每周发版节奏（不进核心 YAML）；旧设置没有该字段。 */
     schedule?: ReleaseScheduleSettings;
   };
+  /**
+   * 推送通知（核心 `notify.*`，与 `src/config.ts` 的 `NotifySettings` 严格对齐）。
+   * 旧设置/未配置时缺省；界面按默认值渲染。密钥字段只存 `${VAR}` 引用，不落明文。
+   */
+  notify?: NotifySettingsShape;
   output: { dir: string };
   schedule: { enabled: boolean; time: string; timezone: string; periods: Period[] };
   corePath: string;

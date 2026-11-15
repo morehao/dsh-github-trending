@@ -18,6 +18,7 @@ import { OverviewView } from './overview.js';
 import { RunsView } from './runs.js';
 import { DigestView } from './digest.js';
 import { SubscriptionsView } from './subscriptions.js';
+import { NotifyView } from './notify.js';
 import { AboutDialog } from './about.js';
 import { IdentityBar } from './identity-bar.js';
 import { RestoreNotice } from './restore-notice.js';
@@ -38,12 +39,13 @@ interface Slots {
   inject: (name: string, factory: () => unknown) => () => void;
 }
 
-type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'settings';
+type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'notify' | 'settings';
 
 const NAV: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: 'overview', label: 'nav.overview', icon: 'grid' },
   { id: 'digest', label: 'nav.digest', icon: 'doc' },
   { id: 'subscriptions', label: 'nav.subscriptions', icon: 'rss' },
+  { id: 'notify', label: 'nav.notify', icon: 'bell' },
   { id: 'runs', label: 'nav.runs', icon: 'list' },
   { id: 'settings', label: 'nav.settings', icon: 'sliders' },
 ];
@@ -94,6 +96,14 @@ function navIcon(name: string, size = 16): any {
       h('path', { d: 'M5 5a14 14 0 0 1 14 14' }),
       h('path', { d: 'M5 11a8 8 0 0 1 8 8' }),
       h('circle', { cx: 6, cy: 18, r: 1.6 }),
+    );
+  }
+  if (name === 'bell') {
+    return h(
+      'svg',
+      common,
+      h('path', { d: 'M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5' }),
+      h('path', { d: 'M13.7 19a2 2 0 0 1-3.4 0' }),
     );
   }
   return h(
@@ -226,7 +236,9 @@ export function apply(ctx: any): void {
             ? h(RunsView, { t, store: value, controller, onOpenDigest: openDigest })
             : view === 'subscriptions'
               ? h(SubscriptionsView, { t, store: value, onOpenSettings: openSettings })
-              : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
+              : view === 'notify'
+                ? h(NotifyView, { t, store: value })
+                : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
 
     return h(
       'div',
