@@ -348,14 +348,24 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const patchFallback = (index: number, patch: Partial<ModelFallbackShape>): void => update((next) => {
     next.model.fallbacks = fallbacksOf(next).map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
   });
-  // 来源切换：custom ↔ dsh。切到 custom 保留现值当草稿；切到 dsh 先清成空白沿用态，
-  // 由用户点「从 DSH 选择…」定格（避免把旧手填值误当沿用）。
+  // 来源切换：custom ↔ dsh。切到 custom 保留现值当草稿；切到 dsh 时**仅当原本不是 dsh
+  // 才清成空白沿用态**，由用户点「从 DSH 选择…」定格。若该条本就是 dsh（已有 hostProvider /
+  // apiKeyRef 定格），一定来回切换都要保留原值——否则 proxy 型沿用项会被清空 hostProvider，
+  // 保存时报 `model.fallbacks.<i>.hostProvider` 缺失。
   const setFallbackSource = (index: number, next: 'custom' | 'dsh'): void => {
     if (draft === null) return;
     const entry = fallbacksOf(draft)[index];
-    if (entry === undefined || fallbackSource(entry) === next) return;
-    if (next === 'custom') patchFallback(index, { source: 'custom' });
-    else patchFallback(index, { source: 'dsh', hostProvider: '', apiKeyRef: '' });
+    if (entry === undefined) return;
+    const current = fallbackSource(entry);
+    if (current === next) return;
+    if (next === 'custom') {
+      patchFallback(index, { source: 'custom' });
+    } else {
+      // 从 custom 首次切入 dsh：清空沿用态等待重新选择；但若这条早先是 dsh（例如来回切过），
+      // 已定格值在切到 custom 时并未丢失，这里只在「从未定格」时才需要清。
+      const pinned = entry.hostProvider.trim() !== '' || entry.apiKeyRef.trim() !== '';
+      patchFallback(index, pinned ? { source: 'dsh' } : { source: 'dsh', hostProvider: '', apiKeyRef: '' });
+    }
   };
 
   const save = async (section: SectionId): Promise<void> => {    if (draft === null) return;
@@ -1441,10 +1451,10 @@ function FallbackEditModal(props: {
   );
 
   // dsh 身份块：只读展示，不允许改 provider/model/baseURL/凭据（防止「假沿用」）。
-  const pickedLabel =
-    entry.provider !== '' && entry.model !== ''
-      ? t('model.fallbacks.picked', { provider: entry.provider, model: entry.model })
-      : t('model.fallbacks.pickEmpty');
+  const picked = entry.provider !== '' && entry.model !== '';
+  const pickedLabel = picked ? t('model.fallbacks.picked', { provider: entry.provider, model: entry.model }) : t('model.fallbacks.pickEmpty');
+  // 沿用项未选定（或 proxy 缺宿主路由）时，就在弹窗里显式提示，别等到保存才报字段缺失。
+  const identityIncomplete = !picked || (entry.mode === 'proxy' && entry.hostProvider.trim() === '');
   const dshIdentity = h(
     'div',
     { className: 'dshgt-fb-identity' },
@@ -1455,7 +1465,10 @@ function FallbackEditModal(props: {
       h('span', { className: 'dshgt-pill' }, entry.mode === 'proxy' ? t('model.fallbacks.proxy') : t('model.fallbacks.direct')),
     ),
     h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('model.fallbacks.dshHint')),
-    h('div', { className: 'dshgt-inline' }, h(Btn, { small: true, onClick: props.onPick }, entry.provider !== '' ? t('model.fallbacks.repick') : t('model.fallbacks.pick'))),
+    identityIncomplete
+      ? h('p', { className: 'dshgt-hint', style: { margin: 0, color: 'var(--gt-warn, #b45309)' } }, t('model.fallbacks.dshPickRequired'))
+      : null,
+    h('div', { className: 'dshgt-inline' }, h(Btn, { small: true, variant: identityIncomplete ? 'primary' : undefined, onClick: props.onPick }, picked ? t('model.fallbacks.repick') : t('model.fallbacks.pick'))),
   );
 
   const customFields = h(
