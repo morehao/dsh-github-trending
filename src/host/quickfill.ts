@@ -13,7 +13,7 @@
  *
  * 这里**不写任何配置**：只产出候选，由用户确认后 `/config` 落盘（禁止静默复制）。
  */
-import type { ModelSettings, Settings } from '../config.js';
+import type { ModelEntryView, ModelSettings, Settings } from '../config.js';
 import { PROVIDER_BASE_URLS } from '../config.js';
 import { describeRef, resolveRef, credentialServices, type CredentialServices } from './credentials.js';
 
@@ -222,6 +222,35 @@ export function applyCandidate(settings: Settings, candidate: LlmProviderCandida
         : settings.model.apiKeyRef,
   };
   return { ...settings, model };
+}
+
+/**
+ * 把「DSH 已配置的某个 provider+model」折算成一条**沿用（source='dsh'）**备选项。
+ *
+ * 映射规则与 `applyCandidate` 对主模型一致（direct→取凭据引用与端点；proxy→清空 baseURL/
+ * apiKeyRef、填宿主路由 id），但：
+ *   - 保留该备选项自身的 `temperature` / `maxTokens`（用户可微调）；
+ *   - 置 `source='dsh'`（纯插件侧标记，`toCoreConfig` 不读它）；
+ *   - `hostProvider` proxy 时必填，正是 `validateSettings` 对 dsh-proxy 项的硬要求。
+ *
+ * 纯函数、不写盘：客户端在设置页把选中结果落进 draft，随「保存设置」一起提交。
+ */
+export function applyCandidateToFallback(
+  entry: ModelEntryView,
+  candidate: LlmProviderCandidate,
+  modelId: string,
+): ModelEntryView {
+  const proxy = candidate.credential.mode === 'proxy';
+  return {
+    ...entry,
+    source: 'dsh',
+    provider: candidate.coreProvider,
+    mode: proxy ? 'proxy' : 'direct',
+    hostProvider: proxy ? candidate.id : '',
+    baseURL: proxy ? '' : candidate.baseURL || PROVIDER_BASE_URLS[candidate.coreProvider] || '',
+    model: modelId,
+    apiKeyRef: !proxy && candidate.credential.ref !== undefined ? candidate.credential.ref : '',
+  };
 }
 
 /**

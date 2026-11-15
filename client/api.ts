@@ -240,6 +240,8 @@ export interface SettingsShape {
      * 按序尝试，空数组/缺省 = 关闭；旧 state 可能没有该键，故可选。
      */
     fallbacks?: Array<{
+      /** 来源：custom=手填；dsh=沿用 DSH 已配置模型（保存时定格）。旧数据缺省按 custom。 */
+      source?: 'custom' | 'dsh';
       provider: string;
       mode: 'direct' | 'proxy';
       hostProvider: string;

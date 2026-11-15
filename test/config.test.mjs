@@ -460,6 +460,7 @@ test('fallbacks：默认空链，normalizeSettings 读数组并剔空项', () =>
   assert.equal(settings.model.fallbacks.length, 2);
   const [first, second] = settings.model.fallbacks;
   assert.deepEqual(first, {
+    source: 'custom',
     provider: 'openai-compatible',
     mode: 'proxy',
     hostProvider: 'openai',
@@ -562,4 +563,69 @@ test('fallbacks：非法项被 validateSettings 报 CONFIG_INVALID（同构校�
     providers,
   );
   assert.equal(ok.some((p) => p.field.startsWith('model.fallbacks.')), false);
+});
+
+test('fallbacks.source：默认 custom，dsh 保留，未知值回落 custom', () => {
+  // 无 source → custom（向后兼容旧 settings.json）
+  const legacy = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ provider: 'deepseek', model: 'deepseek-reasoner' }] } });
+  assert.equal(legacy.model.fallbacks[0].source, 'custom');
+
+  // 显式 dsh 保留
+  const withDsh = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ source: 'dsh', provider: 'deepseek', model: 'deepseek-reasoner' }] } });
+  assert.equal(withDsh.model.fallbacks[0].source, 'dsh');
+
+  // 未知值 → custom
+  const weird = config.normalizeSettings({ model: { provider: 'deepseek', model: 'm', fallbacks: [{ source: 'nonsense', provider: 'deepseek', model: 'x' }] } });
+  assert.equal(weird.model.fallbacks[0].source, 'custom');
+});
+
+test('fallbacks：dsh 与 custom 项 toCoreConfig 输出同形（source 不参与核心映射）', () => {
+  const settings = config.normalizeSettings({
+    model: {
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      fallbacks: [
+        { source: 'dsh', provider: 'deepseek', model: 'deepseek-reasoner', temperature: 0.1, maxTokens: 500 },
+        { source: 'custom', provider: 'deepseek', model: 'deepseek-reasoner', temperature: 0.1, maxTokens: 500 },
+      ],
+    },
+    repo: { path: '/tmp/x' },
+  });
+  const core = config.toCoreConfig(settings, 'K', undefined, undefined, 0, undefined, ['A', 'B']);
+  // 除 apiKey（按序由 fallbackApiKeys 注入）外完全同形
+  const strip = (e) => ({ ...e, apiKey: '' });
+  assert.deepEqual(strip(core.model.fallbacks[0]), strip(core.model.fallbacks[1]));
+  assert.equal('source' in core.model.fallbacks[0], false);
+});
+
+test('fallbacks：dsh-proxy 缺 hostProvider 报 CONFIG_INVALID；dsh-direct 缺 apiKeyRef 不报错', () => {
+  const providers = ['deepseek', 'openai-compatible'];
+  const badProxy = config.validateSettings(
+    config.normalizeSettings({
+      model: { provider: 'deepseek', model: 'm', fallbacks: [{ source: 'dsh', provider: 'openai-compatible', mode: 'proxy', baseURL: 'https://a.example/v1', model: 'gpt-4o', hostProvider: '' }] },
+      repo: { path: '/tmp/x' },
+    }),
+    providers,
+  );
+  assert.ok(badProxy.some((p) => p.field === 'model.fallbacks.0.hostProvider' && p.code === 'CONFIG_INVALID'));
+
+  // dsh-direct 无 apiKeyRef：允许（运行时解析不到会回落下一项）
+  const directNoKey = config.validateSettings(
+    config.normalizeSettings({
+      model: { provider: 'deepseek', model: 'm', fallbacks: [{ source: 'dsh', provider: 'deepseek', model: 'deepseek-reasoner', apiKeyRef: '' }] },
+      repo: { path: '/tmp/x' },
+    }),
+    providers,
+  );
+  assert.equal(directNoKey.some((p) => p.field.startsWith('model.fallbacks.')), false);
+
+  // dsh-proxy 有 hostProvider：合法
+  const okProxy = config.validateSettings(
+    config.normalizeSettings({
+      model: { provider: 'deepseek', model: 'm', fallbacks: [{ source: 'dsh', provider: 'openai-compatible', mode: 'proxy', baseURL: 'https://a.example/v1', model: 'gpt-4o', hostProvider: 'openai' }] },
+      repo: { path: '/tmp/x' },
+    }),
+    providers,
+  );
+  assert.equal(okProxy.some((p) => p.field.startsWith('model.fallbacks.')), false);
 });

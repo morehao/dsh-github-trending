@@ -70,12 +70,23 @@ export interface ModelSettings {
 }
 
 /**
+ * 备选模型来源。`custom`=手填；`dsh`=从 DSH 已配置目录沿用（保存时定格成具体字段）。
+ * 未知值在归一化时回落 `custom`（向后兼容旧 settings.json）。
+ */
+export type ModelEntrySource = 'custom' | 'dsh';
+
+/**
  * 备选模型链上的一环（插件侧视图）。字段与主模型 `ModelSettings` 对齐，
  * 但**不含** `allowDegraded`：降级只在整条链全败后由主模型的 allowDegraded 决定
  * （设计 §8 Q4），链上单项不单独持有降级开关。
  * 映射到核心 YAML 时：`model`→核心 `name`、`apiKeyRef`→核心 `apiKey`（密钥运行时注入）。
  */
 export interface ModelEntryView {
+  /**
+   * 来源：`custom`=手填（默认，向后兼容）；`dsh`=从 DSH 已配置目录沿用、保存时定格成下方各字段。
+   * 纯插件侧元数据：`toCoreConfig` 不读它，只影响设置页交互（只读哪些字段）。
+   */
+  source: ModelEntrySource;
   provider: Provider;
   /** `direct` / `proxy`，语义同主模型；`proxy` 时由插件为该项单独注入回环代理地址。 */
   mode: 'direct' | 'proxy';
@@ -459,6 +470,7 @@ function normalizeFallbacks(value: unknown): ModelEntryView[] {
     const model = str(raw.model, '').trim();
     if (provider === '' && model === '') continue; // 空项丢弃
     items.push({
+      source: str(raw.source, 'custom') === 'dsh' ? 'dsh' : 'custom',
       provider,
       mode: str(raw.mode, 'direct') === 'proxy' ? 'proxy' : 'direct',
       hostProvider: str(raw.hostProvider, '').trim(),
@@ -714,6 +726,15 @@ export function validateSettings(settings: Settings, providers: readonly string[
     if (!Number.isInteger(entry.maxTokens) || entry.maxTokens <= 0) {
       problems.push({ field: `${at}.maxTokens`, code: 'CONFIG_INVALID', message: 'maxTokens 必须是正整数' });
     }
+    // 沿用 DSH 的备选项：proxy 来源必须定格了宿主路由（hostProvider），否则运行时无从转发。
+    // direct 的凭据（apiKeyRef）允许为空——运行时解析不到会按现状回落到下一项，不阻断保存。
+    if (entry.source === 'dsh' && entry.mode === 'proxy' && entry.hostProvider.trim() === '') {
+      problems.push({
+        field: `${at}.hostProvider`,
+        code: 'CONFIG_INVALID',
+        message: '沿用 DSH 的代理型备选缺少宿主路由，请重新从 DSH 选择模型',
+      });
+    }
   });
 
   if (repo.path.trim() === '') {
@@ -917,6 +938,8 @@ export function toCoreConfig(
   // 旧核心的 yaml.Unmarshal 非严格、忽略未知字段，但空数组也没必要下发）。
   // 每项的 `apiKey` 只能来自宿主凭据，绝不来自 settings.json：由调用方（runner）按序
   // 解析各自 `apiKeyRef` 后经 `fallbackApiKeys` 传入；缺省为空串（与主模型 apiKey 走参数一致）。
+  // 注意：`entry.source`（custom/dsh）是纯插件侧元数据，**不**参与此处映射——dsh 项在保存时
+  // 已定格成与 custom 同形的字段，故核心对「来源」无感知。
   const fallbacks: CoreModelEntry[] = (settings.model.fallbacks ?? []).map((entry, index) => ({
     provider: entry.provider,
     name: entry.model,

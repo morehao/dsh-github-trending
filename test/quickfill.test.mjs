@@ -167,3 +167,56 @@ test('resolveFallbackKeys：单项 resolve 抛错只影响该项，后续项照�
   const { keys } = await quickfill.resolveFallbackKeys(settings, credentials, {});
   assert.deepEqual(keys, ['', 'sk-ok']);
 });
+
+test('applyCandidateToFallback：direct 候选落凭据与端点、保留温度/token、置 source=dsh', async () => {
+  const { llm, credentials } = host({ stored: { DEEPSEEK_API_KEY: 'sk-stored' } });
+  const candidates = await quickfill.listProviderCandidates({ llm, credentials, env: {} });
+  const deepseek = candidates.find((candidate) => candidate.id === 'deepseek');
+  const entry = {
+    source: 'custom',
+    provider: '',
+    mode: 'direct',
+    hostProvider: '',
+    baseURL: '',
+    model: '',
+    apiKeyRef: '',
+    temperature: 0.7,
+    maxTokens: 1234,
+  };
+  const next = quickfill.applyCandidateToFallback(entry, deepseek, 'deepseek-chat');
+  assert.equal(next.source, 'dsh');
+  assert.equal(next.provider, 'deepseek');
+  assert.equal(next.mode, 'direct');
+  assert.equal(next.hostProvider, '');
+  assert.equal(next.model, 'deepseek-chat');
+  assert.equal(next.apiKeyRef, 'DEEPSEEK_API_KEY');
+  assert.equal(next.baseURL, 'https://api.deepseek.com/v1');
+  // 保留该行自身的温度/token（不被候选覆盖）
+  assert.equal(next.temperature, 0.7);
+  assert.equal(next.maxTokens, 1234);
+});
+
+test('applyCandidateToFallback：proxy 候选清空 baseURL/apiKeyRef、填 hostProvider', async () => {
+  const { llm, credentials } = host();
+  const candidates = await quickfill.listProviderCandidates({ llm, credentials, env: {} });
+  const sso = candidates.find((candidate) => candidate.id === 'corp-sso');
+  const entry = {
+    source: 'custom',
+    provider: 'deepseek',
+    mode: 'direct',
+    hostProvider: '',
+    baseURL: 'https://stale.example/v1',
+    model: 'old',
+    apiKeyRef: 'STALE',
+    temperature: 0.2,
+    maxTokens: 2048,
+  };
+  const next = quickfill.applyCandidateToFallback(entry, sso, 'corp-sso-model');
+  assert.equal(next.source, 'dsh');
+  assert.equal(next.mode, 'proxy');
+  assert.equal(next.hostProvider, 'corp-sso');
+  assert.equal(next.baseURL, '');
+  assert.equal(next.apiKeyRef, '');
+  assert.equal(next.provider, 'openai-compatible');
+  assert.equal(next.model, 'corp-sso-model');
+});
