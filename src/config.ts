@@ -823,8 +823,8 @@ export function validateSettings(settings: Settings, providers: readonly string[
   return problems;
 }
 
-export function effectiveBaseURL(model: ModelSettings): string {
-  return model.baseURL !== '' ? model.baseURL : PROVIDER_BASE_URLS[model.provider] ?? '';
+export function effectiveBaseURL(model: { baseURL: string; provider: string }): string {
+  return model.baseURL !== '' ? model.baseURL : PROVIDER_BASE_URLS[model.provider as Provider] ?? '';
 }
 
 /**

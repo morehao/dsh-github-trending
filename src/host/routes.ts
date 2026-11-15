@@ -31,7 +31,7 @@ import { probeGithubAuth } from './github.js';
 import { attemptView, beginGithubSignIn, cancelGithubSignIn, ensureGithubFlow } from './github-auth.js';
 import { importFirstAvailable } from './import-cli.js';
 import { checkPendingPr } from './pending-pr.js';
-import { preflightModel } from './preflight.js';
+import { preflightFallback, preflightModel } from './preflight.js';
 import { applyCandidate, applyDefaultSelection, listProviderCandidates, llmServices, readDefaultSelection } from './quickfill.js';
 import { readDefaultBranch } from './repo.js';
 import { runSubscribe, isValidRepo } from './subscribe.js';
@@ -211,6 +211,19 @@ async function dispatch(
 
   if (method === 'POST' && pathname === '/preflight') {
     const candidate = body.settings === undefined ? settings : normalizeSettings(body.settings);
+    // 可选 `fallbackIndex`：给了就预检备选链上该下标的那一项，否则预检主模型。
+    // 两者共用同一套预检实现（preflight.ts），错误码与判定一致。
+    const fallbackIndex = typeof body.fallbackIndex === 'number' && Number.isInteger(body.fallbackIndex) && body.fallbackIndex >= 0 ? body.fallbackIndex : undefined;
+    if (fallbackIndex !== undefined) {
+      const result = await preflightFallback({
+        settings: candidate,
+        index: fallbackIndex,
+        credentials: credentialServices(deps.get),
+        llm: llmServices(deps.get),
+        env,
+      });
+      return { preflight: result };
+    }
     const result = await preflightModel({
       settings: candidate,
       credentials: credentialServices(deps.get),

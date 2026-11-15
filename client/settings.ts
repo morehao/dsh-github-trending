@@ -187,6 +187,10 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [notice, setNotice] = React.useState<Notice | null>(null);
   const [preflight, setPreflight] = React.useState<PreflightResult | null>(null);
   const [preflighting, setPreflighting] = React.useState(false);
+  // 备选链每项各自的预检状态：下标 → 结果 / 进行中。与主模型预检相互独立，
+  // 各自就地显示（proxied 到 /preflight 时带 fallbackIndex）。
+  const [fallbackPreflight, setFallbackPreflight] = React.useState<Record<number, PreflightResult>>({});
+  const [fallbackPreflighting, setFallbackPreflighting] = React.useState<Record<number, boolean>>({});
   const [rechecking, setRechecking] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   const [quickOpen, setQuickOpen] = React.useState(false);
@@ -338,6 +342,34 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
       setPreflight({ ok: false, message: error instanceof Error ? error.message : String(error), durationMs: 0, mode: draft.model.mode });
     } finally {
       setPreflighting(false);
+    }
+  };
+
+  // 预检备选链上的第 index 项。与主模型预检共用 /preflight（带 fallbackIndex），
+  // 结果按 index 就地存放，多项可各自进行/各自显示，互不覆盖。
+  const runFallbackPreflight = async (index: number): Promise<void> => {
+    if (draft === null) return;
+    setFallbackPreflighting((current) => ({ ...current, [index]: true }));
+    setFallbackPreflight((current) => {
+      const next = { ...current };
+      delete next[index];
+      return next;
+    });
+    const entry = fallbacksOf(draft)[index];
+    try {
+      const result = await apiCall<{ preflight: PreflightResult }>('POST', '/preflight', { settings: draft, fallbackIndex: index });
+      setFallbackPreflight((current) => ({ ...current, [index]: result.preflight }));
+    } catch (error) {
+      setFallbackPreflight((current) => ({
+        ...current,
+        [index]: { ok: false, message: error instanceof Error ? error.message : String(error), durationMs: 0, mode: entry?.mode ?? 'direct' },
+      }));
+    } finally {
+      setFallbackPreflighting((current) => {
+        const next = { ...current };
+        delete next[index];
+        return next;
+      });
     }
   };
 
@@ -771,6 +803,26 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
             ? h('span', { className: 'dshgt-hint', style: { color: 'var(--gt-warn, #b45309)' } }, t('model.fallbacks.dshUnavailable'))
             : null,
           tunables,
+          h(
+            'div',
+            { className: 'dshgt-row', style: { width: '100%', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h(
+              Btn,
+              { small: true, onClick: () => void runFallbackPreflight(index), disabled: fallbackPreflighting[index] === true },
+              fallbackPreflighting[index] === true ? t('model.preflighting') : t('model.preflight'),
+            ),
+            (() => {
+              const result = fallbackPreflight[index];
+              if (result === undefined) return null;
+              return h(
+                'span',
+                { className: 'dshgt-hint', style: { color: result.ok ? 'var(--gt-ok, #15803d)' : 'var(--gt-warn, #b45309)' } },
+                `${result.ok ? t('state.ok') : t('error.prefix')} · ${result.mode} · ${duration(result.durationMs)}${
+                  result.message === undefined ? '' : ` · ${result.message}`
+                }`,
+              );
+            })(),
+          ),
         );
       });
     })(),
