@@ -558,6 +558,33 @@ export const CSS = `
 .dshgt-addmodal{max-width:420px;}
 .dshgt-addmodal-input{height:34px;width:100%;}
 .dshgt-addmodal-err{color:var(--gt-err);}
+/* 备选模型：摘要列表（每项一行紧凑卡）+ 独立编辑弹窗 */
+.dshgt-fb-card{display:flex;align-items:center;gap:12px;border:1px solid var(--gt-border);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--gt-card));padding:10px 12px;transition:border-color .12s;}
+.dshgt-fb-card:hover{border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));}
+.dshgt-fb-rank{flex:none;width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--gt-accent);background:color-mix(in srgb,var(--gt-accent) 12%,var(--gt-bg));border:1px solid color-mix(in srgb,var(--gt-accent) 28%,var(--gt-border));}
+.dshgt-fb-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.dshgt-fb-title{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;}
+.dshgt-fb-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dshgt-fb-tag{font-size:11px;border:1px solid var(--gt-border);border-radius:5px;padding:0 6px;color:var(--gt-muted);background:var(--gt-bg);white-space:nowrap;}
+.dshgt-fb-tag.accent{color:var(--gt-accent);border-color:color-mix(in srgb,var(--gt-accent) 40%,var(--gt-border));background:color-mix(in srgb,var(--gt-accent) 8%,var(--gt-bg));}
+.dshgt-fb-sub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--gt-muted);}
+.dshgt-fb-sep{opacity:.5;}
+.dshgt-fb-preflight{display:inline-flex;align-items:center;gap:5px;font-size:12px;}
+.dshgt-fb-actions{flex:none;display:flex;align-items:center;gap:4px;}
+.dshgt-fb-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.dshgt-fb-empty{border:1px dashed var(--gt-border);border-radius:10px;padding:18px;text-align:center;color:var(--gt-muted);font-size:12px;display:flex;flex-direction:column;align-items:center;gap:10px;background:color-mix(in srgb,var(--gt-fg) 2%,var(--gt-bg));}
+/* 编辑弹窗：加宽以容纳字段网格；来源分段控件；dsh 身份块 */
+.dshgt-fb-modal{max-width:600px;}
+.dshgt-fb-modal-head{display:flex;align-items:flex-start;gap:10px;}
+.dshgt-fb-modal-head>div{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
+.dshgt-fb-modal-head h3{margin:0;}
+.dshgt-fb-fields{display:flex;flex-direction:column;gap:8px;}
+.dshgt-src-toggle{display:inline-flex;border:1px solid var(--gt-border);border-radius:9px;overflow:hidden;background:var(--gt-bg);}
+.dshgt-src-toggle button{appearance:none;font:inherit;font-size:12px;cursor:pointer;border:0;background:none;color:var(--gt-muted);padding:5px 12px;}
+.dshgt-src-toggle button[aria-pressed="true"]{background:color-mix(in srgb,var(--gt-accent) 14%,var(--gt-bg));color:var(--gt-fg);font-weight:600;}
+.dshgt-src-toggle button+button{border-left:1px solid var(--gt-border);}
+.dshgt-fb-identity{border:1px solid var(--gt-border);border-radius:9px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2,var(--gt-card));display:flex;flex-direction:column;gap:8px;}
+.dshgt-fb-identity-name{font-weight:600;font-size:13px;overflow-wrap:anywhere;}
 @media (max-width:1040px){
   .dshgt-subs-thead,.dshgt-subs-row{grid-template-columns:240px 120px 110px minmax(0,1fr);}
   .dshgt-subs-sum,.dshgt-subs-th-summary{display:none;}

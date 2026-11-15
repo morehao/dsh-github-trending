@@ -10,7 +10,7 @@
  * （需要时用环境变量或直接改 settings.json），手动 `凭据引用` 也不露出（由快速
  * 填充自动带入）。避免把开发/排障概念摊在首屏，也避免出现「点了没反应」的开关。
  */
-import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, copyText, duration, h, localTime, React } from './ui.js';
+import { Alert, Btn, Card, Chips, Input, KV, Pill, Row, Select, Toggle, copyText, duration, formatTokens, h, localTime, React } from './ui.js';
 import type { Translate } from './i18n.js';
 import {
   apiCall,
@@ -120,6 +120,29 @@ function fallbacksOf(settings: SettingsShape): ModelFallbackShape[] {
   return settings.model.fallbacks ?? [];
 }
 
+/** 备选链删除某项后，按下标索引的旁路状态（预检结果）整体前移。 */
+function shiftRecord<T>(record: Record<number, T>, removed: number, _delta: -1, _len: number): Record<number, T> {
+  const next: Record<number, T> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const index = Number(key);
+    if (index === removed) continue;
+    next[index > removed ? index - 1 : index] = value;
+  }
+  return next;
+}
+
+/** 备选链上移/下移后，交换两项的旁路状态（预检结果跟着行走）。 */
+function swapRecord<T>(record: Record<number, T>, a: number, b: number): Record<number, T> {
+  const next: Record<number, T> = { ...record };
+  const hasA = Object.prototype.hasOwnProperty.call(record, a);
+  const hasB = Object.prototype.hasOwnProperty.call(record, b);
+  if (hasA) next[b] = record[a];
+  else delete next[b];
+  if (hasB) next[a] = record[b];
+  else delete next[a];
+  return next;
+}
+
 /** 操作回执：成功只是「刚才那步成功了」，到时自动收起；失败要留到用户下一次操作。 */
 type Notice = { kind: 'ok' | 'err'; text: string };
 
@@ -196,6 +219,8 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
   const [quickOpen, setQuickOpen] = React.useState(false);
   // 当前打开「从 DSH 选择」弹层的备选下标；null=未打开。
   const [fallbackPick, setFallbackPick] = React.useState<number | null>(null);
+  // 当前在「编辑备选模型」弹窗里编辑的下标；null=未打开。列表只展示摘要，编辑落到弹窗承载。
+  const [fallbackEdit, setFallbackEdit] = React.useState<number | null>(null);
   const [section, setSection] = React.useState<SectionId>(props.initialSection ?? 'source');
   const [branchInfo, setBranchInfo] = React.useState<RepoBranchResult | null>(null);
   const [branchLoading, setBranchLoading] = React.useState(false);
@@ -287,23 +312,51 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
 
   // 备选模型链的增删改与排序：顺序即尝试顺序，按钮式上移/下移（简单可靠）。
   // 空项由 Host 的 normalizeFallbacks 在保存时剔除；这里只管编辑体验。
-  const addFallback = (): void => update((next) => {
-    next.model.fallbacks = [...fallbacksOf(next), blankFallback(next.model)];
-  });
-  const removeFallback = (index: number): void => update((next) => {
-    next.model.fallbacks = fallbacksOf(next).filter((_entry, i) => i !== index);
-  });
-  const moveFallback = (index: number, delta: -1 | 1): void => update((next) => {
-    const items = [...fallbacksOf(next)];
+  // 新增后直接打开编辑器，少一次点击（新行 provider/model 为空，需用户填）。
+  const addFallback = (): void => {
+    if (draft === null) return;
+    const nextIndex = fallbacksOf(draft).length;
+    update((next) => {
+      next.model.fallbacks = [...fallbacksOf(next), blankFallback(next.model)];
+    });
+    setFallbackEdit(nextIndex);
+  };
+  const removeFallback = (index: number): void => {
+    if (draft === null) return;
+    const nextLen = fallbacksOf(draft).length - 1;
+    update((next) => {
+      next.model.fallbacks = fallbacksOf(next).filter((_entry, i) => i !== index);
+    });
+    // 预检结果按 index 存，删除后其后的下标整体前移；同时把打开的编辑器下标对齐。
+    setFallbackPreflight((current) => shiftRecord(current, index, -1, nextLen));
+    setFallbackEdit((open) => (open === null ? null : open === index ? null : open > index ? open - 1 : open));
+  };
+  const moveFallback = (index: number, delta: -1 | 1): void => {
+    if (draft === null) return;
     const target = index + delta;
-    if (target < 0 || target >= items.length) return;
-    const [moved] = items.splice(index, 1);
-    items.splice(target, 0, moved);
-    next.model.fallbacks = items;
-  });
+    if (target < 0 || target >= fallbacksOf(draft).length) return;
+    update((next) => {
+      const items = [...fallbacksOf(next)];
+      const [moved] = items.splice(index, 1);
+      items.splice(target, 0, moved);
+      next.model.fallbacks = items;
+    });
+    // 预检结果跟着行一起换位；打开的编辑器也跟到移动后的新下标。
+    setFallbackPreflight((current) => swapRecord(current, index, target));
+    setFallbackEdit((open) => (open === index ? target : open === target ? index : open));
+  };
   const patchFallback = (index: number, patch: Partial<ModelFallbackShape>): void => update((next) => {
     next.model.fallbacks = fallbacksOf(next).map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
   });
+  // 来源切换：custom ↔ dsh。切到 custom 保留现值当草稿；切到 dsh 先清成空白沿用态，
+  // 由用户点「从 DSH 选择…」定格（避免把旧手填值误当沿用）。
+  const setFallbackSource = (index: number, next: 'custom' | 'dsh'): void => {
+    if (draft === null) return;
+    const entry = fallbacksOf(draft)[index];
+    if (entry === undefined || fallbackSource(entry) === next) return;
+    if (next === 'custom') patchFallback(index, { source: 'custom' });
+    else patchFallback(index, { source: 'dsh', hostProvider: '', apiKeyRef: '' });
+  };
 
   const save = async (section: SectionId): Promise<void> => {    if (draft === null) return;
     setSavingSection(section);
@@ -701,134 +754,68 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     h('p', { className: 'dshgt-desc' }, t('model.fallbacks.hint')),
     ...(() => {
       const items = fallbacksOf(draft);
-      // DSH 目录是否可用不在此处预判（要额外请求 /quickfill）；始终允许打开选择弹层，
-      // 目录为空时由弹层内部提示「DSH 未配置可用模型」。故这里恒 true。
-      const dshDirAvailable = true;
       if (items.length === 0) {
         return [
           h(
-            Row,
-            { label: '' },
+            'div',
+            { className: 'dshgt-fb-empty' },
             h('span', { className: 'dshgt-hint' }, t('model.fallbacks.empty')),
-            h(Btn, { small: true, onClick: addFallback }, `+ ${t('model.fallbacks.add')}`),
+            h(Btn, { small: true, variant: 'primary', onClick: addFallback }, `+ ${t('model.fallbacks.add')}`),
           ),
         ];
       }
       return items.map((entry, index) => {
         const source = fallbackSource(entry);
-        // 来源切换：custom ↔ dsh。切到 custom 保留现值当草稿；切到 dsh 先清成空白沿用态，
-        // 由用户点「从 DSH 选择…」定格（避免把旧手填值误当沿用）。
-        const setSource = (next: 'custom' | 'dsh'): void => {
-          if (next === source) return;
-          if (next === 'custom') {
-            patchFallback(index, { source: 'custom' });
-          } else {
-            patchFallback(index, { source: 'dsh', hostProvider: '', apiKeyRef: '' });
-          }
-        };
-        const sourceToggle = h(
-          'div',
-          { className: 'dshgt-row', style: { gap: 4 } },
-          h('span', { className: 'dshgt-hint' }, t('model.fallbacks.source')),
-          h(
-            Btn,
-            { small: true, variant: source === 'custom' ? 'primary' : 'ghost', onClick: () => setSource('custom') },
-            t('model.fallbacks.source.custom'),
-          ),
-          h(
-            Btn,
-            { small: true, variant: source === 'dsh' ? 'primary' : 'ghost', onClick: () => setSource('dsh') },
-            t('model.fallbacks.source.dsh'),
-          ),
-        );
-        // 只读的身份字段展示（dsh 项不允许改 provider/model/baseURL/凭据，防止「假沿用」）。
-        const pickedLabel =
-          entry.provider !== '' && entry.model !== ''
-            ? t('model.fallbacks.picked', { provider: entry.provider, model: entry.model })
-            : t('model.fallbacks.pickEmpty');
-        const dshIdentity = h(
-          'div',
-          { className: 'dshgt-row', style: { flex: 1, minWidth: 0, gap: 8, alignItems: 'center' } },
-          h('span', { className: 'dshgt-mono', style: { fontSize: 12 } }, pickedLabel),
-          h(
-            'span',
-            { className: 'dshgt-pill' },
-            entry.mode === 'proxy' ? t('model.fallbacks.proxy') : t('model.fallbacks.direct'),
-          ),
-          h(
-            Btn,
-            { small: true, onClick: () => setFallbackPick(index), disabled: !dshDirAvailable },
-            entry.provider !== '' ? t('model.fallbacks.repick') : t('model.fallbacks.pick'),
-          ),
-        );
-        const customFields = h(
-          'div',
-          { className: 'dshgt-row', style: { flex: 1, minWidth: 0, gap: 8 } },
-          h('span', { className: 'dshgt-hint' }, t('model.provider')),
-          h(Select, {
-            value: entry.provider,
-            options: [{ value: '', label: t('model.provider') }, ...providers.map((provider) => ({ value: provider, label: provider }))],
-            onChange: (value: string) => patchFallback(index, { provider: value }),
-          }),
-          h(Input, { mono: true, width: 240, value: entry.model, placeholder: t('model.model.placeholder'), onInput: (value: string) => patchFallback(index, { model: value }) }),
-          h(Input, { mono: true, width: 300, value: entry.baseURL, placeholder: t('model.baseURL.placeholder'), onInput: (value: string) => patchFallback(index, { baseURL: value }) }),
-        );
-        const tunables = h(
-          'div',
-          { className: 'dshgt-row', style: { gap: 8 } },
-          h('span', { className: 'dshgt-hint' }, t('model.temperature')),
-          h(Input, { mono: true, width: 64, value: String(entry.temperature), onInput: (value: string) => patchFallback(index, { temperature: Number(value) || 0 }) }),
-          h('span', { className: 'dshgt-hint' }, t('model.maxTokens')),
-          h(Input, { mono: true, width: 84, value: String(entry.maxTokens), onInput: (value: string) => patchFallback(index, { maxTokens: Math.round(Number(value) || 0) }) }),
-        );
+        const result = fallbackPreflight[index];
+        const modelName = entry.provider !== '' && entry.model !== '' ? `${entry.provider} / ${entry.model}` : t('model.fallbacks.pickEmpty');
+        const subParts: any[] = [
+          h('span', null, `${t('model.temperature')} ${entry.temperature}`),
+          h('span', { className: 'dshgt-fb-sep' }, '·'),
+          h('span', null, `${t('model.maxTokens')} ${formatTokens(entry.maxTokens)}`),
+          h('span', { className: 'dshgt-fb-sep' }, '·'),
+          result === undefined
+            ? h('span', null, t('model.fallbacks.notTested'))
+            : h(
+                'span',
+                { className: 'dshgt-fb-preflight', style: { color: result.ok ? 'var(--gt-ok, #15803d)' : 'var(--gt-warn, #b45309)' } },
+                h('span', { className: `dshgt-dot ${result.ok ? 'ok' : 'warn'}` }),
+                `${result.ok ? t('state.ok') : t('error.prefix')} · ${result.mode} · ${duration(result.durationMs)}`,
+              ),
+        ];
         return h(
           'div',
-          { key: index, className: 'dshgt-row dshgt-fallback-row', style: { alignItems: 'flex-start', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--gt-border)', paddingTop: 8, marginTop: 4 } },
+          { key: index, className: 'dshgt-fb-card' },
+          h('span', { className: 'dshgt-fb-rank' }, String(index + 1)),
           h(
             'div',
-            { className: 'dshgt-row', style: { width: '100%', gap: 8, alignItems: 'center' } },
-            h('label', { className: 'dshgt-label' }, h('span', { className: 'dshgt-label-text' }, t('model.fallbacks.index', { index: index + 1 }))),
-            sourceToggle,
-            h('span', { style: { flex: 1 } }),
+            { className: 'dshgt-fb-main' },
+            h(
+              'div',
+              { className: 'dshgt-fb-title' },
+              h('span', { className: 'dshgt-fb-name' }, modelName),
+              h('span', { className: `dshgt-fb-tag${source === 'dsh' ? ' accent' : ''}` }, source === 'dsh' ? t('model.fallbacks.source.dsh') : t('model.fallbacks.source.custom')),
+              h('span', { className: 'dshgt-fb-tag' }, entry.mode === 'proxy' ? t('model.fallbacks.proxy') : t('model.fallbacks.direct')),
+            ),
+            h('div', { className: 'dshgt-fb-sub' }, ...subParts),
+          ),
+          h(
+            'div',
+            { className: 'dshgt-fb-actions' },
             h(Btn, { small: true, variant: 'ghost', disabled: index === 0, title: t('model.fallbacks.moveUp'), onClick: () => moveFallback(index, -1) }, '↑'),
             h(Btn, { small: true, variant: 'ghost', disabled: index === items.length - 1, title: t('model.fallbacks.moveDown'), onClick: () => moveFallback(index, 1) }, '↓'),
-            h(Btn, { small: true, variant: 'ghost', title: t('model.fallbacks.remove'), onClick: () => removeFallback(index) }, t('model.fallbacks.remove')),
-          ),
-          h(
-            'div',
-            { className: 'dshgt-row', style: { width: '100%', gap: 8, alignItems: 'flex-start' } },
-            source === 'dsh' ? dshIdentity : customFields,
-          ),
-          source === 'dsh' && !dshDirAvailable
-            ? h('span', { className: 'dshgt-hint', style: { color: 'var(--gt-warn, #b45309)' } }, t('model.fallbacks.dshUnavailable'))
-            : null,
-          tunables,
-          h(
-            'div',
-            { className: 'dshgt-row', style: { width: '100%', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-            h(
-              Btn,
-              { small: true, onClick: () => void runFallbackPreflight(index), disabled: fallbackPreflighting[index] === true },
-              fallbackPreflighting[index] === true ? t('model.preflighting') : t('model.preflight'),
-            ),
-            (() => {
-              const result = fallbackPreflight[index];
-              if (result === undefined) return null;
-              return h(
-                'span',
-                { className: 'dshgt-hint', style: { color: result.ok ? 'var(--gt-ok, #15803d)' : 'var(--gt-warn, #b45309)' } },
-                `${result.ok ? t('state.ok') : t('error.prefix')} · ${result.mode} · ${duration(result.durationMs)}${
-                  result.message === undefined ? '' : ` · ${result.message}`
-                }`,
-              );
-            })(),
+            h(Btn, { small: true, onClick: () => setFallbackEdit(index) }, t('model.fallbacks.edit')),
+            h(Btn, { small: true, variant: 'ghost', title: t('model.fallbacks.remove'), onClick: () => removeFallback(index) }, '✕'),
           ),
         );
       });
     })(),
-    fallbacksOf(draft).length === 0
-      ? null
-      : h('div', { className: 'dshgt-row' }, h(Btn, { small: true, onClick: addFallback }, `+ ${t('model.fallbacks.add')}`)),
+    h(
+      'div',
+      { className: 'dshgt-fb-foot' },
+      h('span', { className: 'dshgt-hint' }, fallbacksOf(draft).length === 0 ? '' : t('model.fallbacks.orderHint')),
+      h('span', { style: { flex: 1 } }),
+      fallbacksOf(draft).length === 0 ? null : h(Btn, { small: true, onClick: addFallback }, `+ ${t('model.fallbacks.add')}`),
+    ),
     preflight === null
       ? null
       : h(
@@ -1268,6 +1255,23 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     quickOpen
       ? h(QuickFillModal, { t, onClose: () => setQuickOpen(false), onApplied: (settings: SettingsShape) => { setDraft(settings); setDirtySections({ ...EMPTY_DIRTY }); setSavedSection(null); void store.refresh({ quiet: true }); } })
       : null,
+    // 编辑备选模型弹窗：打开时以 fallbackEdit 为准；条目被删空则自动关闭。
+    fallbackEdit === null || fallbacksOf(draft)[fallbackEdit] === undefined
+      ? null
+      : h(FallbackEditModal, {
+          t,
+          index: fallbackEdit,
+          entry: fallbacksOf(draft)[fallbackEdit],
+          providers,
+          preflight: fallbackPreflight[fallbackEdit],
+          preflighting: fallbackPreflighting[fallbackEdit] === true,
+          onClose: () => setFallbackEdit(null),
+          onPatch: (patch: Partial<ModelFallbackShape>) => patchFallback(fallbackEdit, patch),
+          onSetSource: (next: 'custom' | 'dsh') => setFallbackSource(fallbackEdit, next),
+          onPick: () => setFallbackPick(fallbackEdit),
+          onPreflight: () => void runFallbackPreflight(fallbackEdit),
+          onRemove: () => { removeFallback(fallbackEdit); setFallbackEdit(null); },
+        }),
     fallbackPick === null
       ? null
       : h(FallbackPickerModal, {
@@ -1392,6 +1396,156 @@ function AuthSignInModal(props: {
       ),
       body,
       footer,
+    ),
+  );
+}
+
+/**
+ * 编辑备选模型弹窗：承载单条备选的完整字段。
+ *
+ * 列表只展示摘要（顺位 / 名称 / 来源 / 直传·代理 / 温度·Token / 预检），查看与编辑落到本弹窗。
+ * 弹窗内直接改 `draft`（`onPatch` 回写表单草稿，关窗即生效），最终仍由页面底部「保存设置」
+ * 统一落盘——与主模型一致，不引入第二条保存路径。来源为 dsh 时身份字段只读，仅温度/Token
+ * 可改，且可再叠一层 `FallbackPickerModal` 重新选择。
+ */
+function FallbackEditModal(props: {
+  t: Translate;
+  index: number;
+  entry: ModelFallbackShape;
+  providers: string[];
+  preflight: PreflightResult | undefined;
+  preflighting: boolean;
+  onClose: () => void;
+  onPatch: (patch: Partial<ModelFallbackShape>) => void;
+  onSetSource: (next: 'custom' | 'dsh') => void;
+  onPick: () => void;
+  onPreflight: () => void;
+  onRemove: () => void;
+}): any {
+  const { t, entry, preflight, preflighting } = props;
+  const source = fallbackSource(entry);
+
+  const sourceToggle = h(
+    'div',
+    { className: 'dshgt-src-toggle' },
+    h(
+      'button',
+      { type: 'button', 'aria-pressed': source === 'custom' ? 'true' : 'false', onClick: () => props.onSetSource('custom') },
+      t('model.fallbacks.source.custom'),
+    ),
+    h(
+      'button',
+      { type: 'button', 'aria-pressed': source === 'dsh' ? 'true' : 'false', onClick: () => props.onSetSource('dsh') },
+      t('model.fallbacks.source.dsh'),
+    ),
+  );
+
+  // dsh 身份块：只读展示，不允许改 provider/model/baseURL/凭据（防止「假沿用」）。
+  const pickedLabel =
+    entry.provider !== '' && entry.model !== ''
+      ? t('model.fallbacks.picked', { provider: entry.provider, model: entry.model })
+      : t('model.fallbacks.pickEmpty');
+  const dshIdentity = h(
+    'div',
+    { className: 'dshgt-fb-identity' },
+    h(
+      'div',
+      { className: 'dshgt-inline' },
+      h('span', { className: 'dshgt-fb-identity-name' }, pickedLabel),
+      h('span', { className: 'dshgt-pill' }, entry.mode === 'proxy' ? t('model.fallbacks.proxy') : t('model.fallbacks.direct')),
+    ),
+    h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('model.fallbacks.dshHint')),
+    h('div', { className: 'dshgt-inline' }, h(Btn, { small: true, onClick: props.onPick }, entry.provider !== '' ? t('model.fallbacks.repick') : t('model.fallbacks.pick'))),
+  );
+
+  const customFields = h(
+    'div',
+    { className: 'dshgt-fb-fields' },
+    h(
+      Row,
+      { label: t('model.provider') },
+      h(Select, {
+        value: entry.provider,
+        options: [{ value: '', label: t('model.provider') }, ...props.providers.map((provider) => ({ value: provider, label: provider }))],
+        onChange: (value: string) => props.onPatch({ provider: value }),
+      }),
+      h('span', { className: 'dshgt-hint' }, entry.mode === 'proxy' ? t('model.fallbacks.proxy') : t('model.fallbacks.direct')),
+    ),
+    h(Row, { label: t('model.baseURL') }, h(Input, {
+      mono: true,
+      width: 360,
+      value: entry.baseURL,
+      placeholder: t('model.baseURL.placeholder'),
+      onInput: (value: string) => props.onPatch({ baseURL: value }),
+    })),
+    h(Row, { label: t('model.model') }, h(Input, {
+      mono: true,
+      width: 240,
+      value: entry.model,
+      placeholder: t('model.model.placeholder'),
+      onInput: (value: string) => props.onPatch({ model: value }),
+    })),
+    h(
+      Row,
+      { label: t('model.credential') },
+      entry.mode === 'proxy'
+        ? h(Pill, { kind: 'ok' }, t('auth.hostProxy'))
+        : entry.apiKeyRef.trim() === ''
+          ? h(Pill, { kind: 'idle' }, t('model.fallbacks.keyRefEmpty'))
+          : h(Pill, { kind: 'ok' }, t('model.fallbacks.keyRef')),
+      h('span', { className: 'dshgt-hint' }, entry.mode === 'proxy' ? t('model.credential.proxyHint') : t('model.credential.directHint')),
+    ),
+  );
+
+  return h(
+    'div',
+    { className: 'dshgt-modal-mask', onClick: (event: any) => { if (event.target === event.currentTarget) props.onClose(); } },
+    h(
+      'div',
+      { className: 'dshgt-modal dshgt-fb-modal' },
+      h(
+        'div',
+        { className: 'dshgt-fb-modal-head' },
+        h(
+          'div',
+          null,
+          h('h3', { style: { margin: 0, fontSize: 14 } }, t('model.fallbacks.editTitle', { index: props.index + 1 })),
+          h('span', { className: 'dshgt-hint' }, t('model.fallbacks.editHint')),
+        ),
+        h(Btn, { small: true, variant: 'ghost', title: t('quickfill.close'), onClick: props.onClose }, '✕'),
+      ),
+      h(Row, { label: t('model.fallbacks.source') }, sourceToggle),
+      source === 'dsh' ? dshIdentity : customFields,
+      h('h4', { className: 'dshgt-subhead' }, t('model.fallbacks.params')),
+      h(
+        Row,
+        { label: t('model.temperature'), help: t('model.temperature.help') },
+        h(Input, { mono: true, width: 80, value: String(entry.temperature), onInput: (value: string) => props.onPatch({ temperature: Number(value) || 0 }) }),
+        h('span', { className: 'dshgt-hint' }, t('model.maxTokens')),
+        h(Input, { mono: true, width: 96, value: String(entry.maxTokens), onInput: (value: string) => props.onPatch({ maxTokens: Math.round(Number(value) || 0) }) }),
+      ),
+      h('h4', { className: 'dshgt-subhead' }, t('model.fallbacks.connectivity')),
+      h(
+        'div',
+        { className: 'dshgt-inline' },
+        h(Btn, { small: true, onClick: props.onPreflight, disabled: preflighting }, preflighting ? t('model.preflighting') : t('model.preflight')),
+        preflight === undefined
+          ? null
+          : h(
+              'span',
+              { className: 'dshgt-fb-preflight', style: { color: preflight.ok ? 'var(--gt-ok, #15803d)' : 'var(--gt-warn, #b45309)' } },
+              h('span', { className: `dshgt-dot ${preflight.ok ? 'ok' : 'warn'}` }),
+              `${preflight.ok ? t('state.ok') : t('error.prefix')} · ${preflight.mode} · ${duration(preflight.durationMs)}${preflight.message === undefined ? '' : ` · ${preflight.message}`}`,
+            ),
+      ),
+      h('p', { className: 'dshgt-hint', style: { margin: 0 } }, t('model.fallbacks.chainNote')),
+      h(
+        'div',
+        { className: 'dshgt-footer' },
+        h(Btn, { variant: 'danger', small: true, onClick: props.onRemove }, t('model.fallbacks.remove')),
+        h('span', { style: { flex: 1 } }),
+        h(Btn, { onClick: props.onClose }, t('model.fallbacks.done')),
+      ),
     ),
   );
 }
