@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.9.26] - 2026-11-16
+
+### Changed
+
+- **飞书（lark）默认消息类型改为 interactive 卡片**：推送正文是 Markdown，此前默认 `post`
+  会把整段塞进单个 `text` 节点、不解析 Markdown（`**`、`- ` 原样露出）。改为 `interactive`
+  互动卡片（`lark_md` 节点），标题/加粗/列表/链接正确渲染。可选项集合加入 `interactive`。
+  存量已保存的 `msgtype: post` 需手动改为（或清空回默认）`interactive` 才生效。
+- 核心版本 `dsh.core.version` 升至 `0.13.2`（trendradar：lark 默认 interactive、golib v1.38.3
+  的 gnotify/lark interactive 支持）。
+
 ## [v0.9.25] - 2026-11-16
 
 ### Features
