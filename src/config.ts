@@ -224,7 +224,7 @@ export const NOTIFY_CHANNEL_KEYS: readonly NotifyChannelKey[] = ['dingtalk', 'la
 /** 各渠道允许的 `msgtype`（核心按渠道校验，见设计 §4.1）。 */
 export const NOTIFY_MSGTYPES: Record<NotifyChannelKey, readonly string[]> = {
   dingtalk: ['markdown', 'text'],
-  lark: ['post', 'text'],
+  lark: ['interactive', 'post', 'text'],
   wecom: ['markdown', 'text'],
 };
 
@@ -406,7 +406,7 @@ export const DEFAULT_SETTINGS: Settings = {
     strategy: 'broadcast',
     channels: {
       dingtalk: { enabled: false, webhookURL: '${DINGTALK_WEBHOOK}', secret: '${DINGTALK_SECRET}', msgtype: 'markdown' },
-      lark: { enabled: false, webhookURL: '${LARK_WEBHOOK}', secret: '${LARK_SECRET}', msgtype: 'post' },
+      lark: { enabled: false, webhookURL: '${LARK_WEBHOOK}', secret: '${LARK_SECRET}', msgtype: 'interactive' },
       wecom: { enabled: false, webhookURL: '${WECOM_WEBHOOK}', secret: '', msgtype: 'markdown' },
     },
     maxReposPerSection: 10,

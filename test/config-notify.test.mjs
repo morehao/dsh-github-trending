@@ -19,7 +19,7 @@ test('notify 默认关闭、三渠道齐全、字段与 §1.1 对齐', () => {
   assert.equal(n.channels.dingtalk.webhookURL, '${DINGTALK_WEBHOOK}');
   assert.equal(n.channels.dingtalk.secret, '${DINGTALK_SECRET}');
   assert.equal(n.channels.dingtalk.msgtype, 'markdown');
-  assert.equal(n.channels.lark.msgtype, 'post');
+  assert.equal(n.channels.lark.msgtype, 'interactive');
   assert.equal(n.channels.wecom.msgtype, 'markdown');
   assert.equal(n.maxReposPerSection, 10);
   assert.equal(n.maxBodyChars, 0);

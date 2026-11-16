@@ -40,7 +40,7 @@ interface ChannelMeta {
 const CHANNELS: ChannelMeta[] = [
   { key: 'wecom', labelKey: 'notify.channel.wecom', color: '#07c160', letter: '企', msgtypes: ['markdown', 'text'], hasSecret: false, env: '${WECOM_WEBHOOK}' },
   { key: 'dingtalk', labelKey: 'notify.channel.dingtalk', color: '#1a7cf5', letter: '钉', msgtypes: ['markdown', 'text'], hasSecret: true, env: '${DINGTALK_WEBHOOK}' },
-  { key: 'lark', labelKey: 'notify.channel.lark', color: '#3370ff', letter: '飞', msgtypes: ['post', 'text'], hasSecret: true, env: '${LARK_WEBHOOK}' },
+  { key: 'lark', labelKey: 'notify.channel.lark', color: '#3370ff', letter: '飞', msgtypes: ['interactive', 'post', 'text'], hasSecret: true, env: '${LARK_WEBHOOK}' },
 ];
 
 /** 与 `src/config.ts` `DEFAULT_SETTINGS.notify` 一致的客户端兜底（旧设置缺 notify 时用）。 */
@@ -52,7 +52,7 @@ const DEFAULT_NOTIFY: NotifySettingsShape = {
   strategy: 'broadcast',
   channels: {
     dingtalk: { enabled: false, webhookURL: '${DINGTALK_WEBHOOK}', secret: '${DINGTALK_SECRET}', msgtype: 'markdown' },
-    lark: { enabled: false, webhookURL: '${LARK_WEBHOOK}', secret: '${LARK_SECRET}', msgtype: 'post' },
+    lark: { enabled: false, webhookURL: '${LARK_WEBHOOK}', secret: '${LARK_SECRET}', msgtype: 'interactive' },
     wecom: { enabled: false, webhookURL: '${WECOM_WEBHOOK}', secret: '', msgtype: 'markdown' },
   },
   maxReposPerSection: 10,
