@@ -56,6 +56,12 @@ export interface NotifyReport {
   usage?: NotifyUsage;
 }
 
+/** POST /notify/test 的返回：真实试发的逐渠道结果（ok = 所有被尝试渠道都 sent）。 */
+export interface NotifyTestResult {
+  ok: boolean;
+  report: NotifyReport;
+}
+
 export const API = '/api/morehao/github-trending';
 export const HEADER = 'x-dsh-github-trending';
 

@@ -15,6 +15,7 @@ export * as handshake from './core/handshake.js';
 export * as channel from './core/channel.js';
 export * as exec from '@morehao/dsh-plugin-kit/exec';
 export * as run from './core/run.js';
+export * as notifyTest from './core/notify-test.js';
 export * as core from './host/core.js';
 export * as credentials from './host/credentials.js';
 export * as github from './host/github.js';

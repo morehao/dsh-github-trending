@@ -65,6 +65,13 @@ export interface RunCoreOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   onStderr?: (line: string) => void;
+  /**
+   * 通知渠道 `${VAR}` 解析后的真实值（`resolveNotifyEnv` 产出）。核心从 env 展开
+   * `${VAR}`，但 sanitizedEnv 白名单不含这些自定义变量名——不注入的话，用户填
+   * `${LARK_WEBHOOK}` 时核心展开为空，推送/试发会失败。键=变量名，值=真实值；
+   * 只进子进程 env，不进 argv/日志（调用方应把这些值加入 `secrets` 供脱敏）。
+   */
+  notifyEnv?: Record<string, string>;
   /** 已知明文，用于日志脱敏。 */
   secrets?: Array<string | undefined>;
 }
@@ -155,6 +162,9 @@ export async function runCore(options: RunCoreOptions): Promise<RunCoreResult> {
       // 超时。设置里填了就显式注入（大小写两份，Go 的 ProxyFromEnvironment 与多数
       // 工具都能识别）。空/未设时不注入任何键，保持原有环境透传行为。
       ...proxyEnv(options.settings.network?.proxy),
+      // 通知渠道 ${VAR} 解析后的真实 webhook/secret：核心从 env 展开，但白名单不含
+      // 这些变量名，故显式注入（只进 env，不进 argv/日志）。
+      ...(options.notifyEnv ?? {}),
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,

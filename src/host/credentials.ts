@@ -149,3 +149,46 @@ async function defaultGhToken(fresh = false): Promise<string | undefined> {
   ghTokenCache = { value, at: Date.now() };
   return value;
 }
+
+/**
+ * 通知渠道 webhook/secret 的 `${VAR}` 解析 → 子进程环境变量。
+ *
+ * 为什么需要：核心从 env 展开 `${VAR}`（`config.go` 的 `os.ExpandEnv`），但插件 spawn
+ * 核心时用的是 `sanitizedEnv` 白名单，不含 `LARK_WEBHOOK` 之类的自定义变量名——于是用户
+ * 在界面填 `${VAR}` 时，核心拿到的展开值是空，推送/试发都会失败。这里把每个渠道配置里
+ * `${VAR}` 的**变量名**取出，经同一套 `resolveRef`（DSH 凭据服务 → 环境回退）解析成真实
+ * 值，返回一个 env 对象，由调用方并入 `sanitizedEnv(process.env, extra)`。
+ *
+ * 安全：解析结果只进子进程 env，不进 argv / 日志；调用方负责把真实值加入 `secrets`
+ * 供 `redact()` 使用。用户若直接填了真实 URL（不含 `${...}`），原样透传、无需注入。
+ */
+export async function resolveNotifyEnv(
+  services: CredentialServices | undefined,
+  channels: Record<string, { webhookURL: string; secret: string }>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Record<string, string>> {
+  const names = new Set<string>();
+  for (const channel of Object.values(channels)) {
+    for (const value of [channel.webhookURL, channel.secret]) {
+      for (const name of envVarNames(value)) names.add(name);
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const name of names) {
+    const resolved = await resolveRef(services, name, env);
+    if (resolved.value !== undefined && resolved.value !== '') out[name] = resolved.value;
+  }
+  return out;
+}
+
+/** 从字符串里取出所有 `${VAR}` 形式的变量名（去重前）。无引用返回空数组。 */
+export function envVarNames(value: string): string[] {
+  const names: string[] = [];
+  const re = /\$\{([^}]+)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value)) !== null) {
+    const name = match[1]?.trim() ?? '';
+    if (name !== '') names.push(name);
+  }
+  return names;
+}

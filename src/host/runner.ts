@@ -9,13 +9,14 @@ import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import type { Period, Settings } from '../config.js';
+import type { NotifyChannelKey, Period, Settings } from '../config.js';
 import { PERIODS, validateSettings } from '../config.js';
 import { areaOf, hintOf, reasonOf, redact } from '../errors.js';
-import { IpcError, type RunOutcome } from '../ipc.js';
+import { IpcError, compareVersions, NOTIFY_TEST_MIN_CORE_VERSION, type RunOutcome } from '../ipc.js';
 import { handshake, type HandshakeResult } from '../core/handshake.js';
 import { locateCore } from '../core/locate.js';
 import { runCore } from '../core/run.js';
+import { notifyTest, type NotifyTestResult } from '../core/notify-test.js';
 import {
   CONTENT_HASH_ALGO_V2,
   newRunId,
@@ -29,7 +30,7 @@ import {
 import { inspectCore, type CoreStatus } from './core.js';
 import { resolveOutputLanguage, type ResolvedOutputLanguage } from './host-language.js';
 import type { HostLanguageReader } from './host-locale.js';
-import { credentialServices, resolveGithubToken } from './credentials.js';
+import { credentialServices, resolveGithubToken, resolveNotifyEnv } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
 import { ProxyPool, type ProxyTarget } from './proxy.js';
 import { isoWeekKey, zonedDateString } from './schedule.js';
@@ -269,6 +270,10 @@ export class Runner {
         store.appendLog(logFile, '[github] 未找到 token：push/PR 会失败并返回 GITHUB_AUTH（dryRun 不受影响）');
       }
 
+      // 通知渠道 ${VAR} 解析为真实值并注入子进程 env（核心从 env 展开 ${VAR}）。
+      const notifyEnv = await resolveNotifyEnv(credentials, model.effectiveSettings.notify.channels, env);
+      const notifySecrets = Object.values(notifyEnv);
+
       const result = await runCore({
         core,
         version: handshakeResult.version,
@@ -285,7 +290,8 @@ export class Runner {
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         timeoutMs: settings.run.timeoutMs,
-        secrets: [apiKey, ...model.fallbackApiKeys, github.token],
+        ...(Object.keys(notifyEnv).length === 0 ? {} : { notifyEnv }),
+        secrets: [apiKey, ...model.fallbackApiKeys, github.token, ...notifySecrets],
         onStderr: (line) => store.appendLog(logFile, line),
       });
       const outcome: RunOutcome = result.outcome;
@@ -421,6 +427,7 @@ export class Runner {
       // 订阅数只服务于把 `auto` 并发/预算解析成数字；读不到按 0（最保守的并发），
       // 绝不因为「数不清订阅」而让整次发版运行失败。
       const repoCount = await this.subscriptionCount(core.path, env);
+      const notifyEnvRelease = await resolveNotifyEnv(credentials, model.effectiveSettings.notify.channels, env);
       const result = await runCore({
         core,
         version: handshakeResult.version,
@@ -440,7 +447,8 @@ export class Runner {
         ...(model.baseURLOverride === undefined ? {} : { baseURLOverride: model.baseURLOverride }),
         signal: controller.signal,
         timeoutMs: settings.run.timeoutMs,
-        secrets: [model.apiKey, ...model.fallbackApiKeys, github.token],
+        ...(Object.keys(notifyEnvRelease).length === 0 ? {} : { notifyEnv: notifyEnvRelease }),
+        secrets: [model.apiKey, ...model.fallbackApiKeys, github.token, ...Object.values(notifyEnvRelease)],
         onStderr: (line) => store.appendLog(logFile, line),
       });
       return this.recordReleaseRun({
@@ -473,6 +481,35 @@ export class Runner {
     } catch {
       return now.toISOString().slice(0, 10);
     }
+  }
+
+  /**
+   * 试发单渠道 webhook（或全部已启用渠道）：真实发送一条测试消息，返回逐渠道结果。
+   *
+   * 与 `run` 的区别：不抓取/不调模型/不碰仓库，不占用单运行并发锁（轻量、可并发）。
+   * 核心从 env 展开 `${VAR}`，故这里同样解析并注入 `notifyEnv`（否则 `${VAR}` 配置拿不到地址）。
+   */
+  async testNotify(options: { channel?: NotifyChannelKey } = {}): Promise<NotifyTestResult> {
+    const env = this.deps.env ?? process.env;
+    const settings = this.deps.store.readSettings();
+    const credentials = credentialServices(this.deps.get);
+
+    const core = await locateCore({ settings, env, allowDownload: settings.coreAutoDownload });
+    const handshakeResult = await handshake(core);
+    if (compareVersions(handshakeResult.version.version, NOTIFY_TEST_MIN_CORE_VERSION) < 0) {
+      throw new IpcError(
+        'CORE_INCOMPATIBLE',
+        `当前核心 ${handshakeResult.version.version} 不支持 webhook 试发：需要 trendradar ≥ ${NOTIFY_TEST_MIN_CORE_VERSION}。请在设置页「核心」点「下载核心」升级后再试。`,
+      );
+    }
+
+    const notifyEnv = await resolveNotifyEnv(credentials, settings.notify.channels, env);
+    return notifyTest({
+      core,
+      settings,
+      ...(options.channel === undefined ? {} : { channel: options.channel }),
+      ...(Object.keys(notifyEnv).length === 0 ? {} : { notifyEnv }),
+    });
   }
 
   /** 订阅仓库数（best-effort，只影响 auto 解析）：任何失败都当 0，不阻塞发版运行。 */

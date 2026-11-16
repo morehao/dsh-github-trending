@@ -19,6 +19,8 @@ import type {
   FileArtifact,
   RunResult,
   Usage,
+  NotifyReport,
+  NotifyChannelResult,
   ReleasesReport,
   SubscriptionDoc,
   SubscriptionItem,
@@ -34,6 +36,8 @@ export type {
   FileArtifact,
   RunRequest,
   RunResult,
+  NotifyReport,
+  NotifyChannelResult,
   State,
   StateRun,
   Usage,
@@ -65,6 +69,12 @@ export const SUPPORTED_CONTRACT_MAJOR = 0;
  * 版本号本身仍会被这里拦下（与 `dsh.core.version` 同源语义）。
  */
 export const MIN_CORE_VERSION = '0.12.0';
+
+/**
+ * 支持 `notify test`（webhook 试发）的最低核心版本。
+ * 低于此版本的核心没有该子命令；试发时会给出「升级核心」的清晰提示，而不是裸 IPC 错误。
+ */
+export const NOTIFY_TEST_MIN_CORE_VERSION = '0.13.1';
 
 /**
  * 比较两个 `x.y.z` 形态的版本（忽略预发布后缀，缺失段按 0）。

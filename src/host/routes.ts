@@ -20,6 +20,7 @@ import {
   SETTINGS_SECTIONS,
   type Settings,
   type SettingsSection,
+  type NotifyChannelKey,
 } from '../config.js';
 import { redact } from '../errors.js';
 import { IpcError } from '../ipc.js';
@@ -338,6 +339,21 @@ async function dispatch(
     // 操作完成后回最新列表（再次 list）；items 与 GET 保持同一形状（恒为数组）。
     const latest = await runSubscribe({ action: 'list' }, { store: deps.store, env });
     return { repos: latest.ok ? latest.repos : [], items: latest.ok ? (latest.items ?? []) : [] };
+  }
+
+  if (method === 'POST' && pathname === '/notify/test') {
+    // 试发单渠道 webhook（或全部已启用渠道）：真实发送一条测试消息，逐渠道返回 status。
+    // channel 可省略（=全部已启用）；非法值直接 CONFIG_INVALID。
+    const raw = body.channel;
+    let channel: NotifyChannelKey | undefined;
+    if (raw !== undefined && raw !== null && raw !== '') {
+      if (raw !== 'dingtalk' && raw !== 'lark' && raw !== 'wecom') {
+        throw new IpcError('CONFIG_INVALID', `未知渠道：${String(raw)}（可选 dingtalk / lark / wecom）`);
+      }
+      channel = raw;
+    }
+    const result = await deps.runner.testNotify(channel === undefined ? {} : { channel });
+    return { ok: result.ok, report: result.report };
   }
 
   if (method === 'POST' && pathname === '/github/test') {

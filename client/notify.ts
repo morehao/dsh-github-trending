@@ -19,11 +19,12 @@ import {
   type NotifyChannelSettingsShape,
   type NotifyMessage,
   type NotifyReport,
+  type NotifyTestResult,
   type NotifySettingsShape,
   type RunRecord,
   type SettingsShape,
 } from './api.js';
-import { isChannelConfigured } from './notify-webhook.js';
+import { hasRealWebhook, isChannelConfigured } from './notify-webhook.js';
 
 /** 渠道静态元数据（顺序即界面展示顺序：企微 / 钉钉 / 飞书）。 */
 interface ChannelMeta {
@@ -156,6 +157,8 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
   const [savedNotice, setSavedNotice] = useAutoDismiss<string>();
   const [error, setError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'trending' | 'releases'>('all');
+  // 逐渠道试发状态：'testing' → 结果（'ok' 或错误文本）。成功自动消失（错误常驻）。
+  const [testState, setTestState] = React.useState<Record<string, 'testing' | 'ok' | string>>({});
 
   // 进入页/外部设置刷新时，只要本地没有未保存改动就同步成最新（否则保留用户草稿）。
   const baselineRef = React.useRef<NotifySettingsShape>(settingsNotify);
@@ -208,8 +211,39 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
     }
   };
 
-  // 测试按钮已移除：当前版本没有「试发单渠道」的真实接口，前端的「假测试」只会误导用户
-  // （见 AGENTS：不伪装成功）。等契约定义试发接口后再放出。
+  // 试发单渠道：调 Host `/notify/test`，由核心真实发送一条测试消息，返回逐渠道 status。
+  // 注意：Host 侧 runner 读的是「已保存的设置」，所以有未保存改动（dirty）时先让用户保存，
+  // 避免「测的是旧 webhook」。成功自动消失；失败（含未保存提示）常驻。
+  const testChannel = (channel: ChannelMeta): void => {
+    if (dirty) {
+      setTestState((current) => ({ ...current, [channel.key]: t('notify.test.needSave') + '|err' }));
+      return;
+    }
+    const cfg = draft.channels[channel.key];
+    if (!hasRealWebhook(cfg)) {
+      setTestState((current) => ({ ...current, [channel.key]: t('notify.test.empty') + '|err' }));
+      return;
+    }
+    setTestState((current) => ({ ...current, [channel.key]: 'testing' }));
+    void (async () => {
+      try {
+        const result = await apiCall<NotifyTestResult>('POST', '/notify/test', { channel: channel.key });
+        const outcome = testOutcomeOf(result.report, channel.key);
+        const okText = t('notify.test.ok');
+        setTestState((current) => ({ ...current, [channel.key]: outcome.ok ? okText : `${outcome.message}|err` }));
+        // 成功后 5s 自动清掉本渠道提示（错误常驻，不自动退场）。
+        if (outcome.ok) {
+          const key = channel.key;
+          setTimeout(() => {
+            setTestState((current) => (current[key] === okText ? { ...current, [key]: undefined as never } : current));
+          }, 5000);
+        }
+      } catch (failure) {
+        const message = failure instanceof Error ? failure.message : String(failure);
+        setTestState((current) => ({ ...current, [channel.key]: t('notify.test.failed', { message }) + '|err' }));
+      }
+    })();
+  };
 
   const online = CHANNELS.filter((channel) => draft.channels[channel.key].enabled).length;
 
@@ -282,9 +316,11 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
               channel,
               cfg: draft.channels[channel.key],
               expanded: expanded[channel.key] === true,
+              testState: testState[channel.key],
               onToggle: () => update((d) => { d.channels[channel.key].enabled = !d.channels[channel.key].enabled; }),
               onExpand: () => setExpanded((current) => ({ ...current, [channel.key]: !current[channel.key] })),
               onWebhook: (value) => update((d) => { d.channels[channel.key].webhookURL = value; }),
+              onTest: () => testChannel(channel),
             })),
           ),
         ),
@@ -413,15 +449,18 @@ interface ChannelCardProps {
   channel: ChannelMeta;
   cfg: NotifyChannelSettingsShape;
   expanded: boolean;
+  testState: 'testing' | 'ok' | string | undefined;
   onToggle: () => void;
   onExpand: () => void;
   onWebhook: (value: string) => void;
+  onTest: () => void;
 }
 
 function renderChannelCard(props: ChannelCardProps): any {
-  const { t, channel, cfg, expanded } = props;
+  const { t, channel, cfg, expanded, testState } = props;
   const on = cfg.enabled;
   const configured = isChannelConfigured(cfg);
+  const testing = testState === 'testing';
   const name = t(channel.labelKey);
   return h(
     'div',
@@ -448,6 +487,10 @@ function renderChannelCard(props: ChannelCardProps): any {
       h(
         'div',
         { className: 'dshgt-chcard-right' },
+        // 已配置才给「测试」按钮：真实试发（核心发送一条消息），不是前端假校验。
+        on && configured
+          ? h('span', { onClick: (event: any) => event.stopPropagation() }, h(Btn, { small: true, onClick: props.onTest, disabled: testing }, testing ? t('notify.test.testing') : t('notify.test.button')))
+          : null,
         h('span', { onClick: (event: any) => event.stopPropagation() }, h(Toggle, { checked: on, onChange: props.onToggle })),
         h('span', { className: `dshgt-chcard-caret${expanded ? ' open' : ''}` }, '▸'),
       ),
@@ -462,6 +505,10 @@ function renderChannelCard(props: ChannelCardProps): any {
             h(Input, { mono: true, width: 300, value: cfg.webhookURL, onInput: props.onWebhook }),
             configured ? h(Pill, { kind: 'ok' }, t('notify.channels.configured')) : h(Pill, { kind: 'warn' }, t('notify.channels.unconfigured')),
           ),
+          // 试发结果：成功自动消失、失败常驻（错误类不自动退场）。
+          testState !== undefined && testState !== 'testing'
+            ? h(Alert, { kind: testState.endsWith('|err') ? 'err' : 'ok' }, testState.replace('|err', ''))
+            : null,
           // 加签密钥 / 消息类型改为渠道默认值，不再让用户填写（见设计文档 ④）。
         )
       : null,
@@ -535,4 +582,17 @@ function shortStamp(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+}
+
+/** 从试发报告里取单渠道结果：ok=该渠道 sent；否则带失败原因。 */
+function testOutcomeOf(report: NotifyReport, channelKey: NotifyChannelKey): { ok: boolean; message: string } {
+  for (const message of report.messages) {
+    for (const channel of message.channels) {
+      if (channel.channel === channelKey) {
+        if (channel.status === 'sent') return { ok: true, message: '' };
+        return { ok: false, message: channel.error ?? channel.status };
+      }
+    }
+  }
+  return { ok: false, message: 'no-result' };
 }
