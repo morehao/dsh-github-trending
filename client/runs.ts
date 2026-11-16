@@ -11,6 +11,7 @@ import type { StoreValue } from './store.js';
 import type { RunController } from './run-controller.js';
 import { LiveRun } from './live-run.js';
 import { reasonHint, skipHint } from './error-copy.js';
+import { NotifyPushRecord } from './notify.js';
 import { digestTarget } from './digest-core.js';
 
 /** 记录类型：日报（榜单运行）与订阅（每周 Release 检查）是两个来源。 */
@@ -282,6 +283,8 @@ export function RunsView(props: RunsProps): any {
               detailItem(t, 'runs.detail.tokens', record.tokens === undefined ? t('runs.detail.tokensNone') : h('span', { className: 'dshgt-mono' }, `${formatTokens(record.tokens)} tokens`)),
             ),
             record.releases === undefined ? null : ReleasesDetail({ t, record }),
+            // 推送结果：仅本次运行确有推送（attempted=true）时出现；未推送/跳过/旧核心不显示。
+            record.notify !== undefined && record.notify.attempted === true ? NotifyDetail({ t, record }) : null,
             record.legacy === true ? h('div', { className: 'dshgt-hint' }, t('runs.legacyHint')) : null,
             h(
               'div',
@@ -504,6 +507,69 @@ function ReleasesDetail(props: { t: Translate; record: RunRecord }): any {
         .filter(([, value]) => value !== undefined)
         .map(([label, value]) => h('span', { className: 'dshgt-releases-stat', key: label }, h('span', { className: 'dshgt-hint' }, label), h('span', { className: 'dshgt-mono' }, String(value)))),
     ),
+  );
+}
+
+/**
+ * 运行详情里的「推送结果」块。
+ *
+ * 数据来自本次运行的 `record.notify`（契约 RunResult.notify）。一次运行通常只推 1 条
+ * （榜单运行推榜单摘要、订阅运行推订阅摘要，两条路径各自独立）；仍按 messages 遍历以兼容
+ * 极端多消息场景。统计按「尝试渠道」口径：非 disabled 的渠道计入尝试，sent 计入送达。
+ */
+function NotifyDetail(props: { t: Translate; record: RunRecord }): any {
+  const { t, record } = props;
+  const report = record.notify;
+  if (report === undefined) return null;
+  const messages = report.messages;
+  const perTokens = report.usage?.usageKnown === true && messages.length > 0
+    ? Math.round((report.usage.totalTokens ?? 0) / messages.length)
+    : undefined;
+  // 渠道统计（跨消息汇总）。
+  let attempted = 0;
+  let sent = 0;
+  for (const message of messages) {
+    for (const channel of message.channels) {
+      if (channel.status === 'disabled') continue;
+      attempted += 1;
+      if (channel.status === 'sent') sent += 1;
+    }
+  }
+  const failed = attempted - sent;
+  const rate = attempted === 0 ? null : Math.round((sent / attempted) * 100);
+  return h(
+    'div',
+    { className: 'dshgt-run-notify' },
+    h('div', { className: 'dshgt-run-notify-h' }, h('h4', null, t('runs.detail.notify'))),
+    h(
+      'div',
+      { className: 'dshgt-statgrid' },
+      statCell(String(sent), t('runs.notify.sent'), 'ok'),
+      statCell(String(failed), t('runs.notify.failed'), failed > 0 ? 'warn' : ''),
+      statCell(rate === null ? '—' : `${rate}%`, t('runs.notify.rate')),
+      statCell(String(attempted), t('runs.notify.attempted')),
+    ),
+    h(
+      'div',
+      { className: 'dshgt-pushlist' },
+      messages.map((message, index) => h(NotifyPushRecord, {
+        key: `${record.id}-${index}`,
+        t,
+        message,
+        rowKey: `${record.id}-${index}`,
+        ...(perTokens === undefined ? {} : { tokens: perTokens }),
+      })),
+    ),
+  );
+}
+
+/** 统计小格：值与标签；tone 控制数值着色（ok/warn/默认）。 */
+function statCell(value: string, label: string, tone: '' | 'ok' | 'warn' = ''): any {
+  return h(
+    'div',
+    { className: 'dshgt-statcell' },
+    h('div', { className: `dshgt-statcell-v${tone === '' ? '' : ' ' + tone}` }, value),
+    h('div', { className: 'dshgt-statcell-k' }, label),
   );
 }
 

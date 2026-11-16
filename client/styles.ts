@@ -672,16 +672,20 @@ export const CSS = `
   .dshgt-authcode-value{font-size:24px;letter-spacing:4px;}
 }
 
-/* ── 通知页（notify）───────────────────────────────────────────── */
-.dshgt-notify-2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.08fr);gap:16px;align-items:start;}
-.dshgt-notify-col{display:flex;flex-direction:column;gap:14px;min-width:0;}
+/* ── 推送通知（设置页 notify 分区 + 运行记录详情「推送结果」）────────────── */
+.dshgt-notify-stack{display:flex;flex-direction:column;gap:14px;min-width:0;}
 .dshgt-notify-dim{opacity:.55;}
+/* 运行记录详情内的「推送结果」块 */
+.dshgt-run-notify{padding-top:12px;border-top:1px solid color-mix(in srgb,var(--gt-border) 70%,transparent);display:flex;flex-direction:column;gap:10px;}
+.dshgt-run-notify-h{margin:0;font-size:12.5px;font-weight:600;}
+.dshgt-run-notify-h h4{margin:0;font-size:12.5px;font-weight:600;}
 /* 渠道卡 */
 .dshgt-chcard{border:1px solid var(--gt-border);border-radius:10px;background:var(--gt-bg);overflow:hidden;}
 .dshgt-chcard.on{background:color-mix(in srgb,var(--gt-accent) 4%,var(--gt-bg));}
 .dshgt-chcard-h{display:flex;align-items:center;gap:10px;padding:10px 12px;}
 .dshgt-chcard-h.clickable{cursor:pointer;}
-.dshgt-chbadge{width:26px;height:26px;border-radius:7px;color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none;}
+.dshgt-chbadge{width:26px;height:26px;border-radius:7px;color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none;overflow:hidden;}
+.dshgt-chbadge svg{width:16px;height:16px;display:block;}
 .dshgt-chcard-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;}
 .dshgt-chcard-sub{font-size:11.5px;color:var(--gt-muted);margin-top:1px;}
 .dshgt-chcard-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none;}
@@ -719,7 +723,6 @@ export const CSS = `
 .dshgt-notice{display:flex;align-items:center;gap:8px;}
 .dshgt-notice .dshgt-notice-x{margin-left:auto;}
 @media (max-width:720px){
-  .dshgt-notify-2col{grid-template-columns:minmax(0,1fr);}
   .dshgt-statgrid{grid-template-columns:repeat(2,1fr);}
 }
 `;

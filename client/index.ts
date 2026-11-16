@@ -18,7 +18,6 @@ import { OverviewView } from './overview.js';
 import { RunsView } from './runs.js';
 import { DigestView } from './digest.js';
 import { SubscriptionsView } from './subscriptions.js';
-import { NotifyView } from './notify.js';
 import { AboutDialog } from './about.js';
 import { IdentityBar } from './identity-bar.js';
 import { RestoreNotice } from './restore-notice.js';
@@ -39,13 +38,12 @@ interface Slots {
   inject: (name: string, factory: () => unknown) => () => void;
 }
 
-type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'notify' | 'settings';
+type ViewId = 'overview' | 'digest' | 'runs' | 'subscriptions' | 'settings';
 
 const NAV: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: 'overview', label: 'nav.overview', icon: 'grid' },
   { id: 'digest', label: 'nav.digest', icon: 'doc' },
   { id: 'subscriptions', label: 'nav.subscriptions', icon: 'rss' },
-  { id: 'notify', label: 'nav.notify', icon: 'bell' },
   { id: 'runs', label: 'nav.runs', icon: 'list' },
   { id: 'settings', label: 'nav.settings', icon: 'sliders' },
 ];
@@ -236,9 +234,7 @@ export function apply(ctx: any): void {
             ? h(RunsView, { t, store: value, controller, onOpenDigest: openDigest })
             : view === 'subscriptions'
               ? h(SubscriptionsView, { t, store: value, onOpenSettings: openSettings })
-              : view === 'notify'
-                ? h(NotifyView, { t, store: value })
-                : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
+              : h(SettingsView, { t, store: value, pickDirectory, onOpenSubscriptions: openSubscriptions });
 
     return h(
       'div',

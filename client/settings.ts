@@ -29,15 +29,16 @@ import {
 } from './api.js';
 import type { StoreValue } from './store.js';
 import { credentialView } from './credential.js';
+import { NotifySettingsSection, DEFAULT_NOTIFY } from './notify.js';
 
 const LANGUAGES = ['all', 'typescript', 'python', 'go', 'rust', 'java', 'c', 'cpp', 'javascript', 'csharp'];
 
-type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'releases';
+type SectionId = 'source' | 'model' | 'repo' | 'auth' | 'scope' | 'releases' | 'notify';
 
 /** 分区顺序，与左侧 tab 一致；用于「是否还有未保存改动」的判定。 */
-const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'releases'];
+const SECTIONS: SectionId[] = ['source', 'model', 'repo', 'auth', 'scope', 'releases', 'notify'];
 
-const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, releases: false };
+const EMPTY_DIRTY: Record<SectionId, boolean> = { source: false, model: false, repo: false, auth: false, scope: false, releases: false, notify: false };
 
 function cloneSettings(settings: SettingsShape): SettingsShape {
   return JSON.parse(JSON.stringify(settings)) as SettingsShape;
@@ -64,6 +65,8 @@ function sectionSlice(settings: SettingsShape, section: SectionId): Record<strin
       };
     case 'releases':
       return { releases: settings.releases };
+    case 'notify':
+      return { notify: settings.notify };
   }
 }
 
@@ -618,6 +621,7 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     { id: 'auth', label: t('st.auth') },
     { id: 'scope', label: t('st.scope') },
     { id: 'releases', label: t('st.releases') },
+    { id: 'notify', label: t('st.notify') },
   ];
 
   const sourceCard = h(
@@ -1200,13 +1204,26 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
     ),
   );
 
+  // 推送通知分区：受控组件，编辑 draft.notify，随设置页统一「保存设置」落盘（section='notify'）。
+  const notifyCard = h(NotifySettingsSection, {
+    t,
+    draft: draft?.notify ?? DEFAULT_NOTIFY,
+    update: (mutate: (next: NonNullable<SettingsShape['notify']>) => void) => update((next) => {
+      const current = next.notify ?? (JSON.parse(JSON.stringify(DEFAULT_NOTIFY)) as NonNullable<SettingsShape['notify']>);
+      next.notify = current;
+      mutate(current);
+    }),
+    dirty: dirtySections.notify,
+  });
+
   const currentCard =
     section === 'source' ? sourceCard
       : section === 'model' ? modelCard
         : section === 'repo' ? repoCard
           : section === 'auth' ? authCard
             : section === 'scope' ? scopeCard
-              : releasesCard;
+              : section === 'notify' ? notifyCard
+                : releasesCard;
 
   return h(
     'div',
