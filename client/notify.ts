@@ -23,6 +23,7 @@ import {
   type RunRecord,
   type SettingsShape,
 } from './api.js';
+import { isChannelConfigured } from './notify-webhook.js';
 
 /** 渠道静态元数据（顺序即界面展示顺序：企微 / 钉钉 / 飞书）。 */
 interface ChannelMeta {
@@ -99,10 +100,7 @@ function sameNotify(a: NotifySettingsShape, b: NotifySettingsShape): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** 渠道是否「已配置」：启用且 webhook 非空且不是纯占位符（有内容即视为已配置）。 */
-function isChannelConfigured(channel: NotifyChannelSettingsShape): boolean {
-  return channel.enabled && channel.webhookURL.trim() !== '';
-}
+/** 纯 `${VAR}` 占位引用与「已配置」判定见 `notify-webhook.ts`（无 React 依赖，便于单测）。 */
 
 /** 推送记录的汇总状态：从逐渠道 status 推导 sent / partial / failed / skipped。 */
 type RecordStatus = 'sent' | 'partial' | 'failed' | 'skipped';
@@ -158,7 +156,6 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
   const [savedNotice, setSavedNotice] = useAutoDismiss<string>();
   const [error, setError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<'all' | 'trending' | 'releases'>('all');
-  const [testState, setTestState] = React.useState<Record<string, 'testing' | 'ok' | string>>({});
 
   // 进入页/外部设置刷新时，只要本地没有未保存改动就同步成最新（否则保留用户草稿）。
   const baselineRef = React.useRef<NotifySettingsShape>(settingsNotify);
@@ -211,18 +208,8 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
     }
   };
 
-  // 测试按钮：契约未定义「试发单渠道」的独立接口（设计 §8 的后续 PR），这里只做前端占位校验：
-  // 未填 webhook → 明确提示；已填 → 提示「测试需要真实发送，当前版本暂未接入」，避免假装成功。
-  const testChannel = (channel: ChannelMeta): void => {
-    const cfg = draft.channels[channel.key];
-    if (cfg.webhookURL.trim() === '') {
-      setTestState((current) => ({ ...current, [channel.key]: t('notify.channels.testEmpty') + '|err' }));
-      return;
-    }
-    setTestState((current) => ({ ...current, [channel.key]: 'testing' }));
-    // 无真实发送接口：给出诚实结论（错误常驻），不伪装成已发送。
-    setTestState((current) => ({ ...current, [channel.key]: t('notify.channels.testEmpty') + '|err' }));
-  };
+  // 测试按钮已移除：当前版本没有「试发单渠道」的真实接口，前端的「假测试」只会误导用户
+  // （见 AGENTS：不伪装成功）。等契约定义试发接口后再放出。
 
   const online = CHANNELS.filter((channel) => draft.channels[channel.key].enabled).length;
 
@@ -295,13 +282,9 @@ export function NotifyView(props: { t: Translate; store: StoreValue }): any {
               channel,
               cfg: draft.channels[channel.key],
               expanded: expanded[channel.key] === true,
-              testState: testState[channel.key],
               onToggle: () => update((d) => { d.channels[channel.key].enabled = !d.channels[channel.key].enabled; }),
               onExpand: () => setExpanded((current) => ({ ...current, [channel.key]: !current[channel.key] })),
-              onTest: () => testChannel(channel),
               onWebhook: (value) => update((d) => { d.channels[channel.key].webhookURL = value; }),
-              onSecret: (value) => update((d) => { d.channels[channel.key].secret = value; }),
-              onMsgtype: (value) => update((d) => { d.channels[channel.key].msgtype = value; }),
             })),
           ),
         ),
@@ -430,17 +413,13 @@ interface ChannelCardProps {
   channel: ChannelMeta;
   cfg: NotifyChannelSettingsShape;
   expanded: boolean;
-  testState: 'testing' | 'ok' | string | undefined;
   onToggle: () => void;
   onExpand: () => void;
-  onTest: () => void;
   onWebhook: (value: string) => void;
-  onSecret: (value: string) => void;
-  onMsgtype: (value: string) => void;
 }
 
 function renderChannelCard(props: ChannelCardProps): any {
-  const { t, channel, cfg, expanded, testState } = props;
+  const { t, channel, cfg, expanded } = props;
   const on = cfg.enabled;
   const configured = isChannelConfigured(cfg);
   const name = t(channel.labelKey);
@@ -469,10 +448,7 @@ function renderChannelCard(props: ChannelCardProps): any {
       h(
         'div',
         { className: 'dshgt-chcard-right' },
-        on && configured
-          ? h('span', { onClick: (event: any) => event.stopPropagation() }, h(Btn, { small: true, onClick: props.onTest }, testState === 'testing' ? t('notify.channels.testing') : t('notify.channels.test')))
-          : null,
-        h('span', { onClick: (event: any) => event.stopPropagation() }, h(Toggle, { checked: on, onChange: props.onToggle, label: name })),
+        h('span', { onClick: (event: any) => event.stopPropagation() }, h(Toggle, { checked: on, onChange: props.onToggle })),
         h('span', { className: `dshgt-chcard-caret${expanded ? ' open' : ''}` }, '▸'),
       ),
     ),
@@ -486,25 +462,7 @@ function renderChannelCard(props: ChannelCardProps): any {
             h(Input, { mono: true, width: 300, value: cfg.webhookURL, onInput: props.onWebhook }),
             configured ? h(Pill, { kind: 'ok' }, t('notify.channels.configured')) : h(Pill, { kind: 'warn' }, t('notify.channels.unconfigured')),
           ),
-          channel.hasSecret
-            ? h(
-                Row,
-                { label: t('notify.field.secret'), help: t('notify.field.secretHelp', { name }) },
-                h(Input, { mono: true, password: true, width: 260, value: cfg.secret, onInput: props.onSecret }),
-              )
-            : null,
-          h(
-            Row,
-            { label: t('notify.field.msgtype') },
-            h(Select, {
-              value: cfg.msgtype,
-              onChange: props.onMsgtype,
-              options: channel.msgtypes.map((type) => ({ value: type, label: type })),
-            }),
-          ),
-          testState !== undefined && testState !== 'testing'
-            ? h(Alert, { kind: testState.endsWith('|err') ? 'err' : 'ok' }, testState.replace('|err', ''))
-            : null,
+          // 加签密钥 / 消息类型改为渠道默认值，不再让用户填写（见设计文档 ④）。
         )
       : null,
   );

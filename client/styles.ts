@@ -684,7 +684,9 @@ export const CSS = `
 .dshgt-chbadge{width:26px;height:26px;border-radius:7px;color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none;}
 .dshgt-chcard-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;}
 .dshgt-chcard-sub{font-size:11.5px;color:var(--gt-muted);margin-top:1px;}
-.dshgt-chcard-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.dshgt-chcard-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none;}
+/* 开关固定槽：无论渠道名长短，各卡开关都落在同一列（右侧 = 开关 36 + 间距 10 + 三角 12）。 */
+.dshgt-chcard-right>.dshgt-inline{flex:none;}
 .dshgt-chcard-caret{color:var(--gt-muted);width:12px;text-align:center;font-size:11px;transition:transform .12s;}
 .dshgt-chcard-caret.open{transform:rotate(90deg);}
 .dshgt-chcard-body{padding:11px 12px;border-top:1px solid var(--gt-border);display:flex;flex-direction:column;gap:8px;}
