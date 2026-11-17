@@ -20,6 +20,7 @@ import {
   SETTINGS_SECTIONS,
   type Settings,
   type SettingsSection,
+  type Problem,
   type NotifyChannelKey,
 } from '../config.js';
 import { redact } from '../errors.js';
@@ -58,6 +59,75 @@ function isAuthorizationAvailable(get: (name: string) => unknown): boolean {
 function browserSignInAvailable(deps: RouteDeps): boolean {
   if (!isAuthorizationAvailable(deps.get)) return false;
   return ensureGithubFlow(githubAuthDeps(deps));
+}
+
+/**
+ * P2：校验代理模式下的 `hostProvider` 是否指向宿主当前真实存在的 provider 路由。
+ *
+ * 只在拿到 live 路由清单（`listProviders`）时校验；拿不到（宿主未提供该能力）或清单为空
+ * 时**跳过**——宁可漏报也不要误伤（宿主 provider 列表偶发为空不应阻断保存）。
+ * 主模型与备选链每一项的 `hostProvider` 都检查；`mode=direct` 或 `hostProvider=''` 的项跳过。
+ */
+/**
+ * P2：校验代理模式下 `hostProvider`（及 `model` id）是否指向宿主当前真实存在的路由/模型。
+ *
+ * 为什么还要查 model id：宿主 provider 常常是稳定的（如所有模型都挂在 `magpie` 下），
+ * 用户「切换模型」只改 model id、不改 provider——所以只查 provider 抓不到「快照里的 model
+ * 已被移除/改名」。这里对存在的 provider 再取一次模型目录核对 model id。
+ *
+ * 保守原则（宁可漏报不误伤）：拿不到 live 路由清单、provider 无模型目录、或 `listModels`
+ * 超时/抛错时，**跳过 model 校验**——宿主偶发不可用不应阻断保存。
+ */
+async function hostProviderProblems(settings: Settings, llm: ReturnType<typeof llmServices>): Promise<Problem[]> {
+  const live = llm?.listProviders?.() ?? [];
+  const known = new Set(live.map((entry) => entry.id));
+  if (known.size === 0) return [];
+  const problems: Problem[] = [];
+  const listModels = llm?.listModels?.bind(llm);
+  const modelsOf = async (provider: string): Promise<Set<string> | undefined> => {
+    if (listModels === undefined) return undefined;
+    try {
+      const models = await Promise.race([
+        listModels(provider),
+        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+      const ids = new Set<string>();
+      for (const model of models) if (typeof model?.id === 'string' && model.id !== '') ids.add(model.id);
+      return ids.size > 0 ? ids : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const checks: Array<{ mode: string; hostProvider: string; model: string; field: string; label: string }> = [
+    { mode: settings.model.mode, hostProvider: settings.model.hostProvider, model: settings.model.model, field: 'model.hostProvider', label: '主模型' },
+    ...(settings.model.fallbacks ?? []).map((entry, index) => ({
+      mode: entry.mode,
+      hostProvider: entry.hostProvider,
+      model: entry.model,
+      field: `model.fallbacks.${index}.hostProvider`,
+      label: `备选 #${index + 1}`,
+    })),
+  ];
+  for (const item of checks) {
+    if (item.mode !== 'proxy' || item.hostProvider.trim() === '') continue;
+    if (!known.has(item.hostProvider)) {
+      problems.push({
+        field: item.field,
+        code: 'MODEL_PROVIDER_UNSUPPORTED',
+        message: `${item.label}的宿主 provider「${item.hostProvider}」不存在；当前可用：${[...known].join(' / ')}`,
+      });
+      continue;
+    }
+    const models = await modelsOf(item.hostProvider);
+    if (models !== undefined && item.model.trim() !== '' && !models.has(item.model)) {
+      problems.push({
+        field: item.field,
+        code: 'MODEL_NOT_FOUND',
+        message: `${item.label}的模型「${item.model}」在宿主「${item.hostProvider}」下已不存在；请在设置页重新选择。`,
+      });
+    }
+  }
+  return problems;
 }
 
 /** 组装 GitHub 登录 adapter 的依赖（get/fetch/clientId/logger）。 */
@@ -201,6 +271,10 @@ async function dispatch(
     const core = await inspectCore({ ...next, corePath: settings.corePath }, { env });
     const providers = core.supportedProviders.length > 0 ? core.supportedProviders : undefined;
     const allProblems = validateSettings(next, providers);
+    // P2：代理模式下的 `hostProvider` 必须指向宿主当前真实存在（已注册）的 provider 路由。
+    // 宿主 provider 迁移/改名后，旧配置不会自动跟随——这正是「静默降级连跑数天」的入口。
+    // 这里在保存时用 live 路由清单校验，缺失即报问题，避免把失效路由存进去。
+    allProblems.push(...(await hostProviderProblems(next, llmServices(deps.get))));
     // 分段保存只回本分区的问题：其它分区沿用已保存值，不该阻塞这次保存。
     const problems = section === undefined ? allProblems : allProblems.filter((problem) => sectionOfField(problem.field) === section);
     if (problems.length > 0) {

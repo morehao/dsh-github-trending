@@ -63,7 +63,8 @@ function setup(overrides = {}) {
     TRENDING_DIGEST_CORE: overrides.core ?? scenarioCore(overrides.scenario ?? {}),
     AC_KEY: 'sk-ac-secret-value',
   };
-  const runner = new runnerModule.Runner({ store, get: () => undefined, env });
+  // 运行前模型预检（P0）默认给「可达」桩：AC-P 用例聚焦核心/编排行为，不应被模型预检的联网左右。
+  const runner = new runnerModule.Runner({ store, get: () => undefined, env, fetchImpl: async () => new Response('{}', { status: 200 }) });
   return { runner, store, repo, env };
 }
 

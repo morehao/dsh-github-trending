@@ -23,6 +23,7 @@ export const PLUGIN_CODES = [
   'MODEL_KEY_MISSING',
   'MODEL_NOT_FOUND',
   'MODEL_PROVIDER_UNSUPPORTED',
+  'MODEL_UNAVAILABLE',
   'GITHUB_AUTH',
   'GITHUB_AUTH_CANCELLED',
   'GITHUB_AUTH_EXPIRED',
@@ -76,6 +77,7 @@ const RETRIABLE: Record<string, boolean> = {
   MODEL_KEY_MISSING: false,
   MODEL_NOT_FOUND: false,
   MODEL_PROVIDER_UNSUPPORTED: false,
+  MODEL_UNAVAILABLE: true,
   GITHUB_AUTH: false,
   GITHUB_AUTH_CANCELLED: false,
   GITHUB_AUTH_EXPIRED: true,
@@ -174,6 +176,8 @@ export function hintOf(code: string, message?: string, reason?: string): string 
       return '端点不认识这个模型 ID：核对模型名，或换一个模型。';
     case 'MODEL_PROVIDER_UNSUPPORTED':
       return '当前核心不支持这个 provider：按核心 version --json 的 supportedProviders 选择。';
+    case 'MODEL_UNAVAILABLE':
+      return '主模型与全部备选模型均不可用：本次未运行，以免产出降级内容。请在设置页重新选择可用的模型（或修复密钥/网络）后重试。';
     case 'MODEL_RATE_LIMITED':
       return '模型限流：稍后重试；结果未写入任何文件。';
     case 'GIT_NOT_INSTALLED':

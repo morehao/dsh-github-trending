@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **模型链路静默降级导致推送变烂（长清单兜底）**：宿主 provider 被迁移/改名后，插件仍指向旧
+  的 `hostProvider`，核心在「模型不可用 + `allowDegraded`」时静默降级为规则式完整列表，把一次
+  模型失效藏进「运行成功」里。三处加固：
+  - **运行前模型预检（P0）**：`Runner.run()` 在 spawn 核心前用一个 1-token 请求探测主模型与备选链。
+    主模型可达直接放行；主挂但备选可达则记录「已回落备选 #n」后继续；**全挂则拒绝本次运行**，
+    报新错误码 `MODEL_UNAVAILABLE`，不再产出降级内容（dryRun 仅告警放行）。
+  - **代理转发失败落日志（P1）**：回环代理把每次请求的 `ok` / `fail`（含 code 与脱敏 message、
+    耗时）写进运行日志 `[model] ...`，模型链路故障不再静默（此前只在内存计数、日志无从发现）。
+  - **宿主 provider / 模型失效的保存时校验（P2）**：`/config` 保存时用宿主 live 路由清单校验代理模式
+    下的 `hostProvider`（主模型与备选逐项），指向不存在的 provider 即报问题；provider 存在时再核对该
+    provider 的模型目录里是否还有配置的 model id——**覆盖「切换模型后插件快照里的 model 已失效」**。
+    拿不到目录或超时则跳过，宁可漏报不误伤。
+
+### Note
+
+- 新增对外错误码 `MODEL_UNAVAILABLE`（model 区，可重试）。契约与 wire 不变。
+- 经核实：`model.allowDegraded=false` **不会**让运行失败（仅把摘要标注为降级原文），因此它不是
+  「防静默降级」的开关；真正的兜底在插件侧 P0 预检。
+
 ## [v0.9.30] - 2026-11-17
 
 ### Changed

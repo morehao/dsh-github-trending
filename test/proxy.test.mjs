@@ -128,3 +128,51 @@ test('ProxyPool：不同 provider/model 各起代理，同目标复用；closeAl
   // closeAll 后所有端口都释放
   assert.equal(pool.size, 0);
 });
+
+test('P1：onEvent 上报 recv/ok，成功路径可观测', async () => {
+  const events = [];
+  const handle = await proxy.startProxy({
+    llm: stubLlm('abc'),
+    provider: 'magpie',
+    model: 'group/workbuddy',
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    const response = await fetch(`${handle.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${handle.token}` },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(events.map((event) => event.kind), ['recv', 'ok']);
+    assert.equal(events[0].provider, 'magpie');
+    assert.equal(events[0].model, 'group/workbuddy');
+    assert.equal(typeof events[1].durationMs, 'number');
+  } finally {
+    await handle.close();
+  }
+});
+
+test('P1：onEvent 上报 fail，带 code 与 message', async () => {
+  const events = [];
+  const llm = {
+    async *stream() {
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'AUTH', message: 'bad key' } } };
+    },
+  };
+  const handle = await proxy.startProxy({ llm, provider: 'p', model: 'm', onEvent: (event) => events.push(event) });
+  try {
+    const response = await fetch(`${handle.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${handle.token}` },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(response.status, 502);
+    const fail = events.find((event) => event.kind === 'fail');
+    assert.ok(fail, '应有 fail 事件');
+    assert.equal(fail.code, 'AUTH');
+    assert.equal(fail.message, 'bad key');
+  } finally {
+    await handle.close();
+  }
+});

@@ -54,7 +54,7 @@
 | `model.model` | 空 | 必填，不设隐式默认 |
 | `model.apiKeyRef` | `TRENDING_MODEL_KEY` | 指向 `ctx.credentials` 的引用名 |
 | `model.temperature` / `maxTokens` | `0.2` / `2048` | 单次调用参数 |
-| `model.allowDegraded` | `true` | 模型失败时核心是否退回原文（会标记 degraded） |
+| `model.allowDegraded` | `true` | 模型失败时核心是否退回原文（会标记 degraded）。注意：它**不能**阻止「模型不可用仍产出降级推送」——那由运行前预检（全挂即拒绝运行）兜底 |
 | `repo.path` | 空 | 本地仓库绝对路径，必填 |
 | `repo.baseBranch` | 读取仓库默认分支 | 只读展示，不允许手改（以 `origin/HEAD` 为准） |
 | `repo.remote` | `origin` | 固定 `origin`，界面不展示 |
@@ -109,7 +109,7 @@
 | `CORE_INCOMPATIBLE` | 核心 `ipcSchema`/`digestSchema` 与插件不一致 | 升级插件（含平台包）到同一版本 |
 | `CORE_TIMEOUT` / `CORE_CANCELLED` | 超时 / 用户取消 | 不提交任何状态，也留不下半成品 |
 | `IPC_INVALID` | 核心 stdout 不是约定的结果信封 | 升级插件与核心 |
-| `MODEL_KEY_MISSING` / `MODEL_UNAUTHORIZED` / `MODEL_NOT_FOUND` / `MODEL_RATE_LIMITED` | 模型侧 | 设置页「模型」区红字 + 重新选择 |
+| `MODEL_KEY_MISSING` / `MODEL_UNAUTHORIZED` / `MODEL_NOT_FOUND` / `MODEL_RATE_LIMITED` / `MODEL_UNAVAILABLE` | 模型侧。`MODEL_UNAVAILABLE` 表示运行前预检判定主模型与全部备选都不可达，已拒绝本次运行以免产出降级内容 | 设置页「模型」区红字 + 重新选择可用模型（或修复密钥/网络） |
 | `GIT_NOT_INSTALLED` / `REPO_NOT_GIT` / `REPO_DIRTY` | 本机 git / 仓库状态 | 装 git ≥ 2.30、换仓库、先提交改动 |
 | `GIT_OPERATION_FAILED` | 核心执行 git 失败（含 push 被拒） | 核心对 `trending/` 日期分支只追加提交、普通 fast-forward 推送；被拒时自动 fetch + rebase 重试一次。若报 `stale info`：在仓库执行 `git fetch --prune origin` 后重试（升级核心后不再出现） |
 | `GITHUB_AUTH` / `PUSH_FAILED` / `PR_FAILED` / `NOT_MERGEABLE` | 推送与 PR | 本地 commit 已保留，修好后重试即可复用 |

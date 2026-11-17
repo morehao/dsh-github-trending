@@ -32,6 +32,7 @@ import { resolveOutputLanguage, type ResolvedOutputLanguage } from './host-langu
 import type { HostLanguageReader } from './host-locale.js';
 import { credentialServices, resolveGithubToken, resolveNotifyEnv } from './credentials.js';
 import { resolveModelKey } from './quickfill.js';
+import { preflightModel, preflightFallback } from './preflight.js';
 import { ProxyPool, type ProxyTarget } from './proxy.js';
 import { isoWeekKey, zonedDateString } from './schedule.js';
 import { runSubscribe } from './subscribe.js';
@@ -101,6 +102,8 @@ export interface RunnerDeps {
   onFinished?: (summary: RunSummary) => void;
   /** 预览副本这类「可失败但不阻断运行」的事件走这里，不写进 warnings。 */
   logger?: (event: string, data?: Record<string, unknown>) => void;
+  /** 预检用的 fetch 注入点（离线测试用）；缺省用全局 fetch。 */
+  fetchImpl?: typeof fetch;
 }
 
 function repoProblem(repoPath: string): { code: string; message: string } | undefined {
@@ -264,6 +267,14 @@ export class Runner {
       const model = await this.openModelChannel({ settings, credentials, env, logFile });
       const apiKey = model.apiKey;
       proxyPool = model.pool;
+
+      // P0：运行前模型可达性预检，避免「模型全挂 → 核心静默降级 → 发一条烂推送」。
+      // 主模型可用直接放行；主挂但备选可用则记录回落后继续（核心会自行按链回落）；
+      // 主与全部备选都不可用时，非 dryRun 直接拒绝本次运行（dryRun 仅告警，便于试跑排障）。
+      const reachability = await this.checkModelReachability({ settings, credentials, env, logFile, dryRun });
+      if (!reachability.usable) {
+        throw new IpcError('MODEL_UNAVAILABLE', `所有模型均不可用，已拒绝运行：${reachability.summary}`);
+      }
 
       const github = await resolveGithubToken(credentials, settings.github.authMode, settings.github.tokenRef, { env });
       if (github.token === undefined) {
@@ -523,6 +534,60 @@ export class Runner {
   }
 
   /**
+   * P0：运行前模型可达性预检。
+   *
+   * 目的：核心在「模型不可用 + allowDegraded」时会静默降级（规则式兜底），把一次模型失效
+   * 藏进「运行成功」里。插件在这里**主动**探一次，把失效暴露成明确结果：
+   *   - 主模型可达 → `usable: true`；
+   *   - 主挂、但备选链中任一可达 → `usable: true`，并写日志说明「主模型不可用(原因)，已回落备选 #n」；
+   *   - 主与全部备选都不可用 → `usable: false`（非 dryRun 时由调用方拒绝本次运行）。
+   *
+   * 复用 `preflight.ts` 的判定（它已区分 unauthorized / not-found / rate-limited / timeout，
+   * 代理模式走 `ctx.llm.stream`）。dryRun 时即便全挂也只告警不拦截（试跑不应被模型拦住），
+   * 但仍会写日志，方便排障。整个预检不改变任何落盘状态、不消耗模型额度（1 token 级）。
+   */
+  private async checkModelReachability(input: {
+    settings: Settings;
+    credentials: ReturnType<typeof credentialServices>;
+    env: NodeJS.ProcessEnv;
+    logFile: string;
+    dryRun: boolean;
+  }): Promise<{ usable: boolean; summary: string }> {
+    const { settings, credentials, env, logFile, dryRun } = input;
+    // 预检的代理分支只需要宿主 llm 的 `stream`（与 openModelChannel 一致），
+    // 不能用 listProviders 门控的 llmServices——否则只实现 stream 的宿主会被误判为「无 llm」。
+    const llm = this.deps.get('llm') as Parameters<typeof preflightModel>[0]['llm'];
+    const fetchImpl = this.deps.fetchImpl;
+    const main = await preflightModel({ settings, credentials, llm, env, ...(fetchImpl === undefined ? {} : { fetchImpl }) });
+    const mainLabel = `${settings.model.provider}${settings.model.hostProvider === '' ? '' : `→${settings.model.hostProvider}`}/${settings.model.model}`;
+    if (main.ok) {
+      this.deps.store.appendLog(logFile, `[model] 预检通过：主模型 ${mainLabel} 可达（${main.durationMs} ms）`);
+      return { usable: true, summary: '主模型可达' };
+    }
+    const reason = main.code === undefined ? main.message ?? '未知' : `${main.code}：${main.message ?? ''}`.trim();
+    this.deps.store.appendLog(logFile, `[model] 预检失败：主模型 ${mainLabel} 不可达（${reason}）`);
+    const fallbacks = settings.model.fallbacks ?? [];
+    for (let index = 0; index < fallbacks.length; index += 1) {
+      const entry = fallbacks[index];
+      if (entry === undefined) continue;
+      const fb = await preflightFallback({ settings, index, credentials, llm, env, ...(fetchImpl === undefined ? {} : { fetchImpl }) });
+      const fbLabel = `${entry.provider}${entry.hostProvider === '' ? '' : `→${entry.hostProvider}`}/${entry.model}`;
+      if (fb.ok) {
+        this.deps.store.appendLog(logFile, `[model] 主模型不可用（${reason}），已回落备选 #${index + 1} ${fbLabel}（${fb.durationMs} ms）`);
+        return { usable: true, summary: `已回落备选 #${index + 1} ${fbLabel}` };
+      }
+      const fbReason = fb.code === undefined ? fb.message ?? '未知' : `${fb.code}：${fb.message ?? ''}`.trim();
+      this.deps.store.appendLog(logFile, `[model] 预检失败：备选 #${index + 1} ${fbLabel} 不可达（${fbReason}）`);
+    }
+    const summary = `主模型 ${mainLabel} 不可用（${reason}）${fallbacks.length === 0 ? '，且未配置备选模型' : '，备选链全部不可用'}`;
+    if (dryRun) {
+      this.deps.store.appendLog(logFile, `[model] ${summary}；这是试跑，继续执行但内容可能降级`);
+      return { usable: true, summary };
+    }
+    return { usable: false, summary };
+  }
+
+  /**
    * 解析模型钥匙并为每个 proxy 目标起回环代理（按 provider/model 复用）。
    *
    * 榜单运行与发版运行共用这一段，保证代理的一次性 token 语义只写一次。
@@ -586,7 +651,16 @@ export class Runner {
     if (llm === undefined || typeof llm.stream !== 'function') {
       throw new IpcError('MODEL_KEY_MISSING', '该模型需要回环代理，但宿主没有可用的 ctx.llm 服务');
     }
-    const pool = new ProxyPool(llm as unknown as ConstructorParameters<typeof ProxyPool>[0]);
+    const pool = new ProxyPool(llm as unknown as ConstructorParameters<typeof ProxyPool>[0], (event) => {
+      // P1：把代理转发过程写进运行日志（仅事件与 code/message，prompt/token 不外泄）。
+      if (event.kind === 'recv') return; // 收到请求的量在 ok/fail 里体现，避免每次两行噪音
+      if (event.kind === 'ok') {
+        this.deps.store.appendLog(logFile, `[model] ${event.provider}/${event.model} 转发成功（${event.durationMs ?? 0} ms）`);
+        return;
+      }
+      const detail = event.message === undefined ? '' : `：${event.message}`;
+      this.deps.store.appendLog(logFile, `[model] ${event.provider}/${event.model} 转发失败（${event.code ?? 'unknown'}）${detail}`);
+    });
     const routeOf = (entry: { mode: 'direct' | 'proxy'; hostProvider: string; provider: string; model: string; temperature: number; maxTokens: number }): ProxyTarget => ({
       // 代理转发到宿主 provider 路由：优先 hostProvider（proxy 模式下填的就是路由 id），退回落 provider。
       provider: entry.hostProvider !== '' ? entry.hostProvider : entry.provider,

@@ -44,7 +44,7 @@ function makeRunner(overrides = {}) {
     [ENV_KEY]: 'sk-test-key',
     ...overrides.env,
   };
-  const runner = new runnerModule.Runner({ store, get: () => undefined, env });
+  const runner = new runnerModule.Runner({ store, get: () => undefined, env, fetchImpl: async () => new Response('{}', { status: 200 }) });
   return { runner, store, repo, env, dir };
 }
 

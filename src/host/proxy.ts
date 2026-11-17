@@ -27,6 +27,22 @@ export interface LlmLike {
   stream(options: Record<string, unknown>): AsyncIterable<StreamChunkLike>;
 }
 
+/**
+ * 代理事件：仅用于「把转发过程写进运行日志」，让模型链路故障不再静默。
+ * - `recv`：核心发来一次 chat/completions；
+ * - `ok`：转发到宿主并成功返回；
+ * - `fail`：转发失败（宿主报错 / 超时 / 请求非法），带 code 与（已脱敏的）message。
+ * 事件不含 prompt 正文、不含 token；message 由调用方再经 redact() 清洗后落盘。
+ */
+export interface ProxyEvent {
+  kind: 'recv' | 'ok' | 'fail';
+  provider: string;
+  model: string;
+  code?: string;
+  message?: string;
+  durationMs?: number;
+}
+
 export interface ProxyOptions {
   llm: LlmLike;
   provider: string;
@@ -34,6 +50,8 @@ export interface ProxyOptions {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** 可选事件回调：runner 接进运行日志，用于可观测性（P1）。 */
+  onEvent?: (event: ProxyEvent) => void;
 }
 
 export interface ProxyHandle {
@@ -111,6 +129,10 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   const handle = { requests: 0 } as ProxyHandle;
   let closed = false;
 
+  const emit = (event: Omit<ProxyEvent, 'provider' | 'model'>): void => {
+    options.onEvent?.({ provider: options.provider, model: options.model, ...event });
+  };
+
   const server = http.createServer((request, response) => {
     void (async () => {
       try {
@@ -141,6 +163,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
 
         handle.requests += 1;
         const started = Date.now();
+        emit({ kind: 'recv' });
         let text = '';
         let usage: StreamChunkLike['usage'];
         let failure: { code?: string; message?: string } | undefined;
@@ -173,8 +196,10 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           clearTimeout(timer);
         }
         if (failure !== undefined) {
+          emit({ kind: 'fail', code: failure.code ?? 'llm_failed', message: failure.message ?? '宿主模型调用失败', durationMs: Date.now() - started });
           return fail(response, 502, failure.code ?? 'llm_failed', failure.message ?? '宿主模型调用失败');
         }
+        emit({ kind: 'ok', durationMs: Date.now() - started });
         return sendJson(response, 200, {
           id: `chatcmpl-proxy-${Date.now().toString(36)}`,
           object: 'chat.completion',
@@ -190,6 +215,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        emit({ kind: 'fail', code: 'proxy_failed', message });
         if (!response.headersSent) fail(response, 500, 'proxy_failed', message);
         else response.end();
       }
@@ -244,9 +270,11 @@ export class ProxyPool {
   private readonly llm: LlmLike;
   private readonly byKey = new Map<string, Promise<ProxyHandle>>();
   private readonly handles: ProxyHandle[] = [];
+  private readonly onEvent?: (event: ProxyEvent) => void;
 
-  constructor(llm: LlmLike) {
+  constructor(llm: LlmLike, onEvent?: (event: ProxyEvent) => void) {
     this.llm = llm;
+    this.onEvent = onEvent;
   }
 
   /** 复用的键：provider 与 model 都相同才视为「同一路由」，可直接共享一个代理。 */
@@ -269,6 +297,7 @@ export class ProxyPool {
       ...(target.temperature === undefined ? {} : { temperature: target.temperature }),
       ...(target.maxTokens === undefined ? {} : { maxTokens: target.maxTokens }),
       ...(target.timeoutMs === undefined ? {} : { timeoutMs: target.timeoutMs }),
+      ...(this.onEvent === undefined ? {} : { onEvent: this.onEvent }),
     }).then(
       (handle) => {
         this.handles.push(handle);

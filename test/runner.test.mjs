@@ -59,6 +59,9 @@ function makeRunner(overrides = {}) {
     store,
     get: () => undefined,
     env,
+    // 运行前模型预检（P0）：默认给一个「总是可达」的 fetch 桩，避免离线测试真的联网；
+    // 需要模拟「模型全挂 → 拒绝运行」的用例显式传 overrides.fetchImpl。
+    fetchImpl: overrides.fetchImpl ?? (async () => new Response('{}', { status: 200 })),
     ...(overrides.hostLanguage === undefined ? {} : { hostLanguage: overrides.hostLanguage }),
     ...(overrides.logger === undefined ? {} : { logger: overrides.logger }),
   });
@@ -740,7 +743,7 @@ test('备选链：主 ref 解析失败、备 ref 成功 → 运行不中断，�
     // 主 ref 刻意不给：解析结果为空；备选 ref 给真值。
     FALLBACK_KEY: 'sk-fallback-key',
   };
-  const runner = new runnerModule.Runner({ store, get: () => undefined, env });
+  const runner = new runnerModule.Runner({ store, get: () => undefined, env, fetchImpl: async () => new Response('{}', { status: 200 }) });
   const summary = await runner.run({ trigger: 'tool' });
   assert.equal(summary.ok, true);
   assert.equal(summary.proxy, false);
@@ -781,4 +784,72 @@ test('proxy/direct 混用：主模型 proxy + 备选 proxy 各起一个代理，
   assert.match(log, /备选 #1（corp-sso）回环代理已启动/);
   // finally 里关闭全部回环代理
   assert.match(log, /已关闭全部回环代理（2 个）/);
+});
+
+test('P0：主模型与备选全部不可达时拒绝运行（不产出、不留状态）', async () => {
+  const downFetch = async () => new Response('upstream down', { status: 503 });
+  const { runner, store } = makeRunner({
+    fetchImpl: downFetch,
+    settings: {
+      model: {
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        apiKeyRef: ENV_KEY,
+        baseURL: 'https://api.deepseek.com/v1',
+        mode: 'direct',
+        fallbacks: [
+          { source: 'custom', provider: 'openai-compatible', mode: 'direct', hostProvider: '', baseURL: 'https://fb.example/v1', model: 'fb-1', apiKeyRef: ENV_KEY, temperature: 0.2, maxTokens: 2048 },
+        ],
+      },
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  // run() 把 MODEL_UNAVAILABLE 归一成一次失败运行（落历史、带错误码），而不是抛出——
+  // 这样用户能在运行页看到「模型不可用」而不是一个无痕的异常。
+  assert.equal(summary.ok, false);
+  assert.equal(summary.error.code, 'MODEL_UNAVAILABLE');
+  // 被拒绝的运行不产出交付物：没有 PR、没有 chunk，历史里只有这条失败记录。
+  assert.equal(summary.prUrl, undefined);
+  assert.equal(store.readState().lastDigest, undefined);
+  assert.equal(store.readState().pendingPr, undefined);
+  assert.equal(store.readHistory().length, 1);
+  assert.equal(store.readHistory()[0].ok, false);
+  assert.equal(runner.running, undefined);
+});
+
+test('P0：主模型不可达但备选可达时继续运行（回落到备选）', async () => {
+  let seenUrls = [];
+  const fetchImpl = async (url) => {
+    seenUrls.push(String(url));
+    // 主模型端点（api.example 会 503），备选端点返回 200
+    if (String(url).includes('fb.example')) return new Response('{}', { status: 200 });
+    return new Response('down', { status: 503 });
+  };
+  const { runner } = makeRunner({
+    fetchImpl,
+    settings: {
+      model: {
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        apiKeyRef: ENV_KEY,
+        baseURL: 'https://main.example/v1',
+        mode: 'direct',
+        fallbacks: [
+          { source: 'custom', provider: 'openai-compatible', mode: 'direct', hostProvider: '', baseURL: 'https://fb.example/v1', model: 'fb-1', apiKeyRef: ENV_KEY, temperature: 0.2, maxTokens: 2048 },
+        ],
+      },
+    },
+  });
+  const summary = await runner.run({ trigger: 'tool' });
+  assert.equal(summary.ok, true);
+  // 预检确实打到了备选端点
+  assert.ok(seenUrls.some((u) => u.includes('fb.example')));
+});
+
+test('P0：dryRun 时模型全挂也不拦截（仅告警）', async () => {
+  const downFetch = async () => new Response('down', { status: 503 });
+  const { runner } = makeRunner({ fetchImpl: downFetch });
+  const summary = await runner.run({ trigger: 'tool', dryRun: true });
+  // dryRun 仍走假核心并成功，不被模型预检拦住
+  assert.equal(summary.dryRun, true);
 });

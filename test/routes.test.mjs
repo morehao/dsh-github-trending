@@ -602,3 +602,54 @@ test('POST /github/browser/begin → 设备码 attempt（waiting-device），can
     await fetch(`${b.base}/github/browser/cancel`, { method: 'POST', headers: HEADER, body: '{}' });
   } finally { b.close(); }
 });
+
+test('P2：保存时拒绝 hostProvider 指向宿主不存在的 provider', async () => {
+  const p2Repo = mkdtempSync(path.join(tmpdir(), 'dshgt-p2-repo-'));
+  mkdirSync(path.join(p2Repo, '.git'));
+  const p2Store = new stateModule.Store({ dir: mkdtempSync(path.join(tmpdir(), 'dshgt-p2-')) });
+  p2Store.writeSettings({ model: { provider: 'deepseek', model: 'deepseek-chat', apiKeyRef: 'DSHGT_P2_KEY' }, repo: { path: p2Repo } });
+  const p2Env = { PATH: process.env.PATH, HOME: process.env.HOME, TRENDING_DIGEST_CORE: scenarioCore(), DSHGT_P2_KEY: 'k' };
+  // 宿主只注册了 magpie；配置却写 hostProvider=deepseek-official（已迁移走）。
+  const llm = {
+    listProviders: () => [{ id: 'magpie', name: 'Magpie' }],
+    listModels: async (provider) => (provider === 'magpie' ? [{ id: 'group/workbuddy' }] : []),
+  };
+  const get = (name) => (name === 'llm' ? llm : undefined);
+  const p2Runner = new runnerModule.Runner({ store: p2Store, get: () => undefined, env: p2Env });
+  const p2Scheduler = new scheduleModule.Scheduler({ store: p2Store, isRunning: () => false, getTimer: () => undefined, run: async () => undefined, runReleases: async () => undefined });
+  const p2Server = http.createServer(routes.createRoutes({ store: p2Store, runner: p2Runner, scheduler: p2Scheduler, get, env: p2Env, version: '0.1.0-test' }));
+  await new Promise((resolve) => p2Server.listen(0, '127.0.0.1', resolve));
+  const p2Base = `http://127.0.0.1:${p2Server.address().port}${routes.ROUTE_PREFIX}`;
+  try {
+    const bad = await fetch(`${p2Base}/config`, {
+      method: 'POST',
+      headers: HEADER,
+      body: JSON.stringify({ settings: { model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'deepseek-official', model: 'x' }, repo: { path: p2Repo } } }),
+    });
+    const badPayload = await bad.json();
+    assert.equal(badPayload.saved, false);
+    assert.ok(badPayload.problems.some((p) => p.field === 'model.hostProvider' && /不存在/.test(p.message)));
+
+    // 指向真实存在的 magpie → 放行
+    const good = await fetch(`${p2Base}/config`, {
+      method: 'POST',
+      headers: HEADER,
+      body: JSON.stringify({ settings: { model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'magpie', model: 'group/workbuddy' }, repo: { path: p2Repo } } }),
+    });
+    const goodPayload = await good.json();
+    assert.equal(goodPayload.saved, true, JSON.stringify(goodPayload.problems));
+
+    // provider 存在但 model id 已被移除（切换模型后的典型快照失效）→ 同样拦住
+    const staleModel = await fetch(`${p2Base}/config`, {
+      method: 'POST',
+      headers: HEADER,
+      body: JSON.stringify({ settings: { model: { provider: 'openai-compatible', mode: 'proxy', hostProvider: 'magpie', model: 'ghost-model' }, repo: { path: p2Repo } } }),
+    });
+    const stalePayload = await staleModel.json();
+    assert.equal(stalePayload.saved, false);
+    assert.ok(stalePayload.problems.some((p) => p.code === 'MODEL_NOT_FOUND' && /ghost-model/.test(p.message)));
+  } finally {
+    p2Server.closeAllConnections?.();
+    p2Server.close();
+  }
+});
