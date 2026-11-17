@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.9.28] - 2026-11-17
+
+### Fixes
+
+- **推送卡片的空渠道提示不再露出原始键名**：`0.9.27` 删「通知」页签时把 `notify.recent.empty` 一起下线，
+  但推送卡片「本次没有尝试任何渠道」的分支仍在引用它，走到会显示 `notify.recent.empty` 原文。
+  改为专用键 `notify.empty.channels`（zh / en）。
+- **补一条文案守卫测试**：`client/**` 里所有 `t('字面量键')` 必须存在于 zh / en 字典
+  （`test/client-i18n.test.mjs`）。此前的 `checkI18n()` 只校验两份字典互相对齐，拦不住「删了键、
+  代码还在用」的漂移。
+
 ## [v0.9.27] - 2026-11-17
 
 ### Changed
