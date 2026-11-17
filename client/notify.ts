@@ -346,7 +346,7 @@ export function NotifyPushRecord(props: { t: Translate; message: NotifyMessage; 
           'div',
           { className: 'dshgt-push-body' },
           message.channels.length === 0
-            ? h('div', { className: 'dshgt-hint', style: { fontSize: 12 } }, status === 'skipped' ? t('notify.status.skipped') : t('notify.recent.empty'))
+            ? h('div', { className: 'dshgt-hint', style: { fontSize: 12 } }, t('notify.empty.channels'))
             : h(
                 'div',
                 { className: 'dshgt-push-chips' },

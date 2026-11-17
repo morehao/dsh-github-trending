@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -46,4 +46,20 @@ test('activeLang：0.2.2 新增语言回落英文，中文族仍中文', async (
   // 0.2.1 的旧形态 locale.lang 也继续支持
   assert.equal(mod.activeLang({ lang: 'zh-CN' }), 'zh');
   assert.equal(mod.activeLang({ lang: 'en' }), 'en');
+});
+
+test('client 代码里的 t(\'…\') 字面量键都存在于 zh / en 字典', async () => {
+  const mod = await loadI18n();
+  const files = readdirSync(path.join(root, 'client')).filter((f) => f.endsWith('.ts') && f !== 'i18n.ts');
+  const missing = [];
+  for (const file of files) {
+    const src = readFileSync(path.join(root, 'client', file), 'utf8');
+    // 只认 `t('literal')`：`slots.inject('x')`、`groupMap.get('daily')` 这类调用不算（要求前面不是标识符字符）。
+    for (const m of src.matchAll(/(?<![A-Za-z0-9_])t\('([a-zA-Z0-9_.]+)'/g)) {
+      const key = m[1];
+      if (!(key in mod.DICT.zh)) missing.push(`${file}: ${key}（zh 缺）`);
+      if (!(key in mod.DICT.en)) missing.push(`${file}: ${key}（en 缺）`);
+    }
+  }
+  assert.deepEqual([...new Set(missing)], []);
 });
