@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.9.30] - 2026-11-17
+
+### Changed
+
+- **核心版本升级到 `0.13.4`**（`dsh.core.version`）：吃到 trendradar 核心本次修复——
+  - **订阅列表「最新版本」改按发布日期选取**：此前 `LastTag` / `LatestTag` 取 GitHub `/releases`
+    的 API 头位置，导致 `infiniflow/ragflow` 这类滚动预发布（`nightly`：`created_at` 每晚刷新、
+    `published_at` 冻结在旧日期）长期被当成最新版本，即使已有更新的正式版（如 `v1.0.0`）。
+    现统一按发布日期选最新版本，并在读取时对陈旧游标做离线对账自愈。
+- 契约与 wire 不变（`@morehao/trendradar-contract` 仍 `0.8.1`，`ipcSchema` 不变）；插件自身代码未改动，本次仅为跟随核心版本。
+
 ## [v0.9.29] - 2026-11-17
 
 ### Changed
