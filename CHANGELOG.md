@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.32] - 2026-11-18
+
+### Fixes
+
+- **auth**: classify github auth probe errors (tls/network/timeout) (#189)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.31...v0.9.32
+
 ## [v0.9.31] - 2026-11-17
 
 ### Fixed
