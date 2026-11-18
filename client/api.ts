@@ -540,6 +540,7 @@ export interface GithubProbeResult {
   login?: string;
   source?: string;
   code?: string;
+  category?: 'auth' | 'network' | 'tls' | 'timeout';
   message?: string;
 }
 

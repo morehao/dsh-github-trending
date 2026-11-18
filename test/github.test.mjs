@@ -54,7 +54,58 @@ test('probeGithubAuth：401 → 失败，不泄漏 token 明文', async () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'GITHUB_AUTH');
+  assert.equal(result.category, 'auth');
   assert.doesNotMatch(result.message ?? '', /ghp_secret_value/);
+});
+
+test('probeGithubAuth：TLS 证书校验失败 → category=tls 并提示 CA/代理', async () => {
+  const err = Object.assign(new Error('fetch failed'), {
+    cause: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' },
+  });
+  const result = await github.probeGithubAuth({
+    credentials: credentialsWith('ghp_test'),
+    authMode: 'pat',
+    tokenRef: 'GITHUB_TOKEN',
+    env: {},
+    fetchImpl: async () => {
+      throw err;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'GITHUB_AUTH');
+  assert.equal(result.category, 'tls');
+  assert.match(result.message ?? '', /证书|CA|TLS/);
+});
+
+test('probeGithubAuth：DNS 失败 → category=network', async () => {
+  const err = Object.assign(new Error('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+  const result = await github.probeGithubAuth({
+    credentials: credentialsWith('ghp_test'),
+    authMode: 'pat',
+    tokenRef: 'GITHUB_TOKEN',
+    env: {},
+    fetchImpl: async () => {
+      throw err;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.category, 'network');
+});
+
+test('probeGithubAuth：超时 → category=timeout', async () => {
+  const err = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+  const result = await github.probeGithubAuth({
+    credentials: credentialsWith('ghp_test'),
+    authMode: 'pat',
+    tokenRef: 'GITHUB_TOKEN',
+    env: {},
+    fetchImpl: async () => {
+      throw err;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.category, 'timeout');
+  assert.match(result.message ?? '', /超时/);
 });
 
 test('readDefaultBranch：空路径 / 相对路径 / 不存在目录都返回 none 且不抛', async () => {

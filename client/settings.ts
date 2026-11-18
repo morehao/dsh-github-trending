@@ -967,7 +967,15 @@ export function SettingsView(props: { t: Translate; store: StoreValue; onClose?:
         : h(Pill, { kind: githubTest.ok ? 'ok' : 'err' },
             githubTest.ok
               ? `${t('auth.test.ok')}${githubTest.login === undefined ? '' : ` · @${githubTest.login}`}`
-              : githubTest.message ?? t('auth.test.fail'),
+              : githubTest.category === 'tls'
+                ? t('auth.test.tls')
+                : githubTest.category === 'network'
+                  ? t('auth.test.network')
+                  : githubTest.category === 'timeout'
+                    ? t('auth.test.timeout')
+                    : githubTest.category === 'auth'
+                      ? t('auth.test.authFail')
+                      : githubTest.message ?? t('auth.test.fail'),
           ),
     ),
   );
