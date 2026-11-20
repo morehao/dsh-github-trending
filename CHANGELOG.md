@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.33] - 2026-11-20
+
+### Fixes
+
+- **model**: 预检与回环代理补 sessionId，修复 opencode-go 网关 400 MissingSessionID (#192)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.32...v0.9.33
+
 ## [v0.9.32] - 2026-11-18
 
 ### Fixes
