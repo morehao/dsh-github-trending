@@ -16,6 +16,7 @@
  * 每环的密钥**各自独立解析**（沿用 `resolveFallbackKeys` 的独立性约束：主 key 失效
  * 不连累备选），代理项按各自 `hostProvider || provider` 起宿主路由。
  */
+import { randomUUID } from 'node:crypto';
 import { effectiveBaseURL, type ModelEntryView, type Settings } from '../config.js';
 import { hintOf, areaOf } from '../errors.js';
 import type { LlmServices } from './quickfill.js';
@@ -124,6 +125,9 @@ async function preflightEntry(
         model: entry.model,
         messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
         maxTokens: 8,
+        // 会话标识：opencode-go 等按会话路由的网关靠它补 `x-opencode-session` 头，
+        // 缺了会直接 400 MissingSessionID（预检会把主模型误判为不可用）。
+        sessionId: `dsh-github-trending-preflight-${randomUUID()}`,
         signal: controller.signal,
       });
       let failure: { code?: string; message?: string } | undefined;

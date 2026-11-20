@@ -104,6 +104,8 @@ test('备选预检：proxy 项走 ctx.llm.stream，provider 取 hostProvider', a
   assert.equal(result.mode, 'proxy');
   assert.equal(seen[0].provider, 'magpie');
   assert.equal(seen[0].model, 'mp-model');
+  // 会话标识：opencode-go 这类按会话路由的网关靠它补 x-opencode-session 头，缺了直接 400。
+  assert.match(seen[0].sessionId, /^dsh-github-trending-preflight-[0-9a-f-]{36}$/);
 });
 
 test('备选预检：越界下标返回失败而不抛错', async () => {

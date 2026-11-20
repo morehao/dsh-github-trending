@@ -44,9 +44,37 @@ test('代理只接受带一次性 token 的请求，并转发 system/user', asyn
     assert.equal(llm.calls[0].provider, 'magpie');
     assert.equal(llm.calls[0].system, 'you are terse');
     assert.equal(llm.calls[0].messages[0].content[0].text, '写一句话');
+    // 会话标识必须透传给宿主：opencode-go 等网关缺它会 400 MissingSessionID。
+    assert.match(llm.calls[0].sessionId, /^dsh-github-trending-[0-9a-f-]{36}$/);
     assert.equal(handle.requests, 1);
   } finally {
     await handle.close();
+  }
+});
+
+test('同一代理的多次转发共享一个 sessionId；不同代理各自独立', async () => {
+  const llm = stubLlm();
+  const send = async (handle) => {
+    const response = await fetch(`${handle.url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${handle.token}` },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }),
+    });
+    assert.equal(response.status, 200);
+  };
+  const first = await proxy.startProxy({ llm, provider: 'opencode-go', model: 'deepseek-v4-pro' });
+  const second = await proxy.startProxy({ llm, provider: 'opencode-go', model: 'other' });
+  try {
+    await send(first);
+    await send(first);
+    await send(second);
+    assert.equal(llm.calls.length, 3);
+    // 网关按会话路由：同一代理必须复用同一个会话，不同代理不能串会话。
+    assert.equal(llm.calls[0].sessionId, llm.calls[1].sessionId);
+    assert.notEqual(llm.calls[0].sessionId, llm.calls[2].sessionId);
+  } finally {
+    await first.close();
+    await second.close();
   }
 });
 

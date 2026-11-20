@@ -11,7 +11,7 @@
  *   - 只实现核心会用到的最小子集：非流式、单轮文本；其余请求直接 4xx，不静默降级。
  */
 import http from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const MAX_BODY = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -127,6 +127,12 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
   const token = randomBytes(24).toString('hex');
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const handle = { requests: 0 } as ProxyHandle;
+  /**
+   * 宿主会话标识：opencode-go 等按会话路由的网关只在拿到 sessionId 时才补
+   * `x-opencode-session` 头，缺了直接 400 MissingSessionID。一个代理一个会话，
+   * 同一轮运行的多次补全共享它。
+   */
+  const sessionId = `dsh-github-trending-${randomUUID()}`;
   let closed = false;
 
   const emit = (event: Omit<ProxyEvent, 'provider' | 'model'>): void => {
@@ -182,6 +188,7 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
                 : typeof body.maxTokens === 'number'
                   ? body.maxTokens
                   : options.maxTokens,
+            sessionId,
             signal: controller.signal,
           });
           for await (const chunk of stream) {
