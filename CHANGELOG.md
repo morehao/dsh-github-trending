@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.9.34] - 2026-11-23
+
+### Fixes
+
+- **run**: 试跑不再写入 periodSuccess/lastSuccessAt，避免吞掉当天调度的投递名额 (#195)
+
+**Full Changelog**: https://github.com/morehao/dsh-github-trending/compare/v0.9.33...v0.9.34
+
 ## [v0.9.33] - 2026-11-20
 
 ### Fixes
