@@ -155,9 +155,9 @@ export const RELEASE_RUN_LIMIT = 30;
 
 export interface PluginState {
   lastRunAt?: string;
-  /** 最近一次成功（ok=true，含 skipped）的运行时间；工具与界面读它。 */
+  /** 最近一次成功（ok=true，含 skipped，不含 dry-run）的运行时间；调度判重与工具读它。 */
   lastSuccessAt?: string;
-  /** 各周期最近一次成功的 ISO 时间；调度按「周期 + 本地日期」判重。 */
+  /** 各周期最近一次成功投递（不含 dry-run）的 ISO 时间；调度按「周期 + 本地日期」判重。 */
   periodSuccess?: Partial<Record<Period, string>>;
   lastDigest?: DigestIdentity;
   lastResult?: RunRecord;

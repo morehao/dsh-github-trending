@@ -369,6 +369,30 @@ test('digest 的 sha256 与 files 不一致 → IPC_INVALID，不生成预览', 
   assert.equal(existsSync(path.join(store.dir, 'previews', `${summary.id}.md`)), false);
 });
 
+test('试跑（dryRun）不写 periodSuccess / lastSuccessAt，不占用当天投递名额', async () => {
+  // 回归：#195 试跑被当成正式投递写进去重标记，导致当天该周期的定时投递被静默跳过。
+  // 对照：正常 run 写入两者；dry-run 两者都不写。lastRunAt 仍无条件写（表示「最近一次尝试」）。
+  const dry = makeRunner();
+  const drySummary = await dry.runner.run({ trigger: 'manual', date: DATED, dryRun: true });
+  assert.equal(drySummary.ok, true);
+  assert.equal(drySummary.dryRun, true);
+  const dryState = dry.store.readState();
+  assert.equal(dryState.periodSuccess, undefined);
+  assert.equal(dryState.lastSuccessAt, undefined);
+  assert.notEqual(dryState.lastRunAt, undefined);
+
+  const real = makeRunner();
+  const realSummary = await real.runner.run({ trigger: 'manual', date: DATED });
+  assert.equal(realSummary.ok, true);
+  assert.equal(realSummary.dryRun, false);
+  const realState = real.store.readState();
+  assert.notEqual(realState.periodSuccess[realSummary.period], undefined);
+  assert.notEqual(realState.lastSuccessAt, undefined);
+
+  // 状态层判据成立即可：dry-run 后 periodSuccess/lastSuccessAt 仍为空 ——
+  // Scheduler.succeededToday 正是读这两个字段判「今天已投递」，故当天定时不会被吞。
+});
+
 test('试跑 / 无产物 / 失败都不生成预览', async () => {
   const dry = makeRunner({
     scenario: { FAKE_ARTIFACT_PATH: `trending/${DATED}.md`, FAKE_ARTIFACT_CONTENT: '# dry' },
