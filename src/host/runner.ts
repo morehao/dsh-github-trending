@@ -992,11 +992,16 @@ export class Runner {
     };
     const state = store.readState();
     const periodSuccess = { ...(state.periodSuccess ?? {}) };
-    if (summary.ok && summary.period !== undefined) periodSuccess[summary.period] = record.at;
+    // 只有真正走完投递路径的运行才占用「当天该周期」名额：试跑（dryRun）只抓取与渲染、
+    // 不提交不投递，不得写成去重标记，否则会让当天该周期的定时投递被静默跳过
+    // （succeededToday 读 periodSuccess / lastSuccessAt 判重）。lastRunAt 仍无条件写，
+    // 它表示「最近一次尝试」，不是去重键。
+    const delivered = summary.ok && summary.dryRun !== true;
+    if (delivered && summary.period !== undefined) periodSuccess[summary.period] = record.at;
     const next: Parameters<Store['recordRun']>[1] = {
       lastRunAt: record.at,
-      ...(summary.ok ? { lastSuccessAt: record.at } : {}),
-      ...(summary.ok && summary.period !== undefined ? { periodSuccess } : {}),
+      ...(delivered ? { lastSuccessAt: record.at } : {}),
+      ...(delivered && summary.period !== undefined ? { periodSuccess } : {}),
       ...(summary.ok && summary.prUrl !== undefined
         ? { pendingPr: { url: summary.prUrl, createdAt: record.at, ...(summary.date === undefined ? {} : { date: summary.date }) } }
         : {}),
